@@ -26,6 +26,17 @@ public class EnemyHealth : MonoBehaviour
         {
             isDead = true;
 
+            // Ghi nhận sự kiện EnemyKilled
+            if (TelemetryManager.Instance != null)
+            {
+                TelemetryManager.Instance.TrackEnemyKilled();
+            }
+            else
+            {
+                Debug.LogWarning("Chua co TelemetryManager trong Scene!");
+            }
+
+            // Cộng điểm khi tiêu diệt Enemy
             if (ScoreManager.Instance != null)
             {
                 ScoreManager.Instance.AddScore(scoreValue);
@@ -35,6 +46,7 @@ public class EnemyHealth : MonoBehaviour
                 Debug.LogWarning("Chua co ScoreManager trong Scene!");
             }
 
+            // Hủy Enemy
             Destroy(gameObject);
         }
     }
