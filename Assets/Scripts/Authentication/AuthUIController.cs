@@ -13,14 +13,10 @@ public class AuthUIController : MonoBehaviour
 
     [Header("Login Fields")]
     [SerializeField] private TMP_InputField loginUsernameInput;
-    [SerializeField] private TMP_InputField loginPasswordInput;
     [SerializeField] private TMP_Text loginMessageText;
 
     [Header("Register Fields")]
     [SerializeField] private TMP_InputField registerUsernameInput;
-    [SerializeField] private TMP_InputField registerEmailInput;
-    [SerializeField] private TMP_InputField registerPasswordInput;
-    [SerializeField] private TMP_InputField confirmPasswordInput;
     [SerializeField] private TMP_Text registerMessageText;
 
     private void Start()
@@ -28,25 +24,20 @@ public class AuthUIController : MonoBehaviour
         ShowLoginPanel();
     }
 
-    // Hiển thị giao diện đăng nhập
     public void ShowLoginPanel()
     {
         loginPanel.SetActive(true);
         registerPanel.SetActive(false);
-
         ClearMessages();
     }
 
-    // Hiển thị giao diện đăng ký
     public void ShowRegisterPanel()
     {
         loginPanel.SetActive(false);
         registerPanel.SetActive(true);
-
         ClearMessages();
     }
 
-    // Xóa thông báo cũ
     private void ClearMessages()
     {
         if (loginMessageText != null)
@@ -56,106 +47,87 @@ public class AuthUIController : MonoBehaviour
             registerMessageText.text = "";
     }
 
-    // Xử lý nút đăng nhập
-
+    // ĐĂNG NHẬP
     public void Login()
     {
-        string username = loginUsernameInput.text.Trim();
-        string password = loginPasswordInput.text;
+        string playerName = loginUsernameInput.text.Trim();
 
-        if (string.IsNullOrEmpty(username) ||
-            string.IsNullOrEmpty(password))
+        if (string.IsNullOrEmpty(playerName))
         {
-            loginMessageText.text = "Vui long nhap tai khoan va mat khau!";
+            loginMessageText.text = "Vui lòng nhập tên người chơi!";
             return;
         }
 
         if (authApiClient == null)
         {
-            loginMessageText.text = "Chua gan AuthApiClient!";
-            Debug.LogError("AuthApiClient chua duoc gan trong Inspector!");
+            loginMessageText.text = "Chưa gắn AuthApiClient!";
             return;
         }
 
-        loginMessageText.text = "Dang dang nhap...";
+        loginMessageText.text = "Đang đăng nhập...";
 
-        authApiClient.Login(username, password, (success, response, message) =>
-        {
-            if (success)
+        authApiClient.Login(
+            playerName,
+            (success, response, message) =>
             {
-                loginMessageText.text = "Dang nhap thanh cong!";
+                if (success)
+                {
+                    loginMessageText.text = "Đăng nhập thành công!";
 
-                Debug.Log("User ID: " + response.userId);
-                Debug.Log("Username: " + response.username);
-                Debug.Log("JWT Token: " + response.token);
+                    Debug.Log("Player ID: " + response.playerId);
+                    Debug.Log("Player Name: " + response.playerName);
 
-                // Chuyen sang Scene game
-                SceneManager.LoadScene("MainScene");
+                    SceneManager.LoadScene("MainScene");
+                }
+                else
+                {
+                    loginMessageText.text = message;
+                    Debug.LogWarning("Login: " + message);
+                }
             }
-            else
-            {
-                loginMessageText.text = message;
-                Debug.LogWarning("Login: " + message);
-            }
-        });
+        );
     }
 
-
-    // Xử lý nút đăng ký
+    // ĐĂNG KÝ
     public void Register()
     {
-        string username = registerUsernameInput.text.Trim();
-        string email = registerEmailInput.text.Trim();
-        string password = registerPasswordInput.text;
-        string confirmPassword = confirmPasswordInput.text;
+        string playerName = registerUsernameInput.text.Trim();
 
-        // Kiem tra du lieu
-        if (string.IsNullOrEmpty(username) ||
-            string.IsNullOrEmpty(email) ||
-            string.IsNullOrEmpty(password) ||
-            string.IsNullOrEmpty(confirmPassword))
+        if (string.IsNullOrEmpty(playerName))
         {
-            registerMessageText.text = "Vui long nhap day du thong tin!";
-            return;
-        }
-
-        if (password.Length < 6)
-        {
-            registerMessageText.text = "Mat khau phai co it nhat 6 ky tu!";
-            return;
-        }
-
-        if (password != confirmPassword)
-        {
-            registerMessageText.text = "Mat khau xac nhan khong khop!";
+            registerMessageText.text = "Vui lòng nhập tên người chơi!";
             return;
         }
 
         if (authApiClient == null)
         {
-            registerMessageText.text = "Chua gan AuthApiClient!";
-            Debug.LogError("AuthApiClient chua duoc gan trong Inspector!");
+            registerMessageText.text = "Chưa gắn AuthApiClient!";
             return;
         }
 
-        registerMessageText.text = "Dang dang ky...";
+        registerMessageText.text = "Đang đăng ký...";
 
-        authApiClient.Register(username, email, password, (success, message) =>
-        {
-            if (success)
+        authApiClient.Register(
+            playerName,
+            (success, response, message) =>
             {
-                registerMessageText.text = "Dang ky thanh cong! Hay dang nhap.";
+                if (success)
+                {
+                    registerMessageText.text =
+                        "Đăng ký thành công! Hãy đăng nhập.";
 
-                // Xoa cac o nhap sau khi dang ky
-                registerPasswordInput.text = "";
-                confirmPasswordInput.text = "";
-            }
-            else
-            {
-                registerMessageText.text = message;
-            }
+                    loginUsernameInput.text = playerName;
+                    registerUsernameInput.text = "";
 
-            Debug.Log("Register: " + message);
-        });
+                    Debug.Log("Registered Player ID: " +
+                              response.playerId);
+                }
+                else
+                {
+                    registerMessageText.text = message;
+                    Debug.LogWarning("Register: " + message);
+                }
+            }
+        );
     }
 }

@@ -5,44 +5,26 @@ using System.Text;
 using UnityEngine;
 using UnityEngine.Networking;
 
+// Dữ liệu gửi lên Backend
 [Serializable]
-public class RegisterApiRequest
+public class PlayerNameRequest
 {
-    public string username;
-    public string email;
-    public string password;
+    public string playerName;
 }
 
+// Dữ liệu Backend trả về
 [Serializable]
-public class LoginApiRequest
+public class PlayerApiResponse
 {
-    public string usernameOrEmail;
-    public string password;
+    public int playerId;
+    public string playerName;
+    public string createdAt;
 }
 
+// Dữ liệu lỗi
 [Serializable]
-public class RegisterApiResponse
+public class PlayerApiError
 {
-    public bool success;
-    public string message;
-    public int userId;
-    public string username;
-}
-
-[Serializable]
-public class LoginApiResponse
-{
-    public bool success;
-    public string message;
-    public int userId;
-    public string username;
-    public string token;
-}
-
-[Serializable]
-public class ApiErrorResponse
-{
-    public bool success;
     public string message;
 }
 
@@ -50,32 +32,31 @@ public class AuthApiClient : MonoBehaviour
 {
     [Header("Backend API")]
     [SerializeField]
-    private string baseUrl = "http://localhost:5176/api/auth/";
+    private string baseUrl =
+        "https://sjf1zkj0-7013.asse.devtunnels.ms";
 
+    // ĐĂNG KÝ
     public void Register(
-        string username,
-        string email,
-        string password,
-        Action<bool, string> callback)
+        string playerName,
+        Action<bool, PlayerApiResponse, string> callback)
     {
-        RegisterApiRequest data = new RegisterApiRequest
+        PlayerNameRequest data = new PlayerNameRequest
         {
-            username = username,
-            email = email,
-            password = password
+            playerName = playerName
         };
 
         StartCoroutine(RegisterCoroutine(data, callback));
     }
 
     private IEnumerator RegisterCoroutine(
-        RegisterApiRequest data,
-        Action<bool, string> callback)
+        PlayerNameRequest data,
+        Action<bool, PlayerApiResponse, string> callback)
     {
         string json = JsonUtility.ToJson(data);
 
-        using (UnityWebRequest request = CreatePostRequest(
-            baseUrl + "register", json))
+        string url = baseUrl.TrimEnd('/') + "/api/Players/register";
+
+        using (UnityWebRequest request = CreatePostRequest(url, json))
         {
             yield return request.SendWebRequest();
 
@@ -83,43 +64,50 @@ public class AuthApiClient : MonoBehaviour
 
             if (request.result == UnityWebRequest.Result.Success)
             {
-                RegisterApiResponse response =
-                    JsonUtility.FromJson<RegisterApiResponse>(responseText);
+                PlayerApiResponse response =
+                    JsonUtility.FromJson<PlayerApiResponse>(responseText);
 
                 callback?.Invoke(
-                    response != null && response.success,
-                    response != null ? response.message : "Dang ky thanh cong!"
+                    response != null,
+                    response,
+                    response != null
+                        ? "Đăng ký thành công!"
+                        : "Không đọc được dữ liệu từ Backend!"
                 );
             }
             else
             {
-                callback?.Invoke(false, GetErrorMessage(responseText, request));
+                callback?.Invoke(
+                    false,
+                    null,
+                    GetErrorMessage(responseText, request)
+                );
             }
         }
     }
 
+    // ĐĂNG NHẬP
     public void Login(
-        string usernameOrEmail,
-        string password,
-        Action<bool, LoginApiResponse, string> callback)
+        string playerName,
+        Action<bool, PlayerApiResponse, string> callback)
     {
-        LoginApiRequest data = new LoginApiRequest
+        PlayerNameRequest data = new PlayerNameRequest
         {
-            usernameOrEmail = usernameOrEmail,
-            password = password
+            playerName = playerName
         };
 
         StartCoroutine(LoginCoroutine(data, callback));
     }
 
     private IEnumerator LoginCoroutine(
-        LoginApiRequest data,
-        Action<bool, LoginApiResponse, string> callback)
+        PlayerNameRequest data,
+        Action<bool, PlayerApiResponse, string> callback)
     {
         string json = JsonUtility.ToJson(data);
 
-        using (UnityWebRequest request = CreatePostRequest(
-            baseUrl + "login", json))
+        string url = baseUrl.TrimEnd('/') + "/api/Players/login";
+
+        using (UnityWebRequest request = CreatePostRequest(url, json))
         {
             yield return request.SendWebRequest();
 
@@ -127,35 +115,43 @@ public class AuthApiClient : MonoBehaviour
 
             if (request.result == UnityWebRequest.Result.Success)
             {
-                LoginApiResponse response =
-                    JsonUtility.FromJson<LoginApiResponse>(responseText);
+                PlayerApiResponse response =
+                    JsonUtility.FromJson<PlayerApiResponse>(responseText);
 
-                if (response != null && response.success)
+                if (response != null)
                 {
-                    // Luu thong tin dang nhap de su dung o cac Scene sau.
-                    PlayerPrefs.SetInt("UserId", response.userId);
-                    PlayerPrefs.SetString("Username", response.username);
-                    PlayerPrefs.SetString("AuthToken", response.token);
+                    // Lưu thông tin người chơi để dùng ở MainScene.
+                    PlayerPrefs.SetInt("PlayerId", response.playerId);
+                    PlayerPrefs.SetString("PlayerName", response.playerName);
                     PlayerPrefs.Save();
 
-                    callback?.Invoke(true, response, response.message);
+                    callback?.Invoke(
+                        true,
+                        response,
+                        "Đăng nhập thành công!"
+                    );
                 }
                 else
                 {
                     callback?.Invoke(
-                        false, null, "Khong doc duoc phan hoi dang nhap!"
+                        false,
+                        null,
+                        "Không đọc được dữ liệu người chơi!"
                     );
                 }
             }
             else
             {
                 callback?.Invoke(
-                    false, null, GetErrorMessage(responseText, request)
+                    false,
+                    null,
+                    GetErrorMessage(responseText, request)
                 );
             }
         }
     }
 
+    // Tạo request POST
     private UnityWebRequest CreatePostRequest(string url, string json)
     {
         UnityWebRequest request = new UnityWebRequest(url, "POST");
@@ -164,12 +160,18 @@ public class AuthApiClient : MonoBehaviour
 
         request.uploadHandler = new UploadHandlerRaw(body);
         request.downloadHandler = new DownloadHandlerBuffer();
-        request.SetRequestHeader("Content-Type", "application/json");
-        request.timeout = 15;
+
+        request.SetRequestHeader(
+            "Content-Type",
+            "application/json"
+        );
+
+        request.timeout = 20;
 
         return request;
     }
 
+    // Đọc thông báo lỗi từ Backend
     private string GetErrorMessage(
         string responseText,
         UnityWebRequest request)
@@ -178,18 +180,22 @@ public class AuthApiClient : MonoBehaviour
         {
             try
             {
-                ApiErrorResponse error =
-                    JsonUtility.FromJson<ApiErrorResponse>(responseText);
+                PlayerApiError error =
+                    JsonUtility.FromJson<PlayerApiError>(responseText);
 
-                if (error != null && !string.IsNullOrEmpty(error.message))
+                if (error != null &&
+                    !string.IsNullOrEmpty(error.message))
+                {
                     return error.message;
+                }
             }
             catch
             {
-                // Su dung thong bao loi mac dinh ben duoi.
+                // Dùng thông báo lỗi mặc định.
             }
         }
 
-        return request.error;
+        return "Lỗi HTTP " + request.responseCode +
+               ": " + request.error;
     }
 }
