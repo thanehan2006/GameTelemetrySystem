@@ -29,6 +29,10 @@ if (app.Environment.IsDevelopment())
     });
 }
 
+// Cho phép phục vụ file tĩnh và file mặc định từ wwwroot
+app.UseDefaultFiles();
+app.UseStaticFiles();
+
 app.UseHttpsRedirection();
 
 app.UseAuthorization();

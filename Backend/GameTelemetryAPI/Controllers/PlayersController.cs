@@ -114,7 +114,8 @@ namespace GameTelemetryAPI.Controllers
                 {
                     PlayerId = p.PlayerId,
                     PlayerName = p.PlayerName,
-                    CreatedAt = p.CreatedAt
+                    CreatedAt = p.CreatedAt,
+                    TotalSessions = p.GameSessions.Count
                 })
                 .ToListAsync();
 
