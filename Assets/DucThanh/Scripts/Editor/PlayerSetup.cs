@@ -6,50 +6,118 @@ using UnityEngine;
 using UnityEngine.AI;
 
 /// <summary>
-/// Menu: DucThanh > Setup Player
-/// 1. Chuyển Idle.fbx, Run.fbx và Atk1.fbx Mixamo sang Humanoid, bake into pose.
-/// 2. Tạo Player_AC (Idle / Run theo Speed, Atk1 theo Trigger Attack).
-/// 3. Tạo Player trong scene Lv1 + camera góc nhìn thứ ba.
+/// Menu:
+/// - DucThanh > Update Player Animations (Random Idle, Run, Atk):
+///   Cấu hình Humanoid + Bake Into Pose cho toàn bộ clip Mixamo mới và cập nhật Player_AC.controller
+///   tại chỗ (GIỮ NGUYÊN Player, vũ khí và scene Lv1 hiện tại).
+/// - DucThanh > Setup Player:
+///   Cấu hình lại toàn bộ animation + dựng lại Player mới trong scene Lv1.
 /// </summary>
 public static class PlayerSetup
 {
     const string Dir = "Assets/DucThanh/Assets/Player/";
     const string IdleFbx = Dir + "Idle.fbx";
+    const string Idle2Fbx = Dir + "Standing Idle.fbx";
+    const string Idle3Fbx = Dir + "Fishing Idle.fbx";
     const string RunFbx = Dir + "Run.fbx";
-    const string AtkFbx = Dir + "Atk1.fbx";
+    const string BlockFbx = Dir + "Standing Block Idle.fbx";
+    const string Atk1Fbx = Dir + "Atk1.fbx";
+    const string Atk2Fbx = Dir + "Standing Melee Attack Horizontal.fbx";
+    const string Atk3Fbx = Dir + "Standing Melee Attack 360 Low.fbx";
+
     const string ControllerPath = Dir + "Player_AC.controller";
     const string MaterialPath = "Assets/DucThanh/Assets/Materials/Player.mat";
     const string ScenePath = "Assets/DucThanh/Scene/Lv1.unity";
 
+    [MenuItem("DucThanh/Update Player Animations (Idle, Run, Block, Atk)")]
+    public static void UpdateAnimationsOnly()
+    {
+        Avatar avatar = ConfigureAllPlayerClips();
+        AnimatorController controller = BuildOrUpdateControllerInPlace();
+
+        // Gán chắc chắn Avatar + Controller cho Player hiện tại trong scene đang mở (nếu có)
+        GameObject player = GameObject.FindWithTag("Player");
+        if (player != null)
+        {
+            Animator anim = player.GetComponentInChildren<Animator>();
+            if (anim != null)
+            {
+                anim.runtimeAnimatorController = controller;
+                if (avatar != null) anim.avatar = avatar;
+                anim.applyRootMotion = false;
+                EditorUtility.SetDirty(anim);
+            }
+        }
+
+        Debug.Log("[PlayerSetup] Đã cập nhật toàn bộ 8 animation (3 Idle, 1 Run, 1 Block khi giữ Chuột Phải, 3 Atk) vào Player_AC.controller!");
+    }
+
     [MenuItem("DucThanh/Setup Player")]
     public static void Run()
     {
-        ConfigureImport(IdleFbx, true);
-        ConfigureImport(RunFbx, true);
-        ConfigureImport(AtkFbx, false);
-
-        Avatar avatar = AssetDatabase.LoadAssetAtPath<Avatar>(IdleFbx);
-        AnimatorController controller = BuildController();
+        Avatar avatar = ConfigureAllPlayerClips();
+        AnimatorController controller = BuildOrUpdateControllerInPlace();
         SetupScene(controller, avatar);
         Debug.Log("[PlayerSetup] Xong! Nhấn Play để thử.");
     }
 
-    static void ConfigureImport(string path, bool loop)
+    static Avatar ConfigureAllPlayerClips()
+    {
+        // Idle.fbx (model chính có skin) luôn tạo Avatar gốc
+        ConfigureImport(IdleFbx, true, null);
+        Avatar baseAvatar = AssetDatabase.LoadAssetAtPath<Avatar>(IdleFbx);
+
+        ConfigureImport(Idle2Fbx, true, baseAvatar);
+        ConfigureImport(Idle3Fbx, true, baseAvatar);
+        ConfigureImport(RunFbx, true, null);
+        // Standing Block Idle.fbx là tư thế đỡ đòn giữ liên tục bằng Chuột Phải -> loop = true
+        ConfigureImport(BlockFbx, true, baseAvatar);
+        ConfigureImport(Atk1Fbx, false, null);
+        ConfigureImport(Atk2Fbx, false, baseAvatar);
+        ConfigureImport(Atk3Fbx, false, baseAvatar);
+
+        return baseAvatar;
+    }
+
+    static void ConfigureImport(string path, bool loop, Avatar sourceAvatar)
     {
         var importer = AssetImporter.GetAtPath(path) as ModelImporter;
-        if (importer == null) { Debug.LogError("[PlayerSetup] Không tìm thấy " + path); return; }
+        if (importer == null)
+        {
+            Debug.LogWarning("[PlayerSetup] Bỏ qua (không tìm thấy file): " + path);
+            return;
+        }
 
-        // Bước 1: chuyển sang Humanoid + CreateFromThisModel rồi reimport để Unity tự sinh humanDescription
-        if (importer.animationType != ModelImporterAnimationType.Human ||
-            importer.avatarSetup != ModelImporterAvatarSetup.CreateFromThisModel)
+        bool needsRigUpdate = importer.animationType != ModelImporterAnimationType.Human;
+        if (sourceAvatar != null)
+        {
+            if (importer.avatarSetup != ModelImporterAvatarSetup.CopyFromOther || importer.sourceAvatar != sourceAvatar)
+            {
+                needsRigUpdate = true;
+            }
+        }
+        else if (importer.avatarSetup != ModelImporterAvatarSetup.CreateFromThisModel)
+        {
+            needsRigUpdate = true;
+        }
+
+        if (needsRigUpdate)
         {
             importer.animationType = ModelImporterAnimationType.Human;
-            importer.avatarSetup = ModelImporterAvatarSetup.CreateFromThisModel;
+            if (sourceAvatar != null)
+            {
+                importer.avatarSetup = ModelImporterAvatarSetup.CopyFromOther;
+                importer.sourceAvatar = sourceAvatar;
+            }
+            else
+            {
+                importer.avatarSetup = ModelImporterAvatarSetup.CreateFromThisModel;
+            }
             importer.SaveAndReimport();
             importer = AssetImporter.GetAtPath(path) as ModelImporter;
         }
 
-        // Bước 2: cấu hình Loop + Bake Into Pose cho clip
+        // Cấu hình Loop + Bake Into Pose để nhân vật không bị trôi khỏi CharacterController
         var clips = importer.clipAnimations;
         if (clips == null || clips.Length == 0) clips = importer.defaultClipAnimations;
 
@@ -71,74 +139,120 @@ public static class PlayerSetup
 
     static AnimationClip LoadClip(string path)
     {
+        if (AssetImporter.GetAtPath(path) == null) return null;
+
         AssetDatabase.ImportAsset(path, ImportAssetOptions.ForceSynchronousImport);
         foreach (var o in AssetDatabase.LoadAllAssetsAtPath(path))
             if (o is AnimationClip c && !c.name.StartsWith("__preview__")) return c;
-        Debug.LogError("[PlayerSetup] Không có clip trong " + path);
+
+        Debug.LogWarning("[PlayerSetup] Không tìm thấy AnimationClip trong " + path);
         return null;
     }
 
-    static AnimatorController BuildController()
+    static AnimatorController BuildOrUpdateControllerInPlace()
     {
-        AssetDatabase.DeleteAsset(ControllerPath);
-        var ac = AnimatorController.CreateAnimatorControllerAtPath(ControllerPath);
+        // Mở lại Player_AC.controller hiện có để GIỮ NGUYÊN GUID không làm mất link trên PlayerBody
+        var ac = AssetDatabase.LoadAssetAtPath<AnimatorController>(ControllerPath);
+        if (ac == null)
+        {
+            ac = AnimatorController.CreateAnimatorControllerAtPath(ControllerPath);
+        }
+
+        // Dọn sạch parameters & state cũ trong layer 0
+        while (ac.parameters.Length > 0)
+        {
+            ac.RemoveParameter(0);
+        }
+
         ac.AddParameter("Speed", AnimatorControllerParameterType.Float);
         ac.AddParameter("Attack", AnimatorControllerParameterType.Trigger);
         ac.AddParameter("CancelAttack", AnimatorControllerParameterType.Trigger);
 
         var sm = ac.layers[0].stateMachine;
-        var idle = sm.AddState("Idle");
-        idle.motion = LoadClip(IdleFbx);
-        var run = sm.AddState("Run");
-        run.motion = LoadClip(RunFbx);
-        var atk1 = sm.AddState("Atk1");
-        atk1.motion = LoadClip(AtkFbx);
-        sm.defaultState = idle;
+        foreach (var trans in sm.anyStateTransitions) sm.RemoveAnyStateTransition(trans);
+        foreach (var childState in sm.states) sm.RemoveState(childState.state);
 
-        var toRun = idle.AddTransition(run);
-        toRun.hasExitTime = false;
-        toRun.duration = 0.1f;
-        toRun.AddCondition(AnimatorConditionMode.Greater, 0.1f, "Speed");
+        // --- IDLE STATES (Random giữa 3 kiểu) ---
+        var idle = AddStateWithClip(sm, "Idle", IdleFbx, new Vector3(240, 20, 0));
+        AddStateWithClip(sm, "Idle2", Idle2Fbx, new Vector3(240, 90, 0));
+        AddStateWithClip(sm, "Idle3", Idle3Fbx, new Vector3(240, 160, 0));
+        if (idle != null) sm.defaultState = idle;
 
-        var toIdle = run.AddTransition(idle);
-        toIdle.hasExitTime = false;
-        toIdle.duration = 0.1f;
-        toIdle.AddCondition(AnimatorConditionMode.Less, 0.1f, "Speed");
+        // --- RUN & BLOCK STATES ---
+        var run = AddStateWithClip(sm, "Run", RunFbx, new Vector3(500, 20, 0));
+        AddStateWithClip(sm, "Block", BlockFbx, new Vector3(500, 100, 0));
 
-        var anyToAtk = sm.AddAnyStateTransition(atk1);
-        anyToAtk.hasExitTime = false;
-        anyToAtk.duration = 0.08f;
-        anyToAtk.canTransitionToSelf = false;
-        anyToAtk.AddCondition(AnimatorConditionMode.If, 0f, "Attack");
+        // --- ATTACK STATES (Random giữa 3 chiêu thức) ---
+        var atk1 = AddStateWithClip(sm, "Atk1", Atk1Fbx, new Vector3(240, -140, 0));
+        var atk2 = AddStateWithClip(sm, "Atk2", Atk2Fbx, new Vector3(450, -140, 0));
+        var atk3 = AddStateWithClip(sm, "Atk3", Atk3Fbx, new Vector3(660, -140, 0));
 
-        var cancelToRun = atk1.AddTransition(run);
-        cancelToRun.hasExitTime = false;
-        cancelToRun.duration = 0.08f;
-        cancelToRun.AddCondition(AnimatorConditionMode.If, 0f, "CancelAttack");
+        // Giữ transition cơ bản giữa Idle <-> Run và Attack fallback
+        if (idle != null && run != null)
+        {
+            var toRun = idle.AddTransition(run);
+            toRun.hasExitTime = false;
+            toRun.duration = 0.1f;
+            toRun.AddCondition(AnimatorConditionMode.Greater, 0.1f, "Speed");
 
-        var atkToRun = atk1.AddTransition(run);
-        atkToRun.hasExitTime = true;
-        atkToRun.exitTime = 0.85f;
-        atkToRun.duration = 0.1f;
-        atkToRun.AddCondition(AnimatorConditionMode.Greater, 0.1f, "Speed");
+            var toIdle = run.AddTransition(idle);
+            toIdle.hasExitTime = false;
+            toIdle.duration = 0.1f;
+            toIdle.AddCondition(AnimatorConditionMode.Less, 0.1f, "Speed");
+        }
 
-        var atkToIdle = atk1.AddTransition(idle);
-        atkToIdle.hasExitTime = true;
-        atkToIdle.exitTime = 0.9f;
-        atkToIdle.duration = 0.1f;
+        AddAttackExitTransitions(atk1, run, idle);
+        AddAttackExitTransitions(atk2, run, idle);
+        AddAttackExitTransitions(atk3, run, idle);
 
         EditorUtility.SetDirty(ac);
         AssetDatabase.SaveAssets();
         return ac;
     }
 
+    static AnimatorState AddStateWithClip(AnimatorStateMachine sm, string stateName, string fbxPath, Vector3 pos)
+    {
+        AnimationClip clip = LoadClip(fbxPath);
+        if (clip == null) return null;
+
+        AnimatorState state = sm.AddState(stateName, pos);
+        state.motion = clip;
+        return state;
+    }
+
+    static void AddAttackExitTransitions(AnimatorState atkState, AnimatorState runState, AnimatorState idleState)
+    {
+        if (atkState == null) return;
+
+        if (runState != null)
+        {
+            var cancelToRun = atkState.AddTransition(runState);
+            cancelToRun.hasExitTime = false;
+            cancelToRun.duration = 0.08f;
+            cancelToRun.AddCondition(AnimatorConditionMode.If, 0f, "CancelAttack");
+
+            var atkToRun = atkState.AddTransition(runState);
+            atkToRun.hasExitTime = true;
+            atkToRun.exitTime = 0.90f;
+            atkToRun.duration = 0.1f;
+            atkToRun.AddCondition(AnimatorConditionMode.Greater, 0.1f, "Speed");
+        }
+
+        if (idleState != null)
+        {
+            var atkToIdle = atkState.AddTransition(idleState);
+            atkToIdle.hasExitTime = true;
+            atkToIdle.exitTime = 0.94f;
+            atkToIdle.duration = 0.1f;
+        }
+    }
+
     static void SetupScene(AnimatorController controller, Avatar avatar)
     {
         var scene = EditorSceneManager.OpenScene(ScenePath, OpenSceneMode.Single);
 
-        // Xoá Player cũ nếu có
         var old = GameObject.FindWithTag("Player");
-        Vector3 pos = old != null ? old.transform.position : new Vector3(1.895f, 0f, 17.17f);
+        Vector3 pos = old != null ? old.transform.position : new Vector3(134f, 26f, 360f);
         if (old != null) Object.DestroyImmediate(old);
 
         var player = new GameObject("Player") { tag = "Player" };
@@ -157,7 +271,8 @@ public static class PlayerSetup
         obstacle.center = cc.center;
         obstacle.carving = false;
 
-        player.AddComponent<PlayerHealth>();
+        var hp = player.AddComponent<PlayerHealth>();
+        hp.maxHealth = 180;
         var pc = player.AddComponent<PlayerController>();
         player.AddComponent<PlayerAnimationController>();
         var pa = player.AddComponent<PlayerAttack>();
@@ -186,9 +301,11 @@ public static class PlayerSetup
             if (tpc == null) tpc = cam.gameObject.AddComponent<ThirdPersonCamera>();
             tpc.target = player.transform;
 
-            Quaternion camRot = Quaternion.Euler(15f, 0f, 0f);
-            Vector3 pivot = player.transform.position + Vector3.up * tpc.height;
+            Quaternion camRot = Quaternion.Euler(12f, 0f, 0f);
+            Vector3 pivot = player.transform.position + Vector3.up * tpc.height + camRot * Vector3.right * tpc.shoulderOffset;
+            cam.fieldOfView = tpc.baseFov;
             cam.transform.SetPositionAndRotation(pivot - camRot * Vector3.forward * tpc.distance, camRot);
+            EditorUtility.SetDirty(cam);
             EditorUtility.SetDirty(cam.transform);
             EditorUtility.SetDirty(tpc);
         }

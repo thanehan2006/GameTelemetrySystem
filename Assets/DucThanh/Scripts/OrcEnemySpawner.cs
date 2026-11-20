@@ -60,6 +60,8 @@ public class OrcEnemySpawner : MonoBehaviour
 
     void Update()
     {
+        // Nhường quyền sinh quái cho StageManager khi đang dùng kịch bản 3 Màn
+        if (StageManager.Instance != null) return;
         if (GameOverManager.IsGameOver || LevelUpChoiceManager.IsPaused) return;
 
         if (player == null)
@@ -94,11 +96,10 @@ public class OrcEnemySpawner : MonoBehaviour
         float distance = Random.Range(minimumDistance, spawnRadius);
         Vector3 spawnPosition = player.position + new Vector3(randomDirection.x, 0f, randomDirection.y) * distance;
 
-        // Đặt độ cao chân chạm đúng mặt đất (Ground y = 0)
-        spawnPosition.y = 0f;
+        // Đặt độ cao mặc định ngang Player rồi Raycast từ trên xuống để chạm đúng mặt đất
+        spawnPosition.y = player.position.y;
 
-        // Bắn Raycast kiểm tra bề mặt sàn để đảm bảo chính xác vị trí chân chạm đất
-        if (Physics.Raycast(new Vector3(spawnPosition.x, 10f, spawnPosition.z), Vector3.down, out RaycastHit hit, 20f))
+        if (Physics.Raycast(new Vector3(spawnPosition.x, player.position.y + 50f, spawnPosition.z), Vector3.down, out RaycastHit hit, 100f, ~0, QueryTriggerInteraction.Ignore))
         {
             spawnPosition.y = hit.point.y;
         }

@@ -101,12 +101,46 @@ public class OrcEnemyAI : MonoBehaviour
         navAgent.avoidancePriority = Random.Range(30, 70);
     }
 
+    public void ApplyCombatStats(float speed, int damage, float range, float kbResistance, float cooldown)
+    {
+        moveSpeed = speed;
+        attackDamage = damage;
+        attackRange = range;
+        knockbackResistance = Mathf.Clamp01(kbResistance);
+        attackCooldown = cooldown;
+
+        if (navAgent != null)
+        {
+            navAgent.speed = moveSpeed;
+        }
+        if (weaponHitbox != null)
+        {
+            weaponHitbox.SetDamage(attackDamage);
+        }
+    }
+
     void SnapToGround()
     {
-        if (Physics.Raycast(transform.position + Vector3.up * 1.5f, Vector3.down, out RaycastHit hit, 5f))
+        Vector3 origin = transform.position + Vector3.up * 20f;
+        RaycastHit[] hits = Physics.RaycastAll(origin, Vector3.down, 60f, ~0, QueryTriggerInteraction.Ignore);
+
+        float bestY = float.MinValue;
+        bool found = false;
+        for (int i = 0; i < hits.Length; i++)
+        {
+            Collider col = hits[i].collider;
+            if (col == null || col.transform.IsChildOf(transform)) continue;
+            if (hits[i].point.y > bestY)
+            {
+                bestY = hits[i].point.y;
+                found = true;
+            }
+        }
+
+        if (found)
         {
             Vector3 pos = transform.position;
-            pos.y = hit.point.y;
+            pos.y = bestY;
             transform.position = pos;
 
             if (AgentReady)
@@ -227,10 +261,24 @@ public class OrcEnemyAI : MonoBehaviour
             transform.position += toPlayer.normalized * (moveSpeed * Time.deltaTime);
         }
 
-        if (Physics.Raycast(transform.position + Vector3.up, Vector3.down, out RaycastHit groundHit, 3f))
+        RaycastHit[] groundHits = Physics.RaycastAll(transform.position + Vector3.up * 5f, Vector3.down, 14f, ~0, QueryTriggerInteraction.Ignore);
+        float highestGroundY = float.MinValue;
+        bool hasGround = false;
+        for (int i = 0; i < groundHits.Length; i++)
+        {
+            Collider col = groundHits[i].collider;
+            if (col == null || col.transform.IsChildOf(transform)) continue;
+            if (groundHits[i].point.y > highestGroundY)
+            {
+                highestGroundY = groundHits[i].point.y;
+                hasGround = true;
+            }
+        }
+
+        if (hasGround)
         {
             Vector3 pos = transform.position;
-            pos.y = groundHit.point.y;
+            pos.y = highestGroundY;
             transform.position = pos;
         }
     }
@@ -395,6 +443,7 @@ public class OrcEnemyAI : MonoBehaviour
     {
         isAttacking = true;
         PlayAnimation(attackStateName);
+        GameAudioManager.PlayOrcAttack();
 
         yield return new WaitForSeconds(hitboxStartDelay);
 

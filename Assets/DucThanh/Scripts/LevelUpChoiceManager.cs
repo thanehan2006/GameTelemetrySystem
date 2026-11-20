@@ -17,7 +17,7 @@ using UnityEditor;
 public class LevelUpChoiceManager : MonoBehaviour
 {
     public static LevelUpChoiceManager Instance { get; private set; }
-    public static bool IsPaused => Instance != null && Instance.isChoosing;
+    public static bool IsPaused => (Instance != null && Instance.isChoosing) || WeaponShopManager.IsShopOpen;
 
     public const string DefaultConfigAssetPath = "Assets/DucThanh/Assets/Weapons/WeaponUpgradeConfig.asset";
     private const string DefaultWeaponsFolder = "Assets/DucThanh/Assets/Weapons";
@@ -263,6 +263,7 @@ public class LevelUpChoiceManager : MonoBehaviour
             choicePanel.transform.SetAsLastSibling();
             choicePanel.SetActive(true);
         }
+        GameAudioManager.PlayLevelUp();
     }
 
     private void UpdateChoiceTexts()
@@ -315,6 +316,7 @@ public class LevelUpChoiceManager : MonoBehaviour
         }
 
         Debug.Log($"[LevelUpChoice] Level {pendingLevel}: Giữ nguyên vũ khí và hồi đầy HP.");
+        GameAudioManager.PlayPickup();
         ResumeGame();
     }
 
@@ -334,6 +336,7 @@ public class LevelUpChoiceManager : MonoBehaviour
         }
 
         Debug.Log($"[LevelUpChoice] Level {pendingLevel}: Đổi sang vũ khí '{candidateDisplayName}' (+{candidateBonusDamage} DMG). Thứ tự tiếp theo: #{currentSequenceStep + 1}");
+        GameAudioManager.PlayWeaponEquip();
         ResumeGame();
     }
 

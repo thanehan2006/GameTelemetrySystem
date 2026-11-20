@@ -17,6 +17,11 @@ public class PlayerController : MonoBehaviour
     public float rotationSpeed = 14f;
     public float gravity = -25f;
 
+    [Header("Block / Parry Settings (Giữ Chuột Phải)")]
+    [Range(0f, 1f)] public float blockDamageReduction = 0.8f;
+    [Tooltip("Cửa sổ thời gian (giây) từ lúc bấm Chuột Phải để kích hoạt Đỡ Đòn Hoàn Hảo (0 sát thương + đẩy choáng quái).")]
+    public float perfectParryWindow = 0.28f;
+
     [Header("Knockback & Collision")]
     public float knockbackDamping = 36f;
     public float bodyCollisionPushForce = 4.5f;
@@ -28,12 +33,16 @@ public class PlayerController : MonoBehaviour
 
     public Vector3 CurrentInputDirection { get; private set; }
     public bool HasMovementInput { get; private set; }
+    public bool IsBlocking { get; private set; }
+    public bool IsPerfectParryWindow => IsBlocking && (Time.time - blockStartTime) <= perfectParryWindow;
 
     private CharacterController controller;
     private PlayerAttack playerAttack;
     private float verticalVelocity;
     private Vector3 knockbackVelocity;
     private Vector3 lungeVelocity;
+    private float blockStartTime;
+    private float footstepTimer;
     private int lastHorizontalDir;
     private int lastVerticalDir;
 
@@ -55,6 +64,8 @@ public class PlayerController : MonoBehaviour
 
     void Start()
     {
+        SnapToGround();
+
         if (playerCamera == null && Camera.main != null)
         {
             playerCamera = Camera.main.transform;
@@ -85,6 +96,7 @@ public class PlayerController : MonoBehaviour
         {
             CurrentInputDirection = Vector3.zero;
             HasMovementInput = false;
+            IsBlocking = false;
             knockbackVelocity = Vector3.zero;
             lungeVelocity = Vector3.zero;
             Cursor.lockState = CursorLockMode.None;
@@ -164,12 +176,41 @@ public class PlayerController : MonoBehaviour
         Vector3 inputDir = HasMovementInput ? new Vector3(rawInput.x, 0f, rawInput.y).normalized : Vector3.zero;
         CurrentInputDirection = HasMovementInput ? GetCameraRelativeDirection(inputDir) : Vector3.zero;
 
-        bool isAttacking = playerAttack != null && playerAttack.IsAttacking;
-        Vector3 moveDir = isAttacking ? Vector3.zero : CurrentInputDirection;
-
-        // Khi không tấn công: xoay mặt cực nhanh theo hướng di chuyển
-        if (!isAttacking && CurrentInputDirection.sqrMagnitude > 0.001f)
+        // Kích hoạt tư thế Đỡ Đòn (Block) khi giữ Chuột Phải
+        bool wantsBlock = Cursor.lockState == CursorLockMode.Locked && Input.GetMouseButton(1);
+        if (wantsBlock && !IsBlocking)
         {
+            IsBlocking = true;
+            blockStartTime = Time.time;
+            lungeVelocity = Vector3.zero;
+
+            if (playerAttack != null)
+            {
+                playerAttack.CancelAttackForBlock();
+            }
+        }
+        else if (!wantsBlock && IsBlocking)
+        {
+            IsBlocking = false;
+        }
+
+        bool isAttacking = playerAttack != null && playerAttack.IsAttacking;
+        Vector3 moveDir = (isAttacking || IsBlocking) ? Vector3.zero : CurrentInputDirection;
+
+        if (IsBlocking)
+        {
+            // Khi đang đỡ đòn: hướng mặt về phía camera nhìn (hoặc hướng phím di chuyển nếu đang giữ)
+            Vector3 guardDir = CurrentInputDirection.sqrMagnitude > 0.01f
+                ? CurrentInputDirection
+                : GetCameraForwardFlat();
+            if (guardDir.sqrMagnitude > 0.001f)
+            {
+                RotateVisualTowards(guardDir, rotationSpeed * 1.1f);
+            }
+        }
+        else if (!isAttacking && CurrentInputDirection.sqrMagnitude > 0.001f)
+        {
+            // Khi không tấn công/đỡ: xoay mặt cực nhanh theo hướng di chuyển
             RotateVisualTowards(CurrentInputDirection, rotationSpeed);
         }
 
@@ -188,6 +229,21 @@ public class PlayerController : MonoBehaviour
         finalDisplacement.y = verticalVelocity * Time.deltaTime;
 
         controller.Move(finalDisplacement);
+
+        // Tiếng bước chân nhịp nhàng khi chạy trên mặt đất
+        if (controller.isGrounded && !isAttacking && !IsBlocking && HasMovementInput)
+        {
+            footstepTimer -= Time.deltaTime;
+            if (footstepTimer <= 0f)
+            {
+                footstepTimer = 0.36f;
+                GameAudioManager.PlayFootstep();
+            }
+        }
+        else
+        {
+            footstepTimer = 0.08f;
+        }
 
         // Giảm tốc nhanh để không bao giờ có cảm giác trượt băng
         if (lungeVelocity.sqrMagnitude > 0.001f)
@@ -288,6 +344,47 @@ public class PlayerController : MonoBehaviour
         {
             StopCombatLunge();
             enemy.ApplyKnockback(transform.position, bodyCollisionPushForce, false);
+        }
+    }
+
+    private Vector3 GetCameraForwardFlat()
+    {
+        if (playerCamera == null && Camera.main != null)
+        {
+            playerCamera = Camera.main.transform;
+        }
+        if (playerCamera == null) return GetVisualForward();
+
+        Vector3 fwd = playerCamera.forward;
+        fwd.y = 0f;
+        return fwd.sqrMagnitude > 0.001f ? fwd.normalized : GetVisualForward();
+    }
+
+    private void SnapToGround()
+    {
+        Vector3 rayOrigin = transform.position + Vector3.up * 20f;
+        RaycastHit[] hits = Physics.RaycastAll(rayOrigin, Vector3.down, 100f, ~0, QueryTriggerInteraction.Ignore);
+
+        float highestGroundY = float.MinValue;
+        bool foundGround = false;
+        for (int i = 0; i < hits.Length; i++)
+        {
+            Collider col = hits[i].collider;
+            if (col == null || col.transform.IsChildOf(transform)) continue;
+
+            if (hits[i].point.y > highestGroundY)
+            {
+                highestGroundY = hits[i].point.y;
+                foundGround = true;
+            }
+        }
+
+        if (foundGround)
+        {
+            bool wasEnabled = controller.enabled;
+            controller.enabled = false;
+            transform.position = new Vector3(transform.position.x, highestGroundY + 0.02f, transform.position.z);
+            controller.enabled = wasEnabled;
         }
     }
 

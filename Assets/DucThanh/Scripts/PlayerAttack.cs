@@ -13,6 +13,7 @@ public class PlayerAttack : MonoBehaviour
 {
     private static readonly int AttackHash = Animator.StringToHash("Attack");
     private static readonly int CancelAttackHash = Animator.StringToHash("CancelAttack");
+    private static readonly string[] AttackCandidateNames = { "Atk1", "Atk2", "Atk3" };
 
     [Header("Attack Settings")]
     public int attackDamage = 35;
@@ -41,8 +42,15 @@ public class PlayerAttack : MonoBehaviour
 
     private Animator animator;
     private PlayerController playerController;
+    private PlayerAnimationController animController;
     private Transform currentTargetEnemy;
     private Vector3 attackFacingDir = Vector3.forward;
+
+    private readonly List<int> availableAttackIndices = new List<int>();
+    private string currentAttackStateName = "Atk1";
+    private int currentAttackVariant = 0;
+    private int lastAttackVariant = -1;
+    private TrailRenderer weaponTrail;
 
     private float nextAttackTime;
     private float attackStartTime;
@@ -54,6 +62,7 @@ public class PlayerAttack : MonoBehaviour
     {
         animator = GetComponentInChildren<Animator>();
         playerController = GetComponent<PlayerController>();
+        animController = GetComponent<PlayerAnimationController>();
 
         if (visualModel == null)
         {
@@ -62,6 +71,7 @@ public class PlayerAttack : MonoBehaviour
         }
 
         ResolveWeaponCollider();
+        EnsureWeaponTrail();
     }
 
     void Start()
@@ -71,7 +81,9 @@ public class PlayerAttack : MonoBehaviour
         if (attackCooldown > 0.4f) attackCooldown = 0.15f;
 
         wasCursorLocked = Cursor.lockState == CursorLockMode.Locked;
+        CacheAvailableAttackStates();
         ResolveWeaponCollider();
+        EnsureWeaponTrail();
     }
 
     void Update()
@@ -92,6 +104,14 @@ public class PlayerAttack : MonoBehaviour
         bool isCursorLocked = Cursor.lockState == CursorLockMode.Locked;
         bool attackDown = isCursorLocked && wasCursorLocked && Input.GetMouseButtonDown(0);
         bool attackHeld = isCursorLocked && wasCursorLocked && Input.GetMouseButton(0);
+
+        bool isBlocking = playerController != null && playerController.IsBlocking;
+        if (isBlocking)
+        {
+            if (IsAttacking) CancelAttackForBlock();
+            wasCursorLocked = isCursorLocked;
+            return;
+        }
 
         if (IsAttacking)
         {
@@ -146,13 +166,21 @@ public class PlayerAttack : MonoBehaviour
         if (elapsed < hitboxStartDelay) return;
 
         AnimatorStateInfo state = animator.GetCurrentAnimatorStateInfo(0);
-        if (state.IsName("Atk1") && !animator.IsInTransition(0) && state.normalizedTime > 0.90f) return;
+        if (state.IsName(currentAttackStateName) && !animator.IsInTransition(0) && state.normalizedTime > 0.90f) return;
 
         CheckWeaponHit();
     }
 
     private void PerformAttack()
     {
+        if (availableAttackIndices.Count == 0)
+        {
+            CacheAvailableAttackStates();
+        }
+
+        currentAttackVariant = PickRandomAttackVariant();
+        currentAttackStateName = AttackCandidateNames[currentAttackVariant];
+
         IsAttacking = true;
         queuedNextAttack = false;
         attackStartTime = Time.time;
@@ -165,8 +193,49 @@ public class PlayerAttack : MonoBehaviour
         animator.ResetTrigger(CancelAttackHash);
         animator.ResetTrigger(AttackHash);
 
-        // Chỉ dùng CrossFadeInFixedTime trực tiếp vào đầu state Atk1 (không gọi SetTrigger cùng lúc để tránh tự ngắt/reset sau 0.1s)
-        animator.CrossFadeInFixedTime("Atk1", 0.06f, 0, 0f);
+        // Phát ngẫu nhiên 1 trong 3 chiêu thức (Atk1 chém chéo, Atk2 chém ngang, Atk3 xoay 360° tầm thấp)
+        animator.CrossFadeInFixedTime(currentAttackStateName, 0.06f, 0, 0f);
+        SetWeaponTrailEmitting(true);
+        CombatVfxManager.SpawnSlashArc(transform.position, attackFacingDir, currentAttackVariant);
+        GameAudioManager.PlaySwordSwing();
+    }
+
+    private void CacheAvailableAttackStates()
+    {
+        availableAttackIndices.Clear();
+        if (animator == null) return;
+
+        for (int i = 0; i < AttackCandidateNames.Length; i++)
+        {
+            if (animator.HasState(0, Animator.StringToHash(AttackCandidateNames[i])))
+            {
+                availableAttackIndices.Add(i);
+            }
+        }
+
+        if (availableAttackIndices.Count == 0)
+        {
+            availableAttackIndices.Add(0);
+        }
+    }
+
+    private int PickRandomAttackVariant()
+    {
+        if (availableAttackIndices.Count <= 1)
+        {
+            lastAttackVariant = availableAttackIndices[0];
+            return lastAttackVariant;
+        }
+
+        int pick = availableAttackIndices[Random.Range(0, availableAttackIndices.Count)];
+        if (pick == lastAttackVariant)
+        {
+            int idx = availableAttackIndices.IndexOf(pick);
+            pick = availableAttackIndices[(idx + Random.Range(1, availableAttackIndices.Count)) % availableAttackIndices.Count];
+        }
+
+        lastAttackVariant = pick;
+        return pick;
     }
 
     private void UpdateSmoothAttackRotation(float elapsed)
@@ -294,22 +363,22 @@ public class PlayerAttack : MonoBehaviour
 
     private bool IsAttackAnimationFinished(float elapsed)
     {
-        // Đảm bảo đã qua giai đoạn blend vào Atk1 (tối thiểu 0.25s)
+        // Đảm bảo đã qua giai đoạn blend vào đòn đánh hiện tại (tối thiểu 0.25s)
         if (elapsed <= 0.25f) return false;
 
         AnimatorStateInfo state = animator.GetCurrentAnimatorStateInfo(0);
         if (animator.IsInTransition(0))
         {
             AnimatorStateInfo next = animator.GetNextAnimatorStateInfo(0);
-            if (next.IsName("Atk1")) return false;
+            if (next.IsName(currentAttackStateName)) return false;
         }
 
-        if (state.IsName("Atk1"))
+        if (state.IsName(currentAttackStateName))
         {
-            return state.normalizedTime >= 0.93f;
+            return state.normalizedTime >= 0.92f;
         }
 
-        return elapsed > 0.4f;
+        return elapsed > 0.45f;
     }
 
     private void EndAttackNormally()
@@ -318,7 +387,34 @@ public class PlayerAttack : MonoBehaviour
         nextAttackTime = Time.time + attackCooldown;
         StopAttackState();
         animator.ResetTrigger(AttackHash);
-        animator.CrossFadeInFixedTime(wantsMove ? "Run" : "Idle", 0.08f, 0);
+
+        if (animController != null)
+        {
+            animController.ForceReturnToLocomotion();
+        }
+        else
+        {
+            animator.CrossFadeInFixedTime(wantsMove ? "Run" : "Idle", 0.08f, 0);
+        }
+    }
+
+    public void CancelAttackForBlock()
+    {
+        if (!IsAttacking) return;
+        StopAttackState();
+        if (animator != null)
+        {
+            animator.ResetTrigger(AttackHash);
+            animator.SetTrigger(CancelAttackHash);
+            if (animController != null)
+            {
+                animController.ForceReturnToLocomotion();
+            }
+            else if (animator.HasState(0, Animator.StringToHash("Block")))
+            {
+                animator.CrossFadeInFixedTime("Block", 0.06f, 0);
+            }
+        }
     }
 
     private void StopAttackState()
@@ -326,6 +422,7 @@ public class PlayerAttack : MonoBehaviour
         IsAttacking = false;
         queuedNextAttack = false;
         hitEnemiesInSwing.Clear();
+        SetWeaponTrailEmitting(false);
 
         if (animator != null)
         {
@@ -355,6 +452,18 @@ public class PlayerAttack : MonoBehaviour
         );
 
         Collider[] hits = Physics.OverlapBox(worldCenter, halfExtents, wt.rotation, enemyLayers, QueryTriggerInteraction.Collide);
+        ProcessHitColliders(hits, worldCenter);
+
+        // Chiêu Atk3 (Xoay 360° tầm thấp) quét thêm vòng AoE xung quanh Player
+        if (currentAttackVariant == 2 && (Time.time - attackStartTime) >= 0.14f)
+        {
+            Collider[] spinHits = Physics.OverlapSphere(transform.position + Vector3.up * 0.85f, 2.65f, enemyLayers, QueryTriggerInteraction.Collide);
+            ProcessHitColliders(spinHits, transform.position + Vector3.up * 0.85f);
+        }
+    }
+
+    private void ProcessHitColliders(Collider[] hits, Vector3 originCenter)
+    {
         for (int i = 0; i < hits.Length; i++)
         {
             Collider col = hits[i];
@@ -371,10 +480,28 @@ public class PlayerAttack : MonoBehaviour
                 OrcEnemyAI orcAI = enemy.GetComponent<OrcEnemyAI>();
                 if (orcAI != null)
                 {
-                    orcAI.ApplyKnockback(transform.position, knockbackForce, true);
+                    float kb = currentAttackVariant == 2 ? knockbackForce * 1.25f : knockbackForce;
+                    orcAI.ApplyKnockback(transform.position, kb, true);
                 }
 
-                enemy.TakeDamage(attackDamage);
+                int dealtDamage = currentAttackVariant == 2 ? Mathf.RoundToInt(attackDamage * 1.15f) : attackDamage;
+                enemy.TakeDamage(dealtDamage);
+
+                Vector3 hitPoint = col.ClosestPoint(originCenter);
+                if ((hitPoint - enemy.transform.position).sqrMagnitude < 0.01f)
+                {
+                    hitPoint = enemy.transform.position + Vector3.up * 1.1f;
+                }
+                Vector3 hitDir = enemy.transform.position - transform.position;
+                bool heavyHit = enemy.isBoss || dealtDamage >= 55 || currentAttackVariant == 2;
+                CombatVfxManager.SpawnBloodHit(hitPoint, hitDir, heavyHit);
+                GameAudioManager.PlaySwordHit(heavyHit);
+
+                if (Camera.main != null)
+                {
+                    ThirdPersonCamera cam = Camera.main.GetComponent<ThirdPersonCamera>();
+                    if (cam != null) cam.AddCameraShake(enemy.isBoss || currentAttackVariant == 2 ? 0.13f : 0.07f, 0.08f);
+                }
             }
         }
     }
@@ -387,8 +514,63 @@ public class PlayerAttack : MonoBehaviour
         }
 
         weaponCollider = null;
+        weaponTrail = null;
         hitEnemiesInSwing.Clear();
         ResolveWeaponCollider();
+        EnsureWeaponTrail();
+    }
+
+    private void EnsureWeaponTrail()
+    {
+        if (weaponCollider == null) return;
+
+        Transform existing = weaponCollider.transform.Find("WeaponSlashTrail");
+        if (existing != null)
+        {
+            weaponTrail = existing.GetComponent<TrailRenderer>();
+            if (weaponTrail != null) weaponTrail.emitting = false;
+            return;
+        }
+
+        GameObject trailObj = new GameObject("WeaponSlashTrail");
+        trailObj.transform.SetParent(weaponCollider.transform, false);
+        // Đặt gần đầu lưỡi vũ khí theo bounds của BoxCollider
+        trailObj.transform.localPosition = weaponCollider.center + new Vector3(0f, weaponCollider.size.y * 0.42f, 0f);
+
+        weaponTrail = trailObj.AddComponent<TrailRenderer>();
+        weaponTrail.time = 0.16f;
+        weaponTrail.minVertexDistance = 0.05f;
+        weaponTrail.startWidth = 0.24f;
+        weaponTrail.endWidth = 0.02f;
+        weaponTrail.material = CombatVfxManager.GetWeaponTrailMaterial();
+        weaponTrail.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+        weaponTrail.receiveShadows = false;
+
+        Gradient grad = new Gradient();
+        grad.SetKeys(
+            new[]
+            {
+                new GradientColorKey(new Color(1f, 0.94f, 0.65f), 0f),
+                new GradientColorKey(new Color(1f, 0.55f, 0.18f), 0.55f),
+                new GradientColorKey(new Color(0.85f, 0.18f, 0.08f), 1f)
+            },
+            new[]
+            {
+                new GradientAlphaKey(0.88f, 0f),
+                new GradientAlphaKey(0.45f, 0.5f),
+                new GradientAlphaKey(0f, 1f)
+            });
+        weaponTrail.colorGradient = grad;
+        weaponTrail.emitting = false;
+    }
+
+    private void SetWeaponTrailEmitting(bool active)
+    {
+        if (weaponTrail == null) EnsureWeaponTrail();
+        if (weaponTrail != null)
+        {
+            weaponTrail.emitting = active;
+        }
     }
 
     private void ResolveWeaponCollider()

@@ -262,6 +262,66 @@ public class TelemetryManager : MonoBehaviour
         TrackEvent("enemy_killed", points);
     }
 
+    public void TrackBossKilled(int stage)
+    {
+        TrackEvent("boss_killed", stage);
+    }
+
+    public void TrackItemPickup(int healOrValue)
+    {
+        TrackEvent("item_pickup", healOrValue);
+    }
+
+    public void TrackCheckpointReached(int stage)
+    {
+        TrackEvent("checkpoint_reached", stage);
+    }
+
+    public void TrackTrapHit(int damage)
+    {
+        TrackEvent("trap_hit", damage);
+    }
+
+    public void TrackDashUsed(int stage)
+    {
+        TrackEvent("dash_used", stage);
+    }
+
+    public void TrackBlockHit(int blockedDamage)
+    {
+        TrackEvent("block_hit", blockedDamage);
+    }
+
+    public void TrackPerfectParry(int stage)
+    {
+        TrackEvent("perfect_parry", stage);
+    }
+
+    public void TrackPlayerLevelUp(int playerLevel)
+    {
+        TrackEvent("player_level_up", playerLevel);
+    }
+
+    public void TrackGoldCollected(int amount)
+    {
+        TrackEvent("gold_collected", amount);
+    }
+
+    public void TrackShopOpened(int stage)
+    {
+        TrackEvent("shop_opened", stage);
+    }
+
+    public void TrackWeaponPurchased(int price)
+    {
+        TrackEvent("weapon_purchased", price);
+    }
+
+    public void TrackPotionPurchased(int price)
+    {
+        TrackEvent("potion_purchased", price);
+    }
+
     public void TrackPlayerDied()
     {
         if (playerDeadTracked || gameEnded) return;

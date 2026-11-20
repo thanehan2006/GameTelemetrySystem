@@ -3,16 +3,25 @@ using UnityEngine;
 using UnityEngine.UI;
 using TMPro;
 
+/// <summary>
+/// Quản lý Điểm (Score) và Vàng (Gold) của Player trong trận đấu.
+/// Tái sử dụng thanh ExpBar ở góc trên-phải thành khung hiển thị Vàng & phím mở Cửa Hàng [B].
+/// </summary>
 public class ScoreManager : MonoBehaviour
 {
     public static ScoreManager Instance;
 
-    [Header("Score & Level Settings")]
+    [Header("Score & Gold Settings")]
     public int score = 0;
-    public int currentLevel = 1;
-    public int maxLevel = 10;
-    public int baseExpToLevelUp = 200;
-    public int expIncreasePerLevel = 200;
+    public int gold = 0;
+    public int totalGoldEarned = 0;
+
+    // Giữ lại các trường cũ để tương thích scene/inspector, không còn bật popup lên cấp chọn đồ
+    [HideInInspector] public int currentLevel = 1;
+    [HideInInspector] public int maxLevel = 10;
+    [HideInInspector] public int baseExpToLevelUp = 200;
+    [HideInInspector] public int expIncreasePerLevel = 150;
+    [HideInInspector] public bool manageStageTelemetry = false;
 
     [Header("UI")]
     public TMP_Text scoreText;
@@ -21,12 +30,7 @@ public class ScoreManager : MonoBehaviour
     [SerializeField] private float barSmoothSpeed = 10f;
 
     public event Action<int> OnLevelUp;
-
-    private int currentExp;
-    private bool hasWon;
-    private float targetExpValue;
-
-    public int RequiredExpForCurrentLevel => Mathf.Max(1, baseExpToLevelUp + (currentLevel - 1) * expIncreasePerLevel);
+    public event Action<int> OnGoldChanged;
 
     private void Awake()
     {
@@ -40,135 +44,92 @@ public class ScoreManager : MonoBehaviour
             return;
         }
 
-        currentLevel = Mathf.Max(1, currentLevel);
-        if (maxLevel < 10) maxLevel = 10;
-        baseExpToLevelUp = Mathf.Max(1, baseExpToLevelUp);
-        expIncreasePerLevel = Mathf.Max(0, expIncreasePerLevel);
-        currentExp = 0;
-        hasWon = false;
-
         if (expSlider == null)
         {
             GameObject sliderObj = GameObject.Find("ExpBar");
             if (sliderObj != null) expSlider = sliderObj.GetComponent<Slider>();
         }
 
-        if (expSlider != null)
-        {
-            expSlider.minValue = 0f;
-            expSlider.maxValue = RequiredExpForCurrentLevel;
-        }
-
-        UpdateScoreUI(true);
+        StyleExpBarAsGoldHud();
+        UpdateGoldHud();
     }
 
     private void Start()
     {
-        if (LevelUpChoiceManager.Instance == null && GetComponent<LevelUpChoiceManager>() == null)
+        // Tự khởi tạo Cửa Hàng Vũ Khí (thay thế hoàn toàn LevelUpChoiceManager)
+        if (WeaponShopManager.Instance == null && GetComponent<WeaponShopManager>() == null)
         {
-            gameObject.AddComponent<LevelUpChoiceManager>();
-        }
-    }
-
-    private void Update()
-    {
-        if (expSlider == null) return;
-
-        if (!Mathf.Approximately(expSlider.value, targetExpValue))
-        {
-            expSlider.value = Mathf.Lerp(expSlider.value, targetExpValue, Time.unscaledDeltaTime * barSmoothSpeed);
-            if (Mathf.Abs(expSlider.value - targetExpValue) < 0.5f)
-            {
-                expSlider.value = targetExpValue;
-            }
+            gameObject.AddComponent<WeaponShopManager>();
         }
     }
 
     public void AddScore(int points)
     {
-        if (hasWon || GameOverManager.IsGameOver) return;
-
-        score += points;
-        currentExp += points;
-        bool leveledUp = CheckLevelUp();
-        UpdateScoreUI(leveledUp && !hasWon);
-
-        Debug.Log($"[ScoreManager] Lv.{currentLevel} | EXP: {currentExp}/{RequiredExpForCurrentLevel} | Total Score: {score}");
+        if (GameOverManager.IsGameOver) return;
+        score += Mathf.Max(0, points);
     }
 
-    private bool CheckLevelUp()
+    public void AddGold(int amount)
     {
-        bool leveledUp = false;
+        if (GameOverManager.IsGameOver || amount <= 0) return;
 
-        while (!hasWon && currentExp >= RequiredExpForCurrentLevel)
+        gold += amount;
+        totalGoldEarned += amount;
+        UpdateGoldHud();
+        OnGoldChanged?.Invoke(gold);
+        Debug.Log($"[ScoreManager] +{amount} Gold | Hiện có: {gold} G (Tổng: {totalGoldEarned} G)");
+    }
+
+    public bool TrySpendGold(int cost)
+    {
+        if (cost < 0 || gold < cost) return false;
+
+        gold -= cost;
+        UpdateGoldHud();
+        OnGoldChanged?.Invoke(gold);
+        return true;
+    }
+
+    private void StyleExpBarAsGoldHud()
+    {
+        if (expSlider == null) return;
+
+        expSlider.interactable = false;
+        expSlider.minValue = 0f;
+        expSlider.maxValue = 1f;
+        expSlider.value = 0f;
+
+        // Ẩn thanh fill xanh cũ để biến khung này thành thẻ hiển thị Vàng gọn đẹp
+        if (expSlider.fillRect != null)
         {
-            int required = RequiredExpForCurrentLevel;
-            int completedLevel = currentLevel;
-
-            if (maxLevel > 0 && completedLevel >= maxLevel)
-            {
-                hasWon = true;
-                currentExp = required;
-
-                if (TelemetryManager.Instance != null)
-                {
-                    TelemetryManager.Instance.TrackLevelComplete(completedLevel);
-                    TelemetryManager.Instance.TrackGameEnded("Win");
-                }
-
-                if (GameOverManager.Instance != null)
-                {
-                    GameOverManager.Instance.ShowVictory();
-                }
-
-                Debug.Log($"[ScoreManager] VICTORY! Hoàn thành tất cả {maxLevel} màn với {score} điểm!");
-                break;
-            }
-
-            currentExp -= required;
-            currentLevel++;
-            leveledUp = true;
-
-            if (TelemetryManager.Instance != null)
-            {
-                TelemetryManager.Instance.TrackLevelComplete(completedLevel);
-                TelemetryManager.Instance.TrackLevelStart(currentLevel);
-            }
-
-            Debug.Log($"[ScoreManager] LEVEL UP! Hoàn thành Level {completedLevel} -> Lên Level {currentLevel} (cần {RequiredExpForCurrentLevel} điểm cho cấp tiếp theo)");
-            OnLevelUp?.Invoke(currentLevel);
+            expSlider.fillRect.gameObject.SetActive(false);
         }
 
-        return leveledUp;
+        Transform bg = expSlider.transform.Find("Background");
+        if (bg != null)
+        {
+            Image bgImg = bg.GetComponent<Image>();
+            if (bgImg != null) bgImg.color = new Color(0.06f, 0.08f, 0.13f, 0.88f);
+
+            Outline outline = bg.GetComponent<Outline>();
+            if (outline == null) outline = bg.gameObject.AddComponent<Outline>();
+            outline.effectColor = new Color(0.90f, 0.70f, 0.25f, 0.65f);
+            outline.effectDistance = new Vector2(1.2f, -1.2f);
+        }
     }
 
-    private void UpdateScoreUI(bool instantSlider)
+    private void UpdateGoldHud()
     {
-        int required = RequiredExpForCurrentLevel;
-        int displayExp = hasWon ? required : Mathf.Clamp(currentExp, 0, required);
-
-        targetExpValue = displayExp;
-
-        if (expSlider != null)
+        if (scoreText != null)
         {
-            expSlider.maxValue = required;
-            if (instantSlider)
-            {
-                expSlider.value = displayExp;
-            }
+            scoreText.text = $"VÀNG: {gold:N0} G   •   [B] CỬA HÀNG";
+            scoreText.color = new Color(1f, 0.86f, 0.34f, 1f);
+            scoreText.fontSize = 15f;
         }
 
         if (levelText != null)
         {
-            levelText.text = $"Lv.{currentLevel}";
-            if (scoreText != null)
-            {
-                scoreText.text = $"EXP: {displayExp}/{required}";
-            }
-        }
-        else if (scoreText != null)
-        {
-            scoreText.text = $"Lv.{currentLevel} | EXP: {displayExp}/{required}";
+            levelText.text = $"{gold:N0} G";
         }
     }
 }

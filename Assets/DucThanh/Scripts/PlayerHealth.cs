@@ -19,8 +19,16 @@ public class PlayerHealth : MonoBehaviour
     [SerializeField] private float barSmoothSpeed = 10f;
 
     private bool isDead = false;
+    private float invulnerableUntil = 0f;
 
     public bool IsAlive => !isDead && currentHealth > 0;
+    public bool IsInvulnerable => Time.time < invulnerableUntil;
+
+    public void SetInvulnerable(float duration)
+    {
+        if (duration <= 0f) return;
+        invulnerableUntil = Mathf.Max(invulnerableUntil, Time.time + duration);
+    }
 
     private void Awake()
     {
@@ -70,11 +78,21 @@ public class PlayerHealth : MonoBehaviour
 
     public void TakeDamage(int damage)
     {
-        if (isDead || currentHealth <= 0)
+        if (isDead || currentHealth <= 0 || IsInvulnerable)
             return;
 
         currentHealth = Mathf.Max(0, currentHealth - damage);
         UpdateHealthUI(false);
+
+        CombatVfxManager.TriggerPlayerDamageFlash(damage >= 24 ? 0.5f : 0.35f);
+        GameAudioManager.PlayPlayerHurt();
+
+        if (Camera.main != null)
+        {
+            ThirdPersonCamera cam = Camera.main.GetComponent<ThirdPersonCamera>();
+            if (cam != null) cam.AddCameraShake(0.14f, 0.14f);
+        }
+
         Debug.Log($"Player HP: {currentHealth}/{maxHealth}");
 
         if (currentHealth <= 0 && !isDead)
@@ -128,7 +146,7 @@ public class PlayerHealth : MonoBehaviour
         if (healthText != null)
         {
             healthText.text = $"HP: {currentHealth}/{maxHealth}";
-            healthText.color = hpColor;
+            healthText.color = Color.white;
         }
 
         if (healthFillImage != null)
