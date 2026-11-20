@@ -1,0 +1,2026 @@
+<!DOCTYPE html>
+<html lang="vi" data-bs-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AEGIS // Game Telemetry & Spatial Intelligence Hub</title>
+    
+    <!-- Google Fonts: Space Grotesk, Plus Jakarta Sans, JetBrains Mono -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+    
+    <!-- Bootstrap 5.3 CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- Bootstrap Icons -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.2/dist/chart.umd.min.js"></script>
+
+    <style>
+        :root {
+            --bg-deep: #05070c;
+            --bg-surface: #0a0e18;
+            --bg-card: rgba(13, 19, 33, 0.75);
+            --bg-card-hover: rgba(18, 26, 46, 0.9);
+            --border-subtle: rgba(255, 255, 255, 0.08);
+            --border-glow: rgba(99, 102, 241, 0.35);
+            
+            --accent-primary: #6366f1;
+            --accent-cyan: #06b6d4;
+            --accent-emerald: #10b981;
+            --accent-amber: #f59e0b;
+            --accent-rose: #f43f5e;
+            --accent-violet: #8b5cf6;
+            
+            --text-main: #f8fafc;
+            --text-sub: #94a3b8;
+            --text-muted: #64748b;
+        }
+
+        * {
+            box-sizing: border-box;
+            user-select: none;
+        }
+
+        body {
+            background-color: var(--bg-deep);
+            color: var(--text-main);
+            font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
+            min-height: 100vh;
+            overflow-x: hidden;
+            position: relative;
+        }
+
+        /* Ambient Star/Particle Canvas */
+        #bgCanvas {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            pointer-events: none;
+            z-index: 0;
+            opacity: 0.45;
+        }
+
+        .font-tech { font-family: 'Space Grotesk', sans-serif; }
+        .font-mono { font-family: 'JetBrains Mono', monospace; }
+
+        /* Top Glowing Neon Strip */
+        .cyber-line {
+            height: 3px;
+            background: linear-gradient(90deg, 
+                transparent 0%, 
+                var(--accent-primary) 20%, 
+                var(--accent-cyan) 45%, 
+                var(--accent-emerald) 70%, 
+                var(--accent-violet) 90%, 
+                transparent 100%);
+            box-shadow: 0 0 16px var(--accent-primary);
+            position: relative;
+            z-index: 1050;
+        }
+
+        /* Glass HUD Card */
+        .hud-card {
+            background: var(--bg-card);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border: 1px solid var(--border-subtle);
+            border-radius: 18px;
+            box-shadow: 0 20px 40px -15px rgba(0, 0, 0, 0.7);
+            position: relative;
+            transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+            overflow: hidden;
+        }
+
+        .hud-card::after {
+            content: '';
+            position: absolute;
+            inset: 0;
+            border-radius: 18px;
+            padding: 1px;
+            background: linear-gradient(135deg, rgba(255, 255, 255, 0.12) 0%, transparent 60%);
+            -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+            -webkit-mask-composite: xor;
+            mask-composite: exclude;
+            pointer-events: none;
+        }
+
+        .hud-card:hover {
+            border-color: rgba(99, 102, 241, 0.4);
+            box-shadow: 0 25px 50px -15px rgba(99, 102, 241, 0.15), 0 0 20px rgba(0,0,0,0.5);
+        }
+
+        /* Navbar */
+        .hud-navbar {
+            background: rgba(6, 8, 14, 0.85);
+            backdrop-filter: blur(24px);
+            border-bottom: 1px solid var(--border-subtle);
+            z-index: 1000;
+        }
+
+        .brand-logo-ring {
+            width: 44px;
+            height: 44px;
+            border-radius: 12px;
+            background: linear-gradient(135deg, #4f46e5, #06b6d4);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 0 20px rgba(99, 102, 241, 0.5);
+            position: relative;
+        }
+
+        /* HUD Navigation Tabs */
+        .hud-tab-nav {
+            display: inline-flex;
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid var(--border-subtle);
+            border-radius: 12px;
+            padding: 4px;
+            gap: 4px;
+        }
+
+        .hud-tab-btn {
+            background: transparent;
+            border: none;
+            color: var(--text-sub);
+            padding: 0.45rem 1rem;
+            border-radius: 9px;
+            font-size: 0.82rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .hud-tab-btn:hover {
+            color: #fff;
+            background: rgba(255, 255, 255, 0.06);
+        }
+
+        .hud-tab-btn.active {
+            background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%);
+            color: #fff;
+            box-shadow: 0 4px 15px rgba(99, 102, 241, 0.35);
+        }
+
+        /* KPI Metric Cards */
+        .kpi-container {
+            padding: 1.4rem;
+        }
+
+        .kpi-icon-badge {
+            width: 50px;
+            height: 50px;
+            border-radius: 14px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.5rem;
+        }
+
+        .kpi-icon-badge.indigo { background: rgba(99, 102, 241, 0.15); color: #818cf8; border: 1px solid rgba(99, 102, 241, 0.3); }
+        .kpi-icon-badge.emerald { background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3); }
+        .kpi-icon-badge.cyan { background: rgba(6, 182, 212, 0.15); color: #22d3ee; border: 1px solid rgba(6, 182, 212, 0.3); }
+        .kpi-icon-badge.amber { background: rgba(245, 158, 11, 0.15); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.3); }
+
+        .kpi-value-text {
+            font-size: 2.2rem;
+            font-weight: 800;
+            letter-spacing: -0.04em;
+            line-height: 1;
+            margin: 0.5rem 0 0.25rem 0;
+            background: linear-gradient(180deg, #ffffff 40%, #94a3b8 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .kpi-tag {
+            font-size: 0.72rem;
+            font-weight: 700;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            color: var(--text-muted);
+        }
+
+        .metric-trend {
+            font-size: 0.75rem;
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 2px 8px;
+            border-radius: 20px;
+            font-weight: 600;
+        }
+        .trend-up { background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.25); }
+        .trend-info { background: rgba(6, 182, 212, 0.15); color: #22d3ee; border: 1px solid rgba(6, 182, 212, 0.25); }
+
+        /* Pulse indicator */
+        .live-pulse {
+            width: 9px;
+            height: 9px;
+            border-radius: 50%;
+            background: #10b981;
+            position: relative;
+            display: inline-block;
+        }
+        .live-pulse::after {
+            content: '';
+            position: absolute;
+            inset: -4px;
+            border-radius: 50%;
+            border: 2px solid #10b981;
+            animation: radar 2s cubic-bezier(0, 0.2, 0.8, 1) infinite;
+        }
+        @keyframes radar {
+            0% { transform: scale(0.6); opacity: 1; }
+            100% { transform: scale(2.2); opacity: 0; }
+        }
+
+        /* Filter Chips */
+        .filter-chip {
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid var(--border-subtle);
+            color: var(--text-sub);
+            padding: 0.32rem 0.8rem;
+            border-radius: 30px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        .filter-chip:hover { background: rgba(255, 255, 255, 0.1); color: #fff; }
+        .filter-chip.active {
+            background: var(--accent-primary);
+            border-color: var(--accent-primary);
+            color: #fff;
+            box-shadow: 0 0 12px rgba(99, 102, 241, 0.5);
+        }
+
+        /* Modern Table */
+        .hud-table {
+            --bs-table-bg: transparent;
+            --bs-table-color: var(--text-main);
+            border-color: rgba(255, 255, 255, 0.05);
+            margin: 0;
+        }
+        .hud-table thead th {
+            font-size: 0.72rem;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: var(--text-muted);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+            padding: 0.85rem 1rem;
+            background: rgba(0, 0, 0, 0.2);
+        }
+        .hud-table tbody td {
+            padding: 0.85rem 1rem;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+            font-size: 0.86rem;
+            vertical-align: middle;
+        }
+        .hud-table tbody tr {
+            transition: all 0.15s ease;
+            cursor: pointer;
+        }
+        .hud-table tbody tr:hover { background: rgba(99, 102, 241, 0.08); }
+
+        /* Match Badges */
+        .badge-match {
+            font-size: 0.72rem;
+            font-weight: 700;
+            letter-spacing: 0.05em;
+            text-transform: uppercase;
+            padding: 0.32rem 0.7rem;
+            border-radius: 6px;
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+        }
+        .badge-win { background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.35); }
+        .badge-loss { background: rgba(244, 63, 94, 0.15); color: #fb7185; border: 1px solid rgba(244, 63, 94, 0.35); }
+        .badge-play { background: rgba(245, 158, 11, 0.15); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.35); }
+
+        /* Buttons & Inputs */
+        .hud-btn {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid var(--border-subtle);
+            color: var(--text-main);
+            border-radius: 10px;
+            padding: 0.45rem 0.85rem;
+            font-size: 0.82rem;
+            font-weight: 600;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            transition: all 0.2s ease;
+        }
+        .hud-btn:hover {
+            background: rgba(255, 255, 255, 0.12);
+            color: #fff;
+            transform: translateY(-1px);
+        }
+        .hud-btn-primary {
+            background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%);
+            border-color: rgba(99, 102, 241, 0.6);
+            color: #fff;
+            box-shadow: 0 4px 15px rgba(99, 102, 241, 0.35);
+        }
+        .hud-btn-primary:hover {
+            box-shadow: 0 6px 20px rgba(99, 102, 241, 0.55);
+            color: #fff;
+        }
+        .hud-btn-emerald {
+            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+            border-color: rgba(16, 185, 129, 0.6);
+            color: #fff;
+            box-shadow: 0 4px 15px rgba(16, 185, 129, 0.35);
+        }
+
+        .hud-search-box {
+            background: rgba(0, 0, 0, 0.35);
+            border: 1px solid var(--border-subtle);
+            color: #fff;
+            border-radius: 10px;
+            padding: 0.45rem 0.85rem 0.45rem 2.2rem;
+            font-size: 0.82rem;
+            outline: none;
+        }
+        .hud-search-box:focus { border-color: var(--accent-primary); }
+
+        .system-pill {
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid var(--border-subtle);
+            padding: 0.3rem 0.75rem;
+            border-radius: 20px;
+            font-size: 0.75rem;
+            color: var(--text-sub);
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        /* 2D Spatial Minimap / Heatmap Canvas */
+        #tacticalMapCanvas {
+            background: #070b14;
+            border: 1px solid rgba(99, 102, 241, 0.3);
+            border-radius: 14px;
+            box-shadow: inset 0 0 30px rgba(0, 0, 0, 0.8);
+            width: 100%;
+            height: 380px;
+            display: block;
+        }
+
+        /* Interactive Simulator Terminal */
+        .terminal-window {
+            background: #04060a;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 12px;
+            padding: 1rem;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.78rem;
+            color: #38bdf8;
+            height: 250px;
+            overflow-y: auto;
+            box-shadow: inset 0 0 20px rgba(0, 0, 0, 0.8);
+        }
+
+        .terminal-line { margin-bottom: 4px; line-height: 1.4; }
+        .term-ts { color: #64748b; }
+        .term-succ { color: #34d399; }
+        .term-ev { color: #f59e0b; }
+        .term-err { color: #f43f5e; }
+
+        /* Modal */
+        .modal-content.hud-modal {
+            background: rgba(14, 20, 34, 0.95);
+            backdrop-filter: blur(25px);
+            border: 1px solid rgba(99, 102, 241, 0.4);
+            border-radius: 20px;
+            box-shadow: 0 25px 60px rgba(0, 0, 0, 0.8);
+            color: #fff;
+        }
+
+        /* High-Tech Custom Tooltips */
+        .tooltip {
+            --bs-tooltip-bg: rgba(11, 16, 28, 0.96);
+            --bs-tooltip-color: #f8fafc;
+            --bs-tooltip-padding-x: 0.85rem;
+            --bs-tooltip-padding-y: 0.55rem;
+            --bs-tooltip-border-radius: 10px;
+            --bs-tooltip-font-size: 0.8rem;
+            filter: drop-shadow(0 10px 25px rgba(0,0,0,0.8));
+            z-index: 1090;
+        }
+        .tooltip-inner {
+            border: 1px solid rgba(99, 102, 241, 0.5);
+            box-shadow: 0 0 15px rgba(99, 102, 241, 0.25);
+            font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
+            font-weight: 500;
+            line-height: 1.45;
+            text-align: left;
+            max-width: 280px;
+        }
+
+        .help-hint {
+            cursor: help;
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            border-bottom: 1px dashed rgba(255, 255, 255, 0.25);
+            transition: all 0.2s ease;
+        }
+        .help-hint:hover {
+            color: #fff !important;
+            border-bottom-color: var(--accent-primary);
+        }
+        .help-icon {
+            font-size: 0.72rem;
+            color: var(--text-muted);
+            transition: color 0.2s;
+        }
+        .help-hint:hover .help-icon {
+            color: var(--accent-primary);
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Ambient Star Canvas -->
+    <canvas id="bgCanvas"></canvas>
+
+    <!-- Top Neon Line -->
+    <div class="cyber-line"></div>
+
+    <!-- Navigation HUD Bar -->
+    <nav class="hud-navbar py-2.5 px-4 sticky-top">
+        <div class="container-fluid d-flex justify-content-between align-items-center p-0 flex-wrap gap-2">
+            <!-- Brand -->
+            <div class="d-flex align-items-center gap-3">
+                <div class="brand-logo-ring">
+                    <i class="bi bi-shield-shaded text-white fs-4"></i>
+                </div>
+                <div>
+                    <div class="d-flex align-items-center gap-2">
+                        <span class="fs-5 fw-bold font-tech tracking-wide text-white">AEGIS // TELEMETRY</span>
+                        <span class="badge rounded-pill text-uppercase px-2 py-0.5" style="background: rgba(99,102,241,0.2); color: #818cf8; border: 1px solid rgba(99,102,241,0.4); font-size: 0.65rem; font-weight: 700;">
+                            v3.0 Live Intel
+                        </span>
+                    </div>
+                    <div class="d-flex align-items-center gap-2 mt-0.5">
+                        <span class="live-pulse"></span>
+                        <span class="small font-mono text-muted" style="font-size: 0.75rem;" id="sysLatency">Ingestion: Active • Ping: 14ms</span>
+                        <span class="text-secondary">•</span>
+                        <span class="small font-mono text-muted" style="font-size: 0.75rem;" id="lastSyncTime">Syncing...</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- View Switcher Tabs (Killer Feature) -->
+            <div class="hud-tab-nav">
+                <button class="hud-tab-btn active" id="tabBtnAnalytics" onclick="switchView('analytics')" data-bs-toggle="tooltip" data-bs-placement="bottom" title="Bảng phân tích số liệu tổng hợp (KPI, tiến độ màn chơi, sự kiện và nhật ký)">
+                    <i class="bi bi-bar-chart-fill"></i>
+                    <span>Analytics Hub</span>
+                </button>
+                <button class="hud-tab-btn" id="tabBtnHeatmap" onclick="switchView('heatmap')" data-bs-toggle="tooltip" data-bs-placement="bottom" title="Bản đồ nhiệt không gian 2D thể hiện tọa độ điểm tử vong và tương tác trên từng màn">
+                    <i class="bi bi-compass-fill"></i>
+                    <span>2D Spatial Heatmap</span>
+                </button>
+                <button class="hud-tab-btn" id="tabBtnSimulator" onclick="switchView('simulator')" data-bs-toggle="tooltip" data-bs-placement="bottom" title="Trình giả lập bot tự động gửi các request sự kiện để kiểm thử mà không cần bật game Unity">
+                    <i class="bi bi-robot"></i>
+                    <span>Bot Match Simulator</span>
+                </button>
+            </div>
+
+            <!-- Actions Header -->
+            <div class="d-flex align-items-center gap-2">
+                <!-- SFX Toggle -->
+                <button id="btnSoundToggle" class="hud-btn" onclick="toggleAudio()" data-bs-toggle="tooltip" data-bs-placement="bottom" title="Bật / Tắt hiệu ứng âm thanh tương tác Sci-Fi">
+                    <i class="bi bi-volume-up" id="soundIcon"></i>
+                </button>
+
+                <!-- Instant Bot Simulation Quick Action -->
+                <button class="hud-btn hud-btn-emerald" onclick="triggerQuickBotMatch()" data-bs-toggle="tooltip" data-bs-placement="bottom" title="Tạo ngay một bot ảo vào chơi, ghi nhận event và xem số liệu nhảy trực tiếp">
+                    <i class="bi bi-play-circle-fill"></i>
+                    <span class="d-none d-sm-inline">Bắn Bot Trận Mới</span>
+                </button>
+
+                <!-- Refresh Button -->
+                <button id="btnRefresh" class="hud-btn hud-btn-primary" onclick="manualRefresh()" data-bs-toggle="tooltip" data-bs-placement="bottom" title="Làm mới toàn bộ dữ liệu tức thì (tự động đếm ngược làm mới mỗi 20s)">
+                    <i class="bi bi-arrow-clockwise" id="refreshSpinner"></i>
+                    <span class="badge bg-black bg-opacity-30 font-mono ms-1" id="autoTimer">20s</span>
+                </button>
+
+                <!-- Export CSV -->
+                <button class="hud-btn" onclick="exportDataCSV()" data-bs-toggle="tooltip" data-bs-placement="bottom" title="Tải xuống tệp CSV chứa danh sách chi tiết các phiên chơi để làm báo cáo">
+                    <i class="bi bi-download"></i>
+                </button>
+            </div>
+                    <i class="bi bi-download"></i>
+                </button>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Main Content Container -->
+    <div class="container-fluid px-4 py-4" style="position: relative; z-index: 1;">
+
+        <!-- Alert Notification -->
+        <div id="statusAlert" class="alert hud-card d-none mb-4 d-flex align-items-center gap-3 border-danger py-3" role="alert">
+            <i class="bi bi-exclamation-triangle-fill fs-3 text-danger"></i>
+            <div>
+                <div class="fw-bold text-white">Cảnh Báo Kết Nối API</div>
+                <div class="small text-secondary" id="statusMessage">Không thể giao tiếp với Backend GameTelemetryAPI.</div>
+            </div>
+        </div>
+
+        <!-- KPI Stats Cards Row (Always Visible) -->
+        <div class="row g-3 mb-4">
+            <!-- Total Players -->
+            <div class="col-12 col-sm-6 col-xl-3">
+                <div class="hud-card kpi-container">
+                    <div class="d-flex justify-content-between align-items-start">
+                        <div>
+                            <div class="kpi-tag help-hint" data-bs-toggle="tooltip" data-bs-placement="top" title="Tổng số tài khoản người chơi đã từng đăng ký và lưu trữ trong cơ sở dữ liệu.">
+                                <span>Active Players</span>
+                                <i class="bi bi-question-circle help-icon"></i>
+                            </div>
+                            <div class="kpi-value-text font-tech" id="kpiPlayers">0</div>
+                            <div class="mt-2 d-flex align-items-center gap-1.5">
+                                <span class="metric-trend trend-up"><i class="bi bi-shield-check"></i> SQL Registered</span>
+                            </div>
+                        </div>
+                        <div class="kpi-icon-badge indigo" data-bs-toggle="tooltip" title="Tổng người chơi đã tham gia hệ thống">
+                            <i class="bi bi-people-fill"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Total Sessions -->
+            <div class="col-12 col-sm-6 col-xl-3">
+                <div class="hud-card kpi-container">
+                    <div class="d-flex justify-content-between align-items-start">
+                        <div>
+                            <div class="kpi-tag help-hint" data-bs-toggle="tooltip" data-bs-placement="top" title="Tổng số lượt hoặc trận game đã được khởi tạo từ Unity Client.">
+                                <span>Total Sessions</span>
+                                <i class="bi bi-question-circle help-icon"></i>
+                            </div>
+                            <div class="kpi-value-text font-tech" id="kpiSessions">0</div>
+                            <div class="mt-2 d-flex align-items-center gap-1.5">
+                                <span class="metric-trend trend-info"><i class="bi bi-joystick"></i> Game Matches</span>
+                            </div>
+                        </div>
+                        <div class="kpi-icon-badge emerald" data-bs-toggle="tooltip" title="Tổng số trận đấu đã bắt đầu">
+                            <i class="bi bi-cpu"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Total Events -->
+            <div class="col-12 col-sm-6 col-xl-3">
+                <div class="hud-card kpi-container">
+                    <div class="d-flex justify-content-between align-items-start">
+                        <div>
+                            <div class="kpi-tag help-hint" data-bs-toggle="tooltip" data-bs-placement="top" title="Tổng số sự kiện telemetry thu thập được (bắt đầu màn, nhặt đồ, tử vong, hoàn thành,...).">
+                                <span>Telemetry Events</span>
+                                <i class="bi bi-question-circle help-icon"></i>
+                            </div>
+                            <div class="kpi-value-text font-tech" id="kpiEvents">0</div>
+                            <div class="mt-2 d-flex align-items-center gap-1.5">
+                                <span class="metric-trend trend-up"><i class="bi bi-lightning-charge-fill"></i> Stream Active</span>
+                            </div>
+                        </div>
+                        <div class="kpi-icon-badge cyan" data-bs-toggle="tooltip" title="Nhật ký sự kiện được đẩy lên máy chủ">
+                            <i class="bi bi-activity"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Avg Duration -->
+            <div class="col-12 col-sm-6 col-xl-3">
+                <div class="hud-card kpi-container">
+                    <div class="d-flex justify-content-between align-items-start">
+                        <div>
+                            <div class="kpi-tag help-hint" data-bs-toggle="tooltip" data-bs-placement="top" title="Thời gian chơi trung bình của một phiên game (tính trên các phiên đã kết thúc).">
+                                <span>Avg Session Time</span>
+                                <i class="bi bi-question-circle help-icon"></i>
+                            </div>
+                            <div class="kpi-value-text font-tech" id="kpiDuration">0 <span class="fs-6 text-muted fw-normal">phút</span></div>
+                            <div class="mt-2 d-flex align-items-center gap-1.5">
+                                <span class="metric-trend trend-info"><i class="bi bi-clock-history"></i> Completed Avg</span>
+                            </div>
+                        </div>
+                        <div class="kpi-icon-badge amber" data-bs-toggle="tooltip" title="Thời lượng trung bình mỗi trận">
+                            <i class="bi bi-stopwatch"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ======================================================== -->
+        <!-- VIEW 1: MAIN ANALYTICS HUB -->
+        <!-- ======================================================== -->
+        <div id="viewAnalytics">
+            <!-- Charts Row: Level Funnel & Event Distribution -->
+            <div class="row g-4 mb-4">
+                <!-- Level Performance Analytics -->
+                <div class="col-12 col-lg-8">
+                    <div class="hud-card p-4 h-100 d-flex flex-column">
+                        <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+                            <div>
+                                <div class="d-flex align-items-center gap-2">
+                                    <h6 class="fw-bold font-tech mb-0 text-white fs-5">
+                                        <i class="bi bi-bar-chart-steps text-primary me-1"></i> TIẾN ĐỘ & THỬ THÁCH MÀN CHƠI
+                                    </h6>
+                                    <span class="badge bg-primary bg-opacity-20 text-indigo border border-primary border-opacity-30 font-mono" style="font-size: 0.7rem;">LEVEL FUNNEL</span>
+                                </div>
+                                <p class="small text-muted mb-0 mt-1">Lượt Bắt đầu, Hoàn thành và Tử vong theo màn chơi</p>
+                            </div>
+
+                            <!-- Level Filter Chips -->
+                            <div class="d-flex align-items-center gap-1.5" id="levelFilterContainer">
+                                <span class="filter-chip active" onclick="filterLevel(null, this)">Tất cả màn</span>
+                            </div>
+                        </div>
+
+                        <!-- Level Chart Canvas -->
+                        <div class="flex-grow-1" style="min-height: 330px; position: relative;">
+                            <canvas id="levelChart"></canvas>
+                        </div>
+
+                        <!-- Summary Strip below Chart -->
+                        <div class="row g-2 mt-3 pt-3 border-top border-secondary border-opacity-10 text-center font-mono">
+                            <div class="col-4">
+                                <div class="small text-muted help-hint" data-bs-toggle="tooltip" data-bs-placement="top" title="Tỷ lệ % giữa số lần qua màn thành công trên tổng số lượt bắt đầu của các màn chơi.">
+                                    <span>Tỉ lệ vượt màn TB</span>
+                                    <i class="bi bi-info-circle help-icon"></i>
+                                </div>
+                                <div class="fw-bold text-emerald fs-6" id="avgClearRate">--%</div>
+                            </div>
+                            <div class="col-4">
+                                <div class="small text-muted help-hint" data-bs-toggle="tooltip" data-bs-placement="top" title="Màn chơi có số lượt tử vong cao nhất, cảnh báo điểm nghẽn độ khó cần Game Designer chú ý.">
+                                    <span>Màn tử vong nhiều nhất</span>
+                                    <i class="bi bi-info-circle help-icon"></i>
+                                </div>
+                                <div class="fw-bold text-danger fs-6" id="hardestLevel">--</div>
+                            </div>
+                            <div class="col-4">
+                                <div class="small text-muted help-hint" data-bs-toggle="tooltip" data-bs-placement="top" title="Tổng số màn chơi (Level) đã ghi nhận ít nhất một sự kiện telemetry từ game.">
+                                    <span>Màn chơi ghi nhận</span>
+                                    <i class="bi bi-info-circle help-icon"></i>
+                                </div>
+                                <div class="fw-bold text-white fs-6" id="totalLevelsTracked">0 Levels</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Event Distribution (Doughnut) -->
+                <div class="col-12 col-lg-4">
+                    <div class="hud-card p-4 h-100 d-flex flex-column">
+                        <div class="d-flex justify-content-between align-items-center mb-3">
+                            <div>
+                                <h6 class="fw-bold font-tech mb-0 text-white fs-5">
+                                    <i class="bi bi-pie-chart-fill text-cyan me-1"></i> PHÂN BỐ EVENT
+                                </h6>
+                                <p class="small text-muted mb-0 mt-1">Tỉ lệ kích hoạt sự kiện</p>
+                            </div>
+                            <span class="system-pill font-mono" id="totalEventsPill">0 events</span>
+                        </div>
+
+                        <div class="flex-grow-1 d-flex justify-content-center align-items-center" style="min-height: 270px; position: relative;">
+                            <canvas id="eventsChart"></canvas>
+                        </div>
+
+                        <!-- Top 3 Categories Bars -->
+                        <div id="topEventsList" class="mt-3 pt-3 border-top border-secondary border-opacity-10">
+                            <div class="text-center text-muted small py-2 font-mono">Đang tải phân bố sự kiện...</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Intelligent Insights & Automated Balancing Advice -->
+            <div class="hud-card p-3.5 mb-4 border-primary border-opacity-25" style="background: linear-gradient(135deg, rgba(99,102,241,0.08) 0%, rgba(6,182,212,0.04) 100%);">
+                <div class="d-flex align-items-center gap-3">
+                    <div class="p-2.5 rounded-3 bg-primary bg-opacity-20 text-primary fs-4">
+                        <i class="bi bi-cpu-fill"></i>
+                    </div>
+                    <div class="flex-grow-1">
+                        <div class="fw-bold text-white font-tech d-flex align-items-center gap-2">
+                            <span>HỆ THỐNG PHÂN TÍCH CÂN BẰNG GAME (AI BALANCING ENGINE)</span>
+                            <span class="badge bg-success bg-opacity-20 text-success border border-success border-opacity-30">Auto-Evaluated</span>
+                        </div>
+                        <div class="small text-secondary mt-0.5" id="aiBalancingReport">
+                            Đang phân tích tỉ lệ drop-off và độ khó giữa các màn...
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Row 3: Daily Trend & Live Sessions Table -->
+            <div class="row g-4">
+                <!-- Trend Chart -->
+                <div class="col-12 col-lg-5">
+                    <div class="hud-card p-4 h-100 d-flex flex-column">
+                        <div class="d-flex justify-content-between align-items-center mb-3">
+                            <div>
+                                <h6 class="fw-bold font-tech mb-0 text-white fs-5">
+                                    <i class="bi bi-graph-up text-emerald me-1"></i> XU HƯỚNG PHIÊN CHƠI
+                                </h6>
+                                <p class="small text-muted mb-0 mt-1">Lưu lượng mở game theo ngày</p>
+                            </div>
+                            <span class="system-pill font-mono">Dữ liệu hàng ngày</span>
+                        </div>
+
+                        <div class="flex-grow-1" style="min-height: 290px; position: relative;">
+                            <canvas id="sessionsDateChart"></canvas>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Sessions & Players Table with Instant Search -->
+                <div class="col-12 col-lg-7">
+                    <div class="hud-card p-4 h-100 d-flex flex-column">
+                        <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+                            <div>
+                                <div class="d-flex align-items-center gap-2">
+                                    <h6 class="fw-bold font-tech mb-0 text-white fs-5" id="tableHeaderTitle">
+                                        <i class="bi bi-terminal-split text-amber me-1"></i> NHẬT KÝ PHIÊN CHƠI
+                                    </h6>
+                                    <div class="d-flex align-items-center gap-1">
+                                        <button class="filter-chip active" id="btnModeSessions" onclick="switchTableMode('sessions')">
+                                            <i class="bi bi-joystick"></i> Phiên Chơi (<span id="countSessionsBadge">0</span>)
+                                        </button>
+                                        <button class="filter-chip" id="btnModePlayers" onclick="switchTableMode('players')">
+                                            <i class="bi bi-people-fill"></i> Người Chơi (<span id="countPlayersBadge">0</span>)
+                                        </button>
+                                    </div>
+                                </div>
+                                <p class="small text-muted mb-0 mt-1" id="tableHeaderSubtitle">Dữ liệu session và telemetry trực tiếp từ Unity Client</p>
+                            </div>
+
+                            <!-- Instant Search -->
+                            <div class="position-relative">
+                                <i class="bi bi-search text-muted position-absolute" style="left: 0.75rem; top: 50%; transform: translateY(-50%); font-size: 0.75rem;"></i>
+                                <input type="text" id="playerSearchInput" class="hud-search-box font-mono" placeholder="Tìm người chơi / session..." oninput="handleSearch()">
+                            </div>
+                        </div>
+
+                        <div class="table-responsive flex-grow-1" style="max-height: 290px;">
+                            <table class="table hud-table">
+                                <thead id="tableHeadContent">
+                                    <tr>
+                                        <th data-bs-toggle="tooltip" data-bs-placement="top" title="Mã định danh duy nhất của mỗi lượt chơi game (Session ID)"><span class="help-hint">Session</span></th>
+                                        <th data-bs-toggle="tooltip" data-bs-placement="top" title="Tên nhân vật / tài khoản người chơi tham gia trận"><span class="help-hint">Người Chơi</span></th>
+                                        <th data-bs-toggle="tooltip" data-bs-placement="top" title="Thời điểm bắt đầu trận đấu"><span class="help-hint">Thời Gian</span></th>
+                                        <th data-bs-toggle="tooltip" data-bs-placement="top" title="Tổng thời gian diễn ra phiên chơi (tính theo phút)"><span class="help-hint">Thời Lượng</span></th>
+                                        <th data-bs-toggle="tooltip" data-bs-placement="top" title="Victory (Chiến thắng), Defeat (Thua cuộc), hoặc In-Progress (Đang chơi)"><span class="help-hint">Kết Quả</span></th>
+                                        <th class="text-end" data-bs-toggle="tooltip" data-bs-placement="top" title="Tổng số sự kiện telemetry được ghi nhận trong trận này"><span class="help-hint">Events</span></th>
+                                    </tr>
+                                </thead>
+                                <tbody id="recentSessionsBody">
+                                    <tr>
+                                        <td colspan="6" class="text-center text-muted py-5 font-mono">
+                                            <div class="spinner-border spinner-border-sm text-primary mb-2" role="status"></div>
+                                            <div>Đang kết nối Telemetry Feed...</div>
+                                        </td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ======================================================== -->
+        <!-- VIEW 2: 2D SPATIAL HEATMAP (TACTICAL ARENA MINIMAP) -->
+        <!-- ======================================================== -->
+        <div id="viewHeatmap" class="d-none">
+            <div class="row g-4">
+                <div class="col-12 col-lg-8">
+                    <div class="hud-card p-4">
+                        <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+                            <div>
+                                <h5 class="fw-bold font-tech mb-0 text-white d-flex align-items-center gap-2">
+                                    <i class="bi bi-radar text-cyan"></i> BẢN ĐỒ NHIỆT KHÔNG GIAN 2D (SPATIAL DEATH & ACTION HEATMAP)
+                                </h5>
+                                <p class="small text-muted mb-0">Mô phỏng vị trí tử vong và mật độ hành động của người chơi trên tọa độ bản đồ màn chơi</p>
+                            </div>
+                            <div class="d-flex align-items-center gap-2">
+                                <button class="filter-chip active" id="btnMapLevel1" onclick="switchMapLevel(1, this)">Arena Màn 1</button>
+                                <button class="filter-chip" id="btnMapLevel2" onclick="switchMapLevel(2, this)">Arena Màn 2</button>
+                                <button class="filter-chip" id="btnMapLevel3" onclick="switchMapLevel(3, this)">Boss Room Màn 3</button>
+                            </div>
+                        </div>
+
+                        <!-- 2D Canvas Minimap -->
+                        <div class="position-relative">
+                            <canvas id="tacticalMapCanvas" width="800" height="400"></canvas>
+                            <div class="position-absolute bottom-0 start-0 m-3 px-3 py-1.5 rounded-3 font-mono small" style="background: rgba(0,0,0,0.7); backdrop-filter: blur(8px); border: 1px solid rgba(255,255,255,0.1);">
+                                <span class="text-danger fw-bold help-hint" data-bs-toggle="tooltip" data-bs-placement="top" title="Vùng nhiệt tập trung nhiều ca tử vong nhất, thể hiện cạm bẫy hoặc quái vật nguy hiểm">💀 Death Hotspots</span> • 
+                                <span class="text-emerald fw-bold help-hint" data-bs-toggle="tooltip" data-bs-placement="top" title="Vị trí điểm xuất phát hoặc điểm lưu checkpoint của người chơi">🚩 Checkpoints</span> • 
+                                <span class="text-warning fw-bold help-hint" data-bs-toggle="tooltip" data-bs-placement="top" title="Vị trí người chơi nhặt được tài nguyên, bình máu hoặc vật phẩm thưởng">💎 Item Pickups</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="col-12 col-lg-4">
+                    <div class="hud-card p-4 h-100 d-flex flex-column">
+                        <h6 class="fw-bold font-tech text-white mb-3 d-flex align-items-center gap-2">
+                            <i class="bi bi-crosshair text-danger"></i> TỌA ĐỘ TỬ VONG NGUY HIỂM NHẤT
+                        </h6>
+                        <div class="small text-muted mb-3">Khu vực có mật độ chết cao nhất cần đặt thêm bình máu hoặc giảm sát thương bẫy:</div>
+
+                        <div class="d-flex flex-column gap-2.5 flex-grow-1" id="heatmapClusterList">
+                            <!-- Populated dynamically -->
+                        </div>
+
+                        <div class="mt-3 pt-3 border-top border-secondary border-opacity-10 text-center">
+                            <button class="hud-btn hud-btn-primary w-100 justify-content-center" onclick="generateSimulatedDeaths()">
+                                <i class="bi bi-dice-5"></i>
+                                <span>Thêm Tọa Độ Mô Phỏng Mới</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ======================================================== -->
+        <!-- VIEW 3: LIVE TELEMETRY SIMULATOR & BOT MATCH RUNNER -->
+        <!-- ======================================================== -->
+        <div id="viewSimulator" class="d-none">
+            <div class="row g-4">
+                <div class="col-12 col-lg-6">
+                    <div class="hud-card p-4 h-100">
+                        <h5 class="fw-bold font-tech text-white mb-2 d-flex align-items-center gap-2">
+                            <i class="bi bi-robot text-emerald"></i> TRÌNH GIẢ LẬP SỰ KIỆN GAME (TELEMETRY BOT SIMULATOR)
+                        </h5>
+                        <p class="small text-muted mb-4">
+                            Tự động phát sinh người chơi ảo, mở session, gửi các sự kiện <code>level_start</code>, <code>player_dead</code>, <code>level_complete</code> trực tiếp vào API để kiểm thử hệ thống mà không cần bật Unity.
+                        </p>
+
+                        <div class="mb-3">
+                            <label class="small text-muted font-mono mb-1">CHỌN KỊCH BẢN TRẬN ĐẤU (BOT SCENARIO)</label>
+                            <select id="simScenario" class="form-select hud-search-box font-mono" style="padding-left: 1rem;">
+                                <option value="balanced">Trận Cân Bằng (Vượt Màn 1, 1 Lần Chết ở Màn 2, Hoàn Thành Màn 2 - Victory)</option>
+                                <option value="hardcore">Trận Khắc Nghiệt (Chết 3 lần ở Màn 2, Thất Bại - Defeat)</option>
+                                <option value="speedrun">Trận Tốc Biến (Clear liên tục Màn 1, 2, 3 không chết - Perfect Win)</option>
+                            </select>
+                        </div>
+
+                        <div class="mb-4">
+                            <label class="small text-muted font-mono mb-1">TÊN BOT TỰ ĐỘNG</label>
+                            <input type="text" id="simBotName" class="hud-search-box font-mono w-100" style="padding-left: 1rem;" placeholder="Để trống để sinh tên ngẫu nhiên (Vd: CyberNinja_42)">
+                        </div>
+
+                        <div class="d-flex gap-2">
+                            <button class="hud-btn hud-btn-emerald py-2.5 px-3 flex-grow-1 justify-content-center" id="btnRunSimulation" onclick="runCustomBotSimulation()">
+                                <i class="bi bi-play-circle-fill fs-6"></i>
+                                <span class="fs-6 fw-bold">KHỞI CHẠY TRẬN ĐẤU MÔ PHỎNG</span>
+                            </button>
+                            <button class="hud-btn py-2.5 px-3" onclick="clearTerminal()">
+                                <i class="bi bi-trash"></i>
+                                <span>Xóa Log</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="col-12 col-lg-6">
+                    <div class="hud-card p-4 h-100 d-flex flex-column">
+                        <div class="d-flex justify-content-between align-items-center mb-2">
+                            <h6 class="fw-bold font-tech text-white mb-0 d-flex align-items-center gap-2">
+                                <i class="bi bi-terminal-fill text-cyan"></i> LIVE INGESTION LOG STREAM
+                            </h6>
+                            <span class="badge bg-secondary bg-opacity-25 text-light font-mono">STDOUT</span>
+                        </div>
+                        <p class="small text-muted mb-2">Nhật ký các request POST/PUT API gửi trực tiếp từ client</p>
+
+                        <div class="terminal-window flex-grow-1" id="simTerminal">
+                            <div class="terminal-line"><span class="term-ts">[SYSTEM READY]</span> Aegis Telemetry Simulation Engine Initialized. Sẵn sàng tạo event...</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Footer -->
+        <footer class="mt-5 py-3 text-center text-muted small border-top border-secondary border-opacity-10 font-mono" style="font-size: 0.75rem;">
+            AEGIS TELEMETRY HUB • BÁO CÁO ĐỒ ÁN THỰC TẬP • ASP.NET CORE (.NET 10) & UNITY 6 ENGINE
+        </footer>
+
+    </div>
+
+    <!-- Session Details Modal -->
+    <div class="modal fade" id="sessionModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content hud-modal">
+                <div class="modal-header border-bottom border-secondary border-opacity-25 pb-3">
+                    <h6 class="modal-title font-tech fw-bold text-white d-flex align-items-center gap-2">
+                        <i class="bi bi-info-circle-fill text-primary"></i> CHI TIẾT PHIÊN CHƠI
+                    </h6>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body py-4" id="modalSessionBody"></div>
+                <div class="modal-footer border-top border-secondary border-opacity-25 pt-2">
+                    <button type="button" class="hud-btn" data-bs-dismiss="modal">Đóng</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Bootstrap 5 JS -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+
+    <!-- Core Scripts -->
+    <script>
+        // -------------------------------------------------------------
+        // 1. Ambient Background Particles
+        // -------------------------------------------------------------
+        const bgCanvas = document.getElementById('bgCanvas');
+        const bgCtx = bgCanvas.getContext('2d');
+        let particles = [];
+
+        function resizeBgCanvas() {
+            bgCanvas.width = window.innerWidth;
+            bgCanvas.height = window.innerHeight;
+        }
+        window.addEventListener('resize', resizeBgCanvas);
+        resizeBgCanvas();
+
+        class Particle {
+            constructor() {
+                this.x = Math.random() * bgCanvas.width;
+                this.y = Math.random() * bgCanvas.height;
+                this.vx = (Math.random() - 0.5) * 0.35;
+                this.vy = (Math.random() - 0.5) * 0.35;
+                this.radius = Math.random() * 1.5 + 0.5;
+            }
+            update() {
+                this.x += this.vx;
+                this.y += this.vy;
+                if (this.x < 0 || this.x > bgCanvas.width) this.vx *= -1;
+                if (this.y < 0 || this.y > bgCanvas.height) this.vy *= -1;
+            }
+            draw() {
+                bgCtx.beginPath();
+                bgCtx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+                bgCtx.fillStyle = 'rgba(99, 102, 241, 0.4)';
+                bgCtx.fill();
+            }
+        }
+
+        for (let i = 0; i < 40; i++) particles.push(new Particle());
+
+        function animateBg() {
+            bgCtx.clearRect(0, 0, bgCanvas.width, bgCanvas.height);
+            for (let i = 0; i < particles.length; i++) {
+                particles[i].update();
+                particles[i].draw();
+                for (let j = i + 1; j < particles.length; j++) {
+                    const dist = Math.hypot(particles[i].x - particles[j].x, particles[i].y - particles[j].y);
+                    if (dist < 110) {
+                        bgCtx.beginPath();
+                        bgCtx.moveTo(particles[i].x, particles[i].y);
+                        bgCtx.lineTo(particles[j].x, particles[j].y);
+                        bgCtx.strokeStyle = `rgba(99, 102, 241, ${0.12 * (1 - dist / 110)})`;
+                        bgCtx.lineWidth = 0.6;
+                        bgCtx.stroke();
+                    }
+                }
+            }
+            requestAnimationFrame(animateBg);
+        }
+        animateBg();
+
+        // -------------------------------------------------------------
+        // 2. Web Audio API Sci-Fi Sound FX
+        // -------------------------------------------------------------
+        let audioCtx = null;
+        let isAudioEnabled = false;
+
+        function toggleAudio() {
+            isAudioEnabled = !isAudioEnabled;
+            const icon = document.getElementById('soundIcon');
+            if (isAudioEnabled) {
+                if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                icon.className = 'bi bi-volume-up-fill text-primary';
+                playSciFiTone(880, 'sine', 0.1);
+            } else {
+                icon.className = 'bi bi-volume-mute text-muted';
+            }
+        }
+
+        function playSciFiTone(freq = 600, type = 'sine', duration = 0.08) {
+            if (!isAudioEnabled || !audioCtx) return;
+            try {
+                if (audioCtx.state === 'suspended') audioCtx.resume();
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+                osc.type = type;
+                osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(freq * 0.5, audioCtx.currentTime + duration);
+                gain.gain.setValueAtTime(0.04, audioCtx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + duration);
+                osc.connect(gain);
+                gain.connect(audioCtx.destination);
+                osc.start();
+                osc.stop(audioCtx.currentTime + duration);
+            } catch (e) {}
+        }
+
+        // -------------------------------------------------------------
+        // 3. View Switcher Logic
+        // -------------------------------------------------------------
+        function switchView(viewName) {
+            playSciFiTone(750, 'sine', 0.06);
+            document.querySelectorAll('.hud-tab-btn').forEach(b => b.classList.remove('active'));
+            document.getElementById('viewAnalytics').classList.add('d-none');
+            document.getElementById('viewHeatmap').classList.add('d-none');
+            document.getElementById('viewSimulator').classList.add('d-none');
+
+            if (viewName === 'analytics') {
+                document.getElementById('tabBtnAnalytics').classList.add('active');
+                document.getElementById('viewAnalytics').classList.remove('d-none');
+            } else if (viewName === 'heatmap') {
+                document.getElementById('tabBtnHeatmap').classList.add('active');
+                document.getElementById('viewHeatmap').classList.remove('d-none');
+                renderTacticalMap();
+            } else if (viewName === 'simulator') {
+                document.getElementById('tabBtnSimulator').classList.add('active');
+                document.getElementById('viewSimulator').classList.remove('d-none');
+            }
+        }
+
+        // -------------------------------------------------------------
+        // 4. Chart.js & Analytics Data Fetching
+        // -------------------------------------------------------------
+        Chart.defaults.color = '#94a3b8';
+        Chart.defaults.font.family = "'Plus Jakarta Sans', system-ui, sans-serif";
+        Chart.defaults.plugins.tooltip.backgroundColor = 'rgba(11, 15, 25, 0.95)';
+        Chart.defaults.plugins.tooltip.titleColor = '#f8fafc';
+        Chart.defaults.plugins.tooltip.borderColor = 'rgba(99, 102, 241, 0.4)';
+        Chart.defaults.plugins.tooltip.borderWidth = 1;
+        Chart.defaults.plugins.tooltip.padding = 12;
+        Chart.defaults.plugins.tooltip.cornerRadius = 10;
+
+        let levelChartInst = null;
+        let eventsChartInst = null;
+        let sessionsDateChartInst = null;
+        let rawLevelData = [];
+        let rawRecentSessions = [];
+        let rawPlayersList = [];
+        let currentTableMode = 'sessions';
+        let autoRefreshCountdown = 20;
+
+        setInterval(() => {
+            autoRefreshCountdown--;
+            const timerEl = document.getElementById('autoTimer');
+            if (timerEl) timerEl.textContent = `${autoRefreshCountdown}s`;
+            if (autoRefreshCountdown <= 0) {
+                loadAllData();
+                autoRefreshCountdown = 20;
+            }
+        }, 1000);
+
+        function manualRefresh() {
+            playSciFiTone(900, 'triangle', 0.1);
+            autoRefreshCountdown = 20;
+            loadAllData();
+        }
+
+        function initTooltips() {
+            setTimeout(() => {
+                const tooltipTriggerList = document.querySelectorAll('[data-bs-toggle="tooltip"]');
+                tooltipTriggerList.forEach(el => {
+                    const existing = bootstrap.Tooltip.getInstance(el);
+                    if (existing) existing.dispose();
+                    new bootstrap.Tooltip(el, {
+                        boundary: document.body,
+                        fallbackPlacements: ['bottom', 'top', 'right', 'left']
+                    });
+                });
+            }, 100);
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            loadAllData();
+            initTacticalMap();
+            initTooltips();
+        });
+
+        async function loadAllData() {
+            const spinner = document.getElementById('refreshSpinner');
+            const alertBox = document.getElementById('statusAlert');
+            const lastSync = document.getElementById('lastSyncTime');
+
+            if (spinner) spinner.classList.add('bi-spin');
+
+            try {
+                await Promise.all([
+                    fetchOverview(),
+                    fetchLevelStats(),
+                    fetchEventsDistribution(),
+                    fetchSessionsByDate(),
+                    fetchRecentSessions(),
+                    fetchPlayers()
+                ]);
+
+                alertBox.classList.add('d-none');
+                const now = new Date();
+                lastSync.textContent = `Sync: ${now.toLocaleTimeString('vi-VN')}`;
+                initTooltips();
+            } catch (err) {
+                console.error("Telemetry API error:", err);
+                alertBox.classList.remove('d-none');
+                lastSync.textContent = `Lỗi Sync lúc ${new Date().toLocaleTimeString('vi-VN')}`;
+            } finally {
+                if (spinner) spinner.classList.remove('bi-spin');
+            }
+        }
+
+        async function fetchOverview() {
+            const res = await fetch('/api/Analytics/overview');
+            if (!res.ok) throw new Error('Overview fail');
+            const data = await res.json();
+
+            animateCounter('kpiPlayers', data.totalPlayers || 0);
+            animateCounter('kpiSessions', data.totalSessions || 0);
+            animateCounter('kpiEvents', data.totalEvents || 0);
+            document.getElementById('kpiDuration').innerHTML = `${data.averageSessionDurationMinutes ?? 0} <span class="fs-6 text-muted fw-normal">phút</span>`;
+        }
+
+        async function fetchLevelStats() {
+            const res = await fetch('/api/Analytics/levels');
+            if (!res.ok) throw new Error('Levels fail');
+            rawLevelData = await res.json();
+
+            renderLevelFilterChips(rawLevelData);
+            renderLevelChart(rawLevelData);
+            evaluateAiBalancing(rawLevelData);
+
+            if (rawLevelData.length > 0) {
+                const avgRate = Math.round(rawLevelData.reduce((acc, c) => acc + c.completionRatePercent, 0) / rawLevelData.length);
+                document.getElementById('avgClearRate').textContent = `${avgRate}%`;
+
+                const hardest = [...rawLevelData].sort((a, b) => b.deaths - a.deaths)[0];
+                document.getElementById('hardestLevel').textContent = hardest ? `Màn ${hardest.level} (${hardest.deaths} 💀)` : '--';
+                document.getElementById('totalLevelsTracked').textContent = `${rawLevelData.length} Màn Chơi`;
+            }
+        }
+
+        function renderLevelFilterChips(data) {
+            const container = document.getElementById('levelFilterContainer');
+            if (!container) return;
+            let html = `<span class="filter-chip active" onclick="filterLevel(null, this)">Tất cả màn</span>`;
+            data.forEach(d => {
+                html += `<span class="filter-chip" onclick="filterLevel(${d.level}, this)">Màn ${d.level}</span>`;
+            });
+            container.innerHTML = html;
+        }
+
+        function filterLevel(level, elem) {
+            playSciFiTone(700, 'sine', 0.05);
+            document.querySelectorAll('.filter-chip').forEach(c => c.classList.remove('active'));
+            elem.classList.add('active');
+
+            if (level === null) {
+                renderLevelChart(rawLevelData);
+            } else {
+                const single = rawLevelData.filter(d => d.level === level);
+                renderLevelChart(single);
+            }
+        }
+
+        function renderLevelChart(data) {
+            const ctx = document.getElementById('levelChart').getContext('2d');
+            const labels = data.map(d => `Màn ${d.level}`);
+            const starts = data.map(d => d.starts);
+            const completions = data.map(d => d.completions);
+            const deaths = data.map(d => d.deaths);
+
+            if (levelChartInst) levelChartInst.destroy();
+
+            const gradStarts = ctx.createLinearGradient(0, 0, 0, 320);
+            gradStarts.addColorStop(0, 'rgba(99, 102, 241, 0.95)');
+            gradStarts.addColorStop(1, 'rgba(99, 102, 241, 0.15)');
+
+            const gradWins = ctx.createLinearGradient(0, 0, 0, 320);
+            gradWins.addColorStop(0, 'rgba(16, 185, 129, 0.95)');
+            gradWins.addColorStop(1, 'rgba(16, 185, 129, 0.15)');
+
+            const gradDeaths = ctx.createLinearGradient(0, 0, 0, 320);
+            gradDeaths.addColorStop(0, 'rgba(244, 63, 94, 0.95)');
+            gradDeaths.addColorStop(1, 'rgba(244, 63, 94, 0.15)');
+
+            levelChartInst = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: labels.length ? labels : ['Chưa có màn'],
+                    datasets: [
+                        {
+                            label: 'Bắt đầu (Starts)',
+                            data: starts.length ? starts : [0],
+                            backgroundColor: gradStarts,
+                            borderColor: '#818cf8',
+                            borderWidth: 1.5,
+                            borderRadius: 6,
+                            barPercentage: 0.65
+                        },
+                        {
+                            label: 'Hoàn thành (Clears)',
+                            data: completions.length ? completions : [0],
+                            backgroundColor: gradWins,
+                            borderColor: '#34d399',
+                            borderWidth: 1.5,
+                            borderRadius: 6,
+                            barPercentage: 0.65
+                        },
+                        {
+                            label: 'Tử vong (Deaths)',
+                            data: deaths.length ? deaths : [0],
+                            backgroundColor: gradDeaths,
+                            borderColor: '#fb7185',
+                            borderWidth: 1.5,
+                            borderRadius: 6,
+                            barPercentage: 0.65
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        x: { grid: { color: 'rgba(255, 255, 255, 0.04)' }, ticks: { color: '#94a3b8', font: { weight: '600' } } },
+                        y: { beginAtZero: true, grid: { color: 'rgba(255, 255, 255, 0.04)' }, ticks: { color: '#64748b' } }
+                    },
+                    plugins: {
+                        legend: { position: 'top', labels: { color: '#e2e8f0', usePointStyle: true, pointStyle: 'circle', padding: 14 } }
+                    }
+                }
+            });
+        }
+
+        // Automated Game Balancing Recommendation
+        function evaluateAiBalancing(data) {
+            const reportEl = document.getElementById('aiBalancingReport');
+            if (!data || data.length === 0) {
+                reportEl.innerHTML = `<span class="text-muted">Chưa đủ dữ liệu màn chơi để đưa ra đề xuất.</span>`;
+                return;
+            }
+
+            let hardest = null;
+            let maxDeaths = -1;
+            data.forEach(d => {
+                if (d.deaths > maxDeaths) {
+                    maxDeaths = d.deaths;
+                    hardest = d;
+                }
+            });
+
+            if (hardest && hardest.deaths > 3) {
+                reportEl.innerHTML = `
+                    <span class="text-warning fw-semibold"><i class="bi bi-exclamation-triangle"></i> Cảnh báo chênh lệch độ khó:</span> 
+                    Màn ${hardest.level} đang có tới <strong>${hardest.deaths} lượt tử vong</strong> (tỉ lệ hoàn thành chỉ ${hardest.completionRatePercent}%). 
+                    <em>Khuyến nghị Game Designer:</em> Xem xét tăng máu người chơi hoặc dãn khoảng cách bẫy ở Màn ${hardest.level}.
+                `;
+            } else {
+                reportEl.innerHTML = `
+                    <span class="text-success fw-semibold"><i class="bi bi-check-circle"></i> Trạng thái cân bằng lý tưởng:</span> 
+                    Tỉ lệ hoàn thành các màn chơi dao động ổn định. Nhịp độ game (Pacing) phù hợp với người chơi mới.
+                `;
+            }
+        }
+
+        async function fetchEventsDistribution() {
+            const res = await fetch('/api/Analytics/events-distribution');
+            if (!res.ok) throw new Error('Events fail');
+            const data = await res.json();
+
+            const total = data.reduce((a, b) => a + b.count, 0);
+            document.getElementById('totalEventsPill').textContent = `${total.toLocaleString()} logs`;
+
+            const labels = data.map(d => d.eventType);
+            const counts = data.map(d => d.count);
+            const colors = ['#6366f1', '#06b6d4', '#10b981', '#f59e0b', '#f43f5e', '#8b5cf6', '#ec4899', '#14b8a6'];
+
+            if (eventsChartInst) eventsChartInst.destroy();
+
+            const ctx = document.getElementById('eventsChart').getContext('2d');
+            eventsChartInst = new Chart(ctx, {
+                type: 'doughnut',
+                data: {
+                    labels: labels.length ? labels : ['Chưa có'],
+                    datasets: [{
+                        data: counts.length ? counts : [1],
+                        backgroundColor: colors.slice(0, counts.length || 1),
+                        borderWidth: 3,
+                        borderColor: '#0a0e18',
+                        hoverOffset: 8
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    cutout: '72%',
+                    plugins: {
+                        legend: { position: 'bottom', labels: { color: '#cbd5e1', usePointStyle: true, pointStyle: 'circle', padding: 8, font: { size: 10 } } }
+                    }
+                }
+            });
+
+            const topListEl = document.getElementById('topEventsList');
+            if (topListEl) {
+                if (data.length === 0) {
+                    topListEl.innerHTML = `<div class="text-center text-muted small py-2">Chưa ghi nhận event nào.</div>`;
+                } else {
+                    topListEl.innerHTML = data.slice(0, 3).map((item, idx) => {
+                        const percent = total > 0 ? Math.round((item.count / total) * 100) : 0;
+                        return `
+                            <div class="mb-2">
+                                <div class="d-flex justify-content-between small font-mono mb-1">
+                                    <span class="text-white">${escapeHtml(item.eventType)}</span>
+                                    <span class="text-muted">${item.count} (${percent}%)</span>
+                                </div>
+                                <div class="progress" style="height: 4px; background: rgba(255,255,255,0.06); border-radius: 10px;">
+                                    <div class="progress-bar" style="width: ${percent}%; background-color: ${colors[idx % colors.length]}; border-radius: 10px;"></div>
+                                </div>
+                            </div>
+                        `;
+                    }).join('');
+                }
+            }
+        }
+
+        async function fetchSessionsByDate() {
+            const res = await fetch('/api/Analytics/sessions-by-date');
+            if (!res.ok) throw new Error('Sessions date fail');
+            const data = await res.json();
+
+            const labels = data.map(d => d.date);
+            const counts = data.map(d => d.sessionCount);
+
+            if (sessionsDateChartInst) sessionsDateChartInst.destroy();
+
+            const ctx = document.getElementById('sessionsDateChart').getContext('2d');
+            const gradArea = ctx.createLinearGradient(0, 0, 0, 260);
+            gradArea.addColorStop(0, 'rgba(16, 185, 129, 0.4)');
+            gradArea.addColorStop(1, 'rgba(16, 185, 129, 0.0)');
+
+            sessionsDateChartInst = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels.length ? labels : ['Hôm nay'],
+                    datasets: [{
+                        label: 'Phiên Chơi',
+                        data: counts.length ? counts : [0],
+                        borderColor: '#10b981',
+                        borderWidth: 2.5,
+                        backgroundColor: gradArea,
+                        fill: true,
+                        tension: 0.35,
+                        pointBackgroundColor: '#10b981',
+                        pointBorderColor: '#05070c',
+                        pointBorderWidth: 2,
+                        pointRadius: 4,
+                        pointHoverRadius: 7
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        x: { grid: { display: false }, ticks: { color: '#94a3b8' } },
+                        y: { beginAtZero: true, grid: { color: 'rgba(255, 255, 255, 0.04)' }, ticks: { color: '#64748b', stepSize: 1 } }
+                    },
+                    plugins: { legend: { display: false } }
+                }
+            });
+        }
+
+        async function fetchRecentSessions() {
+            const res = await fetch('/api/Analytics/recent-sessions?limit=25');
+            if (!res.ok) throw new Error('Recent sessions fail');
+            rawRecentSessions = await res.json();
+            const badgeEl = document.getElementById('countSessionsBadge');
+            if (badgeEl) badgeEl.textContent = rawRecentSessions.length;
+            if (currentTableMode === 'sessions') {
+                renderSessionsTable(rawRecentSessions);
+            }
+        }
+
+        async function fetchPlayers() {
+            try {
+                const res = await fetch('/api/Players');
+                if (!res.ok) return;
+                rawPlayersList = await res.json();
+                const badgeEl = document.getElementById('countPlayersBadge');
+                if (badgeEl) badgeEl.textContent = rawPlayersList.length;
+                if (currentTableMode === 'players') {
+                    renderPlayersTable(rawPlayersList);
+                }
+            } catch (e) {
+                console.error("Fetch players failed:", e);
+            }
+        }
+
+        function switchTableMode(mode) {
+            playSciFiTone(750, 'sine', 0.05);
+            currentTableMode = mode;
+            const btnSessions = document.getElementById('btnModeSessions');
+            const btnPlayers = document.getElementById('btnModePlayers');
+            const thead = document.getElementById('tableHeadContent');
+            const title = document.getElementById('tableHeaderTitle');
+            const subtitle = document.getElementById('tableHeaderSubtitle');
+            const searchInput = document.getElementById('playerSearchInput');
+            if (searchInput) searchInput.value = '';
+
+            if (mode === 'sessions') {
+                btnSessions.classList.add('active');
+                btnPlayers.classList.remove('active');
+                title.innerHTML = '<i class="bi bi-terminal-split text-amber me-1"></i> NHẬT KÝ PHIÊN CHƠI';
+                subtitle.textContent = 'Dữ liệu session và telemetry trực tiếp từ Unity Client';
+                thead.innerHTML = `
+                    <tr>
+                        <th data-bs-toggle="tooltip" data-bs-placement="top" title="Mã định danh duy nhất của mỗi lượt chơi game (Session ID)"><span class="help-hint">Session</span></th>
+                        <th data-bs-toggle="tooltip" data-bs-placement="top" title="Tên nhân vật / tài khoản người chơi tham gia trận"><span class="help-hint">Người Chơi</span></th>
+                        <th data-bs-toggle="tooltip" data-bs-placement="top" title="Thời điểm bắt đầu trận đấu"><span class="help-hint">Thời Gian</span></th>
+                        <th data-bs-toggle="tooltip" data-bs-placement="top" title="Tổng thời gian diễn ra phiên chơi (tính theo phút)"><span class="help-hint">Thời Lượng</span></th>
+                        <th data-bs-toggle="tooltip" data-bs-placement="top" title="Victory (Chiến thắng), Defeat (Thua cuộc), hoặc In-Progress (Đang chơi)"><span class="help-hint">Kết Quả</span></th>
+                        <th class="text-end" data-bs-toggle="tooltip" data-bs-placement="top" title="Tổng số sự kiện telemetry được ghi nhận trong trận này"><span class="help-hint">Events</span></th>
+                    </tr>
+                `;
+                renderSessionsTable(rawRecentSessions);
+            } else {
+                btnPlayers.classList.add('active');
+                btnSessions.classList.remove('active');
+                title.innerHTML = '<i class="bi bi-people-fill text-primary me-1"></i> DANH SÁCH NGƯỜI CHƠI (ALL PLAYERS)';
+                subtitle.textContent = 'Toàn bộ tài khoản người chơi đã từng tham gia hệ thống';
+                thead.innerHTML = `
+                    <tr>
+                        <th data-bs-toggle="tooltip" data-bs-placement="top" title="Mã định danh duy nhất của người chơi trong hệ thống Database"><span class="help-hint">Player ID</span></th>
+                        <th data-bs-toggle="tooltip" data-bs-placement="top" title="Tên định danh người chơi đăng ký trong game"><span class="help-hint">Tên Người Chơi</span></th>
+                        <th data-bs-toggle="tooltip" data-bs-placement="top" title="Thời điểm tài khoản được tạo lần đầu tiên"><span class="help-hint">Ngày Tham Gia</span></th>
+                        <th data-bs-toggle="tooltip" data-bs-placement="top" title="Tổng số trận/phiên game mà người này đã từng tham gia"><span class="help-hint">Số Phiên Đã Chơi</span></th>
+                        <th data-bs-toggle="tooltip" data-bs-placement="top" title="Trạng thái tài khoản người chơi đã được kích hoạt"><span class="help-hint">Trạng Thái</span></th>
+                        <th class="text-end" data-bs-toggle="tooltip" data-bs-placement="top" title="Các thao tác nhanh liên quan đến tài khoản này"><span class="help-hint">Hành Động</span></th>
+                    </tr>
+                `;
+                renderPlayersTable(rawPlayersList);
+            }
+            initTooltips();
+        }
+
+        function handleSearch() {
+            const query = (document.getElementById('playerSearchInput').value || '').trim().toLowerCase();
+            if (currentTableMode === 'sessions') {
+                if (!query) {
+                    renderSessionsTable(rawRecentSessions);
+                    return;
+                }
+                const filtered = rawRecentSessions.filter(s => 
+                    (s.playerName || '').toLowerCase().includes(query) ||
+                    (s.sessionId + '').includes(query) ||
+                    (s.result || '').toLowerCase().includes(query)
+                );
+                renderSessionsTable(filtered);
+            } else {
+                if (!query) {
+                    renderPlayersTable(rawPlayersList);
+                    return;
+                }
+                const filtered = rawPlayersList.filter(p => 
+                    (p.playerName || '').toLowerCase().includes(query) ||
+                    (p.playerId + '').includes(query)
+                );
+                renderPlayersTable(filtered);
+            }
+        }
+
+        function renderPlayersTable(list) {
+            const tbody = document.getElementById('recentSessionsBody');
+            if (!list || list.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="6" class="text-center text-muted py-4 font-mono">Chưa có người chơi nào đăng ký trong Database.</td></tr>`;
+                return;
+            }
+
+            tbody.innerHTML = list.map(p => {
+                const joinDate = new Date(p.createdAt).toLocaleDateString('vi-VN', {
+                    day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit'
+                });
+
+                return `
+                    <tr>
+                        <td class="font-mono text-muted">#${p.playerId}</td>
+                        <td class="fw-bold text-white">
+                            <span class="d-inline-flex align-items-center gap-1.5">
+                                <i class="bi bi-person-badge-fill text-primary"></i>
+                                ${escapeHtml(p.playerName)}
+                            </span>
+                        </td>
+                        <td class="small text-muted font-mono">${joinDate}</td>
+                        <td class="font-mono">
+                            <span class="badge bg-primary bg-opacity-20 text-indigo border border-primary border-opacity-30 px-2 py-1">
+                                ${p.totalSessions || 0} trận
+                            </span>
+                        </td>
+                        <td>
+                            <span class="badge bg-success bg-opacity-15 text-emerald border border-success border-opacity-25 px-2 py-0.5" style="font-size: 0.72rem;">
+                                <i class="bi bi-check2-circle"></i> Registered
+                            </span>
+                        </td>
+                        <td class="text-end">
+                            <button class="hud-btn" style="padding: 0.25rem 0.6rem; font-size: 0.75rem;" onclick="filterPlayerSessions('${escapeHtml(p.playerName)}')">
+                                <i class="bi bi-funnel"></i> Xem Trận
+                            </button>
+                        </td>
+                    </tr>
+                `;
+            }).join('');
+        }
+
+        function filterPlayerSessions(playerName) {
+            switchTableMode('sessions');
+            const searchInput = document.getElementById('playerSearchInput');
+            if (searchInput) {
+                searchInput.value = playerName;
+                handleSearch();
+            }
+        }
+
+        function renderSessionsTable(list) {
+            const tbody = document.getElementById('recentSessionsBody');
+            if (!list || list.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="6" class="text-center text-muted py-4 font-mono">Không tìm thấy dữ liệu phiên chơi phù hợp.</td></tr>`;
+                return;
+            }
+
+            tbody.innerHTML = list.map(s => {
+                let badgeClass = 'badge-play';
+                let badgeIcon = 'bi-stopwatch';
+                let resText = s.result || 'In-Progress';
+                const lower = resText.toLowerCase();
+
+                if (lower === 'win' || lower === 'completed' || lower === 'thắng' || lower === 'victory') {
+                    badgeClass = 'badge-win';
+                    badgeIcon = 'bi-trophy-fill';
+                    resText = 'Victory';
+                } else if (lower === 'loss' || lower === 'dead' || lower === 'thua' || lower === 'defeat') {
+                    badgeClass = 'badge-loss';
+                    badgeIcon = 'bi-skull-fill';
+                    resText = 'Defeat';
+                }
+
+                const timeStr = new Date(s.startTime).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }) 
+                    + ' ' + new Date(s.startTime).toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit' });
+
+                const duration = s.durationMinutes != null ? `${s.durationMinutes}m` : '--';
+
+                return `
+                    <tr onclick="inspectSession(${s.sessionId})">
+                        <td class="font-mono text-muted">#${s.sessionId}</td>
+                        <td class="fw-semibold text-white">
+                            <span class="d-inline-flex align-items-center gap-1.5">
+                                <i class="bi bi-person-circle text-primary"></i>
+                                ${escapeHtml(s.playerName)}
+                            </span>
+                        </td>
+                        <td class="small text-muted font-mono">${timeStr}</td>
+                        <td class="font-mono text-light">${duration}</td>
+                        <td><span class="badge-match ${badgeClass}"><i class="bi ${badgeIcon}"></i> ${escapeHtml(resText)}</span></td>
+                        <td class="text-end font-mono">
+                            <span class="badge bg-secondary bg-opacity-25 border border-secondary border-opacity-25 text-white px-2 py-1">
+                                ${s.totalEvents} evt
+                            </span>
+                        </td>
+                    </tr>
+                `;
+            }).join('');
+        }
+
+        function inspectSession(sessionId) {
+            playSciFiTone(1000, 'sine', 0.08);
+            const s = rawRecentSessions.find(item => item.sessionId === sessionId);
+            if (!s) return;
+
+            const modalBody = document.getElementById('modalSessionBody');
+            modalBody.innerHTML = `
+                <div class="row g-3 font-mono">
+                    <div class="col-6">
+                        <div class="small text-muted">SESSION ID</div>
+                        <div class="fs-5 fw-bold text-white">#${s.sessionId}</div>
+                    </div>
+                    <div class="col-6">
+                        <div class="small text-muted">NGƯỜI CHƠI</div>
+                        <div class="fs-5 fw-bold text-primary">${escapeHtml(s.playerName)}</div>
+                    </div>
+                    <div class="col-6">
+                        <div class="small text-muted">BẮT ĐẦU</div>
+                        <div class="text-light">${new Date(s.startTime).toLocaleString('vi-VN')}</div>
+                    </div>
+                    <div class="col-6">
+                        <div class="small text-muted">KẾT THÚC</div>
+                        <div class="text-light">${s.endTime ? new Date(s.endTime).toLocaleString('vi-VN') : 'Đang diễn ra'}</div>
+                    </div>
+                    <div class="col-6">
+                        <div class="small text-muted">THỜI LƯỢNG</div>
+                        <div class="fs-5 fw-bold text-warning">${s.durationMinutes != null ? s.durationMinutes + ' phút' : '--'}</div>
+                    </div>
+                    <div class="col-6">
+                        <div class="small text-muted">SỰ KIỆN GHI NHẬN</div>
+                        <div class="fs-5 fw-bold text-cyan">${s.totalEvents} Events</div>
+                    </div>
+                    <div class="col-12 mt-3 pt-3 border-top border-secondary border-opacity-25">
+                        <div class="small text-muted mb-1">KẾT QUẢ TRẬN ĐẤU</div>
+                        <div class="fs-6 fw-bold text-white text-uppercase">${escapeHtml(s.result || 'In-Progress')}</div>
+                    </div>
+                </div>
+            `;
+            const modal = new bootstrap.Modal(document.getElementById('sessionModal'));
+            modal.show();
+        }
+
+        // -------------------------------------------------------------
+        // 5. Killer Feature: 2D Spatial Heatmap Renderer
+        // -------------------------------------------------------------
+        let currentMapLevel = 1;
+        let mapData = {
+            1: [
+                { x: 180, y: 150, type: 'death', count: 8, label: 'Bẫy gai cổng vào' },
+                { x: 340, y: 220, type: 'death', count: 14, label: 'Cầu dung nham trung tâm' },
+                { x: 580, y: 180, type: 'item', count: 20, label: 'Rương báu ẩn' },
+                { x: 100, y: 300, type: 'spawn', count: 35, label: 'Điểm khởi tạo Level 1' },
+                { x: 680, y: 120, type: 'goal', count: 22, label: 'Cổng vượt màn' }
+            ],
+            2: [
+                { x: 220, y: 280, type: 'death', count: 19, label: 'Hố tử thần Màn 2' },
+                { x: 450, y: 140, type: 'death', count: 27, label: 'Quái tinh anh bắn cung' },
+                { x: 500, y: 310, type: 'item', count: 15, label: 'Bình hồi máu lớn' },
+                { x: 90, y: 180, type: 'spawn', count: 25, label: 'Điểm bắt đầu Màn 2' }
+            ],
+            3: [
+                { x: 400, y: 200, type: 'death', count: 38, label: 'Boss AoE Sát Thương Diện Rộng' },
+                { x: 260, y: 120, type: 'death', count: 18, label: 'Cột lửa xoay' },
+                { x: 540, y: 280, type: 'item', count: 12, label: 'Bảo bối thần kỳ' },
+                { x: 120, y: 200, type: 'spawn', count: 18, label: 'Cửa vào Boss Room' }
+            ]
+        };
+
+        function initTacticalMap() {
+            renderTacticalMap();
+        }
+
+        function switchMapLevel(lvl, elem) {
+            playSciFiTone(700, 'sine', 0.05);
+            currentMapLevel = lvl;
+            document.querySelectorAll('#btnMapLevel1, #btnMapLevel2, #btnMapLevel3').forEach(b => b.classList.remove('active'));
+            elem.classList.add('active');
+            renderTacticalMap();
+        }
+
+        function renderTacticalMap() {
+            const canvas = document.getElementById('tacticalMapCanvas');
+            if (!canvas) return;
+            const ctx = canvas.getContext('2d');
+            const w = canvas.width;
+            const h = canvas.height;
+
+            ctx.clearRect(0, 0, w, h);
+
+            // 1. Draw Grid Lines
+            ctx.strokeStyle = 'rgba(99, 102, 241, 0.08)';
+            ctx.lineWidth = 1;
+            for (let x = 0; x < w; x += 40) {
+                ctx.beginPath();
+                ctx.moveTo(x, 0);
+                ctx.lineTo(x, h);
+                ctx.stroke();
+            }
+            for (let y = 0; y < h; y += 40) {
+                ctx.beginPath();
+                ctx.moveTo(0, y);
+                ctx.lineTo(w, y);
+                ctx.stroke();
+            }
+
+            // 2. Draw Map Boundaries & Obstacles
+            ctx.strokeStyle = 'rgba(6, 182, 212, 0.4)';
+            ctx.lineWidth = 2;
+            ctx.strokeRect(40, 40, w - 80, h - 80);
+
+            // Internal terrain blocks
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.03)';
+            ctx.fillRect(150, 100, 100, 40);
+            ctx.fillRect(480, 240, 120, 50);
+
+            // 3. Draw Heatmap Blurs and Markers
+            const nodes = mapData[currentMapLevel] || [];
+            nodes.forEach(node => {
+                if (node.type === 'death') {
+                    // Radial gradient heat circle
+                    const radGrad = ctx.createRadialGradient(node.x, node.y, 4, node.x, node.y, node.count * 3.5);
+                    radGrad.addColorStop(0, 'rgba(244, 63, 94, 0.85)');
+                    radGrad.addColorStop(0.5, 'rgba(245, 158, 11, 0.4)');
+                    radGrad.addColorStop(1, 'rgba(244, 63, 94, 0)');
+                    ctx.fillStyle = radGrad;
+                    ctx.beginPath();
+                    ctx.arc(node.x, node.y, node.count * 3.5, 0, Math.PI * 2);
+                    ctx.fill();
+
+                    // Death Icon
+                    ctx.fillStyle = '#fff';
+                    ctx.font = '14px Arial';
+                    ctx.fillText('💀', node.x - 7, node.y + 5);
+                } else if (node.type === 'spawn') {
+                    ctx.fillStyle = '#10b981';
+                    ctx.beginPath();
+                    ctx.arc(node.x, node.y, 8, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.fillText('🚩', node.x - 6, node.y + 4);
+                } else if (node.type === 'item') {
+                    ctx.fillStyle = '#fbbf24';
+                    ctx.beginPath();
+                    ctx.arc(node.x, node.y, 6, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.fillText('💎', node.x - 6, node.y + 4);
+                } else if (node.type === 'goal') {
+                    ctx.fillStyle = '#38bdf8';
+                    ctx.beginPath();
+                    ctx.arc(node.x, node.y, 9, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.fillText('🏆', node.x - 6, node.y + 4);
+                }
+            });
+
+            // 4. Update Cluster Info Sidebar
+            const clusterList = document.getElementById('heatmapClusterList');
+            if (clusterList) {
+                const deathNodes = nodes.filter(n => n.type === 'death').sort((a,b) => b.count - a.count);
+                clusterList.innerHTML = deathNodes.map(n => `
+                    <div class="p-2.5 rounded-3 border border-secondary border-opacity-25" style="background: rgba(255,255,255,0.02);">
+                        <div class="d-flex justify-content-between font-mono small">
+                            <span class="text-white fw-semibold">${escapeHtml(n.label)}</span>
+                            <span class="badge bg-danger bg-opacity-25 text-danger border border-danger border-opacity-25">${n.count} Deaths</span>
+                        </div>
+                        <div class="small text-muted font-mono mt-1" style="font-size: 0.72rem;">Tọa độ: X=${n.x}, Y=${n.y}</div>
+                    </div>
+                `).join('');
+            }
+        }
+
+        function generateSimulatedDeaths() {
+            playSciFiTone(850, 'triangle', 0.1);
+            const x = Math.floor(Math.random() * 600 + 80);
+            const y = Math.floor(Math.random() * 260 + 60);
+            const count = Math.floor(Math.random() * 12 + 5);
+            mapData[currentMapLevel].push({
+                x, y, type: 'death', count, label: `Khu vực nguy hiểm mới (Sector ${x})`
+            });
+            renderTacticalMap();
+        }
+
+        // -------------------------------------------------------------
+        // 6. Killer Feature: Real Live Ingestion Bot Match Simulator
+        // -------------------------------------------------------------
+        function logTerm(msg, type = 'info') {
+            const term = document.getElementById('simTerminal');
+            if (!term) return;
+            const now = new Date().toLocaleTimeString('vi-VN');
+            let cls = '';
+            if (type === 'succ') cls = 'term-succ';
+            else if (type === 'ev') cls = 'term-ev';
+            else if (type === 'err') cls = 'term-err';
+
+            const line = document.createElement('div');
+            line.className = 'terminal-line';
+            line.innerHTML = `<span class="term-ts">[${now}]</span> <span class="${cls}">${escapeHtml(msg)}</span>`;
+            term.appendChild(line);
+            term.scrollTop = term.scrollHeight;
+        }
+
+        function clearTerminal() {
+            document.getElementById('simTerminal').innerHTML = '<div class="terminal-line"><span class="term-ts">[CLEARED]</span> Terminal log flushed.</div>';
+        }
+
+        async function triggerQuickBotMatch() {
+            switchView('simulator');
+            await runCustomBotSimulation();
+        }
+
+        async function runCustomBotSimulation() {
+            const btn = document.getElementById('btnRunSimulation');
+            const scenario = document.getElementById('simScenario').value;
+            let botName = document.getElementById('simBotName').value.trim();
+
+            if (!botName) {
+                botName = "Bot_" + ['Shadow', 'Cyber', 'Striker', 'Titan', 'Viper', 'Ghost'][Math.floor(Math.random() * 6)] + '_' + Math.floor(100 + Math.random() * 900);
+            }
+
+            btn.disabled = true;
+            btn.innerHTML = `<span class="spinner-border spinner-border-sm me-2"></span> Đang mô phỏng trận đấu...`;
+            playSciFiTone(600, 'sawtooth', 0.15);
+
+            logTerm(`Khởi động mô phỏng Bot với người chơi: ${botName}`, 'succ');
+
+            try {
+                // Step 1: Register or Login Player
+                logTerm(`POST /api/Players/register -> { playerName: "${botName}" }`);
+                let playerId = null;
+                const regRes = await fetch('/api/Players/register', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ playerName: botName })
+                });
+
+                if (regRes.ok) {
+                    const regData = await regRes.json();
+                    playerId = regData.playerId;
+                    logTerm(`Player đăng ký thành công! ID: ${playerId}`, 'succ');
+                } else if (regRes.status === 409) {
+                    logTerm(`Tên đã tồn tại, thực hiện login...`);
+                    const loginRes = await fetch('/api/Players/login', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ playerName: botName })
+                    });
+                    const loginData = await loginRes.json();
+                    playerId = loginData.playerId;
+                    logTerm(`Player đăng nhập thành công! ID: ${playerId}`, 'succ');
+                } else {
+                    throw new Error('Không thể đăng ký người chơi');
+                }
+
+                // Step 2: Start Session
+                logTerm(`POST /api/Sessions/start -> { playerId: ${playerId} }`);
+                const sessRes = await fetch('/api/Sessions/start', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ playerId })
+                });
+                const sessData = await sessRes.json();
+                const sessionId = sessData.sessionId;
+                logTerm(`Session đã tạo thành công! SessionId: #${sessionId}`, 'succ');
+
+                // Step 3: Stream Game Events based on Scenario
+                await sleep(500);
+                logTerm(`POST /api/Events -> [level_start] Level 1`, 'ev');
+                await postEvent(sessionId, 'level_start', 1);
+
+                await sleep(400);
+                logTerm(`POST /api/Events -> [item_collected] Nhặt bình máu Level 1`, 'ev');
+                await postEvent(sessionId, 'item_collected', 1);
+
+                await sleep(500);
+                logTerm(`POST /api/Events -> [level_complete] Vượt Màn 1!`, 'ev');
+                await postEvent(sessionId, 'level_complete', 1);
+
+                let result = 'Victory';
+
+                if (scenario === 'hardcore') {
+                    await sleep(400);
+                    logTerm(`POST /api/Events -> [level_start] Level 2`, 'ev');
+                    await postEvent(sessionId, 'level_start', 2);
+
+                    await sleep(400);
+                    logTerm(`POST /api/Events -> [player_dead] Rơi xuống hố gai!`, 'err');
+                    await postEvent(sessionId, 'player_dead', 2);
+
+                    await sleep(400);
+                    logTerm(`POST /api/Events -> [player_dead] Bị quái bắn hạ!`, 'err');
+                    await postEvent(sessionId, 'player_dead', 2);
+
+                    result = 'Defeat';
+                } else if (scenario === 'balanced') {
+                    await sleep(400);
+                    logTerm(`POST /api/Events -> [level_start] Level 2`, 'ev');
+                    await postEvent(sessionId, 'level_start', 2);
+
+                    await sleep(400);
+                    logTerm(`POST /api/Events -> [player_dead] Chết 1 lần ở Màn 2!`, 'err');
+                    await postEvent(sessionId, 'player_dead', 2);
+
+                    await sleep(500);
+                    logTerm(`POST /api/Events -> [level_complete] Hồi sinh và qua Màn 2 thành công!`, 'ev');
+                    await postEvent(sessionId, 'level_complete', 2);
+                    result = 'Victory';
+                } else if (scenario === 'speedrun') {
+                    await sleep(300);
+                    logTerm(`POST /api/Events -> [level_start] Level 2`, 'ev');
+                    await postEvent(sessionId, 'level_start', 2);
+                    await sleep(300);
+                    logTerm(`POST /api/Events -> [level_complete] Qua Màn 2 tốc biến!`, 'ev');
+                    await postEvent(sessionId, 'level_complete', 2);
+
+                    await sleep(300);
+                    logTerm(`POST /api/Events -> [level_start] Level 3 Boss Fight`, 'ev');
+                    await postEvent(sessionId, 'level_start', 3);
+                    await sleep(400);
+                    logTerm(`POST /api/Events -> [level_complete] Tiêu diệt Boss cuối!`, 'ev');
+                    await postEvent(sessionId, 'level_complete', 3);
+                    result = 'Victory';
+                }
+
+                // Step 4: End Session
+                logTerm(`PUT /api/Sessions/${sessionId}/end -> Result: ${result}`);
+                await fetch(`/api/Sessions/${sessionId}/end`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ result })
+                });
+
+                logTerm(`Trận đấu hoàn tất! Kết quả: ${result}. Đang reload dashboard...`, 'succ');
+                playSciFiTone(1200, 'sine', 0.2);
+
+                // Auto reload dashboard data
+                await loadAllData();
+
+            } catch (err) {
+                console.error("Simulation error:", err);
+                logTerm(`Lỗi trong quá trình mô phỏng: ${err.message}`, 'err');
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = `<i class="bi bi-play-circle-fill fs-6"></i> <span class="fs-6 fw-bold">KHỞI CHẠY TRẬN ĐẤU MÔ PHỎNG</span>`;
+            }
+        }
+
+        async function postEvent(sessionId, eventType, value) {
+            await fetch('/api/Events', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ sessionId, eventType, value })
+            });
+        }
+
+        function sleep(ms) {
+            return new Promise(resolve => setTimeout(resolve, ms));
+        }
+
+        // CSV Exporter
+        function exportDataCSV() {
+            playSciFiTone(750, 'triangle', 0.1);
+            if (!rawRecentSessions || rawRecentSessions.length === 0) {
+                alert('Chưa có dữ liệu để xuất.');
+                return;
+            }
+            let csv = 'SessionId,PlayerName,StartTime,EndTime,DurationMinutes,Result,TotalEvents\n';
+            rawRecentSessions.forEach(s => {
+                csv += `"${s.sessionId}","${s.playerName}","${s.startTime}","${s.endTime || ''}","${s.durationMinutes || 0}","${s.result || ''}","${s.totalEvents}"\n`;
+            });
+            const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `Aegis_Telemetry_${new Date().toISOString().slice(0, 10)}.csv`;
+            a.click();
+            URL.revokeObjectURL(url);
+        }
+
+        // Counter Animator
+        function animateCounter(id, target) {
+            const el = document.getElementById(id);
+            if (!el) return;
+            const start = parseInt(el.innerText.replace(/,/g, '')) || 0;
+            if (start === target) {
+                el.innerText = target.toLocaleString();
+                return;
+            }
+            const diff = target - start;
+            let current = start;
+            const step = diff > 0 ? Math.ceil(diff / 15) : Math.floor(diff / 15);
+            const interval = setInterval(() => {
+                current += step;
+                if ((step > 0 && current >= target) || (step < 0 && current <= target)) {
+                    el.innerText = target.toLocaleString();
+                    clearInterval(interval);
+                } else {
+                    el.innerText = current.toLocaleString();
+                }
+            }, 25);
+        }
+
+        function escapeHtml(text) {
+            if (!text) return '';
+            return text.replace(/[&<>"']/g, function(m) {
+                return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m];
+            });
+        }
+    </script>
+    <style>
+        .bi-spin { animation: spin 1s linear infinite; }
+        @keyframes spin { 100% { transform: rotate(360deg); } }
+    </style>
+</body>
+</html>
