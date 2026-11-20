@@ -45,7 +45,18 @@ public class EnemyHealth : MonoBehaviour
             {
                 Debug.LogWarning("Chua co ScoreManager trong Scene!");
             }
+            
+            // Báo cho LevelManager biết Enemy đã chết.
+            if (LevelManager.Instance != null)
+            {
+                LevelManager.Instance.EnemyKilled();
+            }
 
+            // Gửi Telemetry EnemyKilled.
+            if (TelemetryManager.Instance != null)
+            {
+                TelemetryManager.Instance.TrackEnemyKilled();
+            }
             // Hủy Enemy
             Destroy(gameObject);
         }

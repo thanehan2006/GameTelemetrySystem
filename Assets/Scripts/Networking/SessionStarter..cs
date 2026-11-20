@@ -18,6 +18,12 @@ public class SessionStarter : MonoBehaviour
             if (success)
             {
                 Debug.Log("Đã tạo Session: " + sessionId);
+
+                if (TelemetryManager.Instance != null)
+                {
+                    TelemetryManager.Instance.SetSession(sessionId);
+                    TelemetryManager.Instance.TrackLogin();
+                }
             }
             else
             {
