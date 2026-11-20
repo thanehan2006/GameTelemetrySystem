@@ -77,7 +77,7 @@ public class AuthUIController : MonoBehaviour
                     Debug.Log("Player ID: " + response.playerId);
                     Debug.Log("Player Name: " + response.playerName);
 
-                    SceneManager.LoadScene("MainScene");
+                    SceneManager.LoadScene("LoadingScene");
                 }
                 else
                 {
