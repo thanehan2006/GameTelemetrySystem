@@ -13,7 +13,7 @@ public class LoadingController : MonoBehaviour
     [SerializeField] private TMP_Text loadingStatus;
 
     [Header("Scene")]
-    [SerializeField] private string sceneToLoad = "MainScene";
+    [SerializeField] private string sceneToLoad = "LoginScene";
 
     [Header("Loading Settings")]
     [SerializeField] private float startDelay = 5f;
@@ -39,13 +39,17 @@ public class LoadingController : MonoBehaviour
         progressText.text = "0%";
         loadingStatus.text = "Chuẩn bị tải dữ liệu...";
 
-        // Tải Scene ở chế độ nền
+        // Tải Scene ở chế độ nền (tự chuyển hướng MainScene cũ sang LoginScene theo luồng Loading -> Login -> Lv1)
+        string targetScene = string.IsNullOrWhiteSpace(sceneToLoad) || sceneToLoad == "MainScene"
+            ? "LoginScene"
+            : sceneToLoad;
+
         AsyncOperation operation =
-            SceneManager.LoadSceneAsync(sceneToLoad);
+            SceneManager.LoadSceneAsync(targetScene);
 
         if (operation == null)
         {
-            Debug.LogError("Không thể tải Scene: " + sceneToLoad);
+            Debug.LogError("Không thể tải Scene: " + targetScene);
             yield break;
         }
 

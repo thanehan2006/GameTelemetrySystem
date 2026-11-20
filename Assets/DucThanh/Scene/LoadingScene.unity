@@ -151,7 +151,7 @@ MonoBehaviour:
   progressBar: {fileID: 1696574004}
   progressText: {fileID: 1413210094}
   loadingStatus: {fileID: 2089804636}
-  sceneToLoad: MainScene
+  sceneToLoad: LoginScene
   startDelay: 5
   loadingDuration: 10
 --- !u!4 &280825719

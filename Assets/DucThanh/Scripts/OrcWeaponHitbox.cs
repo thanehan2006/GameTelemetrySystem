@@ -61,6 +61,15 @@ public class OrcWeaponHitbox : MonoBehaviour
         {
             hasDealtDamageInCurrentSwing = true;
             playerHealth.TakeDamage(damage);
+
+            PlayerController playerController = playerHealth.GetComponent<PlayerController>();
+            if (playerController != null)
+            {
+                Vector3 sourcePos = ownerAI != null ? ownerAI.transform.position : transform.position;
+                float kbForce = ownerAI != null ? ownerAI.playerKnockbackForce : 6.5f;
+                playerController.ApplyKnockback(sourcePos, kbForce);
+            }
+
             Debug.Log($"[OrcWeaponHitbox] Vũ khí của {(ownerAI != null ? ownerAI.gameObject.name : gameObject.name)} chém TRÚNG Player! Gây {damage} damage.");
         }
     }

@@ -11,13 +11,14 @@ public class ThirdPersonCamera : MonoBehaviour
     public float mouseSensitivity = 2f;
     public float minPitch = -10f;
     public float maxPitch = 60f;
-    public float followSmooth = 15f;
+    public float followSmooth = 28f;
 
     private float yaw;
     private float pitch = 15f;
 
     void Start()
     {
+        if (followSmooth < 24f) followSmooth = 28f;
         if (target == null)
         {
             var playerObj = GameObject.FindWithTag("Player");
@@ -41,16 +42,17 @@ public class ThirdPersonCamera : MonoBehaviour
             else return;
         }
 
-        if (GameOverManager.IsGameOver) return;
+        if (GameOverManager.IsGameOver || LevelUpChoiceManager.IsPaused) return;
 
         if (Cursor.lockState == CursorLockMode.Locked)
         {
-            yaw += Input.GetAxis("Mouse X") * mouseSensitivity;
-            pitch = Mathf.Clamp(pitch - Input.GetAxis("Mouse Y") * mouseSensitivity, minPitch, maxPitch);
+            yaw += Input.GetAxisRaw("Mouse X") * mouseSensitivity;
+            pitch = Mathf.Clamp(pitch - Input.GetAxisRaw("Mouse Y") * mouseSensitivity, minPitch, maxPitch);
         }
 
         GetDesiredPose(out Vector3 desired, out Quaternion rot);
-        transform.position = Vector3.Lerp(transform.position, desired, followSmooth * Time.deltaTime);
+        float t = 1f - Mathf.Exp(-followSmooth * Time.deltaTime);
+        transform.position = Vector3.Lerp(transform.position, desired, t);
         transform.rotation = rot;
     }
 

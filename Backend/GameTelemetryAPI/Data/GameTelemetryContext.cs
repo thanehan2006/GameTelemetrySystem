@@ -28,6 +28,11 @@ namespace GameTelemetryAPI.Data
                     .IsRequired()
                     .HasMaxLength(50);
 
+                entity.Property(e => e.PasswordHash)
+                    .IsRequired()
+                    .HasMaxLength(256)
+                    .HasDefaultValue(string.Empty);
+
                 entity.Property(e => e.CreatedAt)
                     .HasDefaultValueSql("SYSDATETIME()");
             });

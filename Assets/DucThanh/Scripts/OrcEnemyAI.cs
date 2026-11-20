@@ -13,15 +13,19 @@ public class OrcEnemyAI : MonoBehaviour
     public float stoppingDistance = 1.4f;
     public float rotationSpeed = 10f;
 
-    [Header("Collision & Separation")]
+    [Header("Collision, Separation & Knockback")]
     public float minEnemySpacing = 1.05f;
     public float minPlayerSpacing = 1.15f;
     public float separationSpeed = 6f;
+    public float knockbackResistance = 0f;
+    public float knockbackDamping = 16f;
+    public float hitStunDuration = 0.16f;
 
     [Header("Attack Settings")]
     public float attackRange = 1.8f;
     public int attackDamage = 15;
     public float attackCooldown = 1.6f;
+    public float playerKnockbackForce = 6.5f;
 
     [Header("Weapon Hitbox Timing (seconds in Attack animation)")]
     public float hitboxStartDelay = 0.35f;
@@ -42,6 +46,8 @@ public class OrcEnemyAI : MonoBehaviour
     private bool isAttacking;
     private string currentState = "";
     private Coroutine attackRoutine;
+    private Vector3 knockbackVelocity;
+    private float hitStunTimer;
 
     private bool AgentReady => navAgent != null && navAgent.isActiveAndEnabled && navAgent.isOnNavMesh;
 
@@ -150,6 +156,13 @@ public class OrcEnemyAI : MonoBehaviour
 
     void Update()
     {
+        if (hitStunTimer > 0f)
+        {
+            hitStunTimer -= Time.deltaTime;
+            StopAgent();
+            return;
+        }
+
         if (isAttacking)
         {
             StopAgent();
@@ -224,7 +237,55 @@ public class OrcEnemyAI : MonoBehaviour
 
     void LateUpdate()
     {
+        ProcessKnockback();
         EnforceSeparation();
+    }
+
+    /// <summary>
+    /// Đẩy lùi Enemy khi bị vũ khí Player đánh trúng hoặc va chạm mạnh.
+    /// </summary>
+    public void ApplyKnockback(Vector3 attackerPosition, float force, bool applyHitStun = true)
+    {
+        float effectiveForce = Mathf.Max(0f, force * (1f - Mathf.Clamp01(knockbackResistance)));
+        if (effectiveForce <= 0.01f) return;
+
+        Vector3 dir = transform.position - attackerPosition;
+        dir.y = 0f;
+        if (dir.sqrMagnitude < 0.0001f)
+        {
+            dir = -transform.forward;
+        }
+        else
+        {
+            dir.Normalize();
+        }
+
+        knockbackVelocity = dir * effectiveForce;
+        if (applyHitStun)
+        {
+            hitStunTimer = Mathf.Max(hitStunTimer, hitStunDuration);
+        }
+    }
+
+    private void ProcessKnockback()
+    {
+        if (knockbackVelocity.sqrMagnitude <= 0.001f)
+        {
+            knockbackVelocity = Vector3.zero;
+            return;
+        }
+
+        Vector3 displacement = knockbackVelocity * Time.deltaTime;
+        if (AgentReady)
+        {
+            navAgent.Move(displacement);
+        }
+        else
+        {
+            transform.position += displacement;
+        }
+
+        knockbackVelocity = Vector3.MoveTowards(knockbackVelocity, Vector3.zero, knockbackDamping * Time.deltaTime);
     }
 
     void EnforceSeparation()

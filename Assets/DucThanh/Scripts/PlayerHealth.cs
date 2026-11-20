@@ -1,14 +1,22 @@
 using UnityEngine;
+using UnityEngine.UI;
+using TMPro;
 
 /// <summary>
-/// Quản lý máu của Player.
-/// Tối ưu hóa: kiểm tra trạng thái isDead chuẩn xác, kích hoạt TelemetryManager và GameOverManager.
+/// Quản lý máu của Player, hiển thị thanh máu (Slider) + chữ HP mượt mà,
+/// kích hoạt TelemetryManager và GameOverManager khi chết.
 /// </summary>
 public class PlayerHealth : MonoBehaviour
 {
     [Header("Health Settings")]
     public int maxHealth = 100;
     public int currentHealth;
+
+    [Header("UI")]
+    public TMP_Text healthText;
+    public Slider healthSlider;
+    public Image healthFillImage;
+    [SerializeField] private float barSmoothSpeed = 10f;
 
     private bool isDead = false;
 
@@ -18,6 +26,46 @@ public class PlayerHealth : MonoBehaviour
     {
         currentHealth = maxHealth;
         isDead = false;
+
+        if (healthText == null)
+        {
+            GameObject obj = GameObject.Find("HealthText");
+            if (obj != null) healthText = obj.GetComponent<TMP_Text>();
+        }
+
+        if (healthSlider == null)
+        {
+            GameObject sliderObj = GameObject.Find("HealthBar");
+            if (sliderObj != null) healthSlider = sliderObj.GetComponent<Slider>();
+        }
+
+        if (healthSlider != null)
+        {
+            healthSlider.minValue = 0f;
+            healthSlider.maxValue = maxHealth;
+            healthSlider.value = currentHealth;
+
+            if (healthFillImage == null && healthSlider.fillRect != null)
+            {
+                healthFillImage = healthSlider.fillRect.GetComponent<Image>();
+            }
+        }
+
+        UpdateHealthUI(true);
+    }
+
+    private void Update()
+    {
+        if (healthSlider == null) return;
+
+        if (!Mathf.Approximately(healthSlider.value, currentHealth))
+        {
+            healthSlider.value = Mathf.Lerp(healthSlider.value, currentHealth, Time.unscaledDeltaTime * barSmoothSpeed);
+            if (Mathf.Abs(healthSlider.value - currentHealth) < 0.05f)
+            {
+                healthSlider.value = currentHealth;
+            }
+        }
     }
 
     public void TakeDamage(int damage)
@@ -26,6 +74,7 @@ public class PlayerHealth : MonoBehaviour
             return;
 
         currentHealth = Mathf.Max(0, currentHealth - damage);
+        UpdateHealthUI(false);
         Debug.Log($"Player HP: {currentHealth}/{maxHealth}");
 
         if (currentHealth <= 0 && !isDead)
@@ -37,6 +86,7 @@ public class PlayerHealth : MonoBehaviour
     private void Die()
     {
         isDead = true;
+        UpdateHealthUI(false);
         Debug.Log("PLAYER DEAD!");
 
         // Ghi nhận sự kiện telemetry khi player hy sinh
@@ -56,5 +106,43 @@ public class PlayerHealth : MonoBehaviour
     {
         if (isDead) return;
         currentHealth = Mathf.Min(maxHealth, currentHealth + amount);
+        UpdateHealthUI(false);
+    }
+
+    public void FullHeal()
+    {
+        if (isDead) return;
+        currentHealth = maxHealth;
+        UpdateHealthUI(false);
+    }
+
+    private void UpdateHealthUI(bool instantSlider)
+    {
+        float ratio = maxHealth > 0 ? (float)currentHealth / maxHealth : 0f;
+        Color hpColor = ratio > 0.5f
+            ? new Color(0.2f, 0.9f, 0.45f, 1f)
+            : ratio > 0.25f
+                ? new Color(1f, 0.8f, 0.2f, 1f)
+                : new Color(1f, 0.28f, 0.28f, 1f);
+
+        if (healthText != null)
+        {
+            healthText.text = $"HP: {currentHealth}/{maxHealth}";
+            healthText.color = hpColor;
+        }
+
+        if (healthFillImage != null)
+        {
+            healthFillImage.color = hpColor;
+        }
+
+        if (healthSlider != null)
+        {
+            healthSlider.maxValue = maxHealth;
+            if (instantSlider)
+            {
+                healthSlider.value = currentHealth;
+            }
+        }
     }
 }

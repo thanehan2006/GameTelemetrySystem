@@ -34,7 +34,7 @@ public class SessionApiClient : MonoBehaviour
 {
     [Header("Backend API")]
     [SerializeField]
-    private string baseUrl = ApiConfig.DEVTUNNEL_URL;
+    private string baseUrl = ApiConfig.DEFAULT_BASE_URL;
 
     private bool isEndingSession;
     private string endedSessionId;
@@ -75,6 +75,7 @@ public class SessionApiClient : MonoBehaviour
             request.downloadHandler = new DownloadHandlerBuffer();
             request.SetRequestHeader("Content-Type", "application/json");
             request.timeout = 15;
+            ApiConfig.ConfigureRequest(request, url);
 
             yield return request.SendWebRequest();
 
@@ -138,6 +139,7 @@ public class SessionApiClient : MonoBehaviour
             request.downloadHandler = new DownloadHandlerBuffer();
             request.SetRequestHeader("Content-Type", "application/json");
             request.timeout = 15;
+            ApiConfig.ConfigureRequest(request, url);
 
             yield return request.SendWebRequest();
 

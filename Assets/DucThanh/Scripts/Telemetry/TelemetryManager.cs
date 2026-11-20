@@ -47,7 +47,7 @@ public class TelemetryManager : MonoBehaviour
     public static TelemetryManager Instance { get; private set; }
 
     [Header("Backend API Configuration")]
-    [SerializeField] private string baseUrl = ApiConfig.DEVTUNNEL_URL;
+    [SerializeField] private string baseUrl = ApiConfig.DEFAULT_BASE_URL;
     [SerializeField] private bool sendToBackend = true;
     [SerializeField] private SessionApiClient sessionApiClient;
 
@@ -124,6 +124,13 @@ public class TelemetryManager : MonoBehaviour
         {
             SessionId = string.Empty;
             EnsureBackendSession();
+        }
+
+        if (PlayerPrefs.GetInt("PendingLoginEvent", 0) == 1)
+        {
+            PlayerPrefs.DeleteKey("PendingLoginEvent");
+            PlayerPrefs.Save();
+            TrackEvent("login", PlayerPrefs.GetInt("PlayerId", 0));
         }
 
         TrackEvent("game_start");
@@ -354,6 +361,7 @@ public class TelemetryManager : MonoBehaviour
                 request.downloadHandler = new DownloadHandlerBuffer();
                 request.SetRequestHeader("Content-Type", "application/json");
                 request.timeout = 10;
+                ApiConfig.ConfigureRequest(request, url);
 
                 yield return request.SendWebRequest();
 

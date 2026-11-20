@@ -6,24 +6,39 @@ using UnityEngine.Networking;
 
 public static class ApiConfig
 {
-    // Có thể đổi linh hoạt localhost (chạy máy cục bộ) hoặc devtunnel URL
-    public const string DEFAULT_BASE_URL = "http://localhost:5295";
+    public const string DEFAULT_BASE_URL = "https://localhost:7013";
+    public const string LOCAL_HTTP_URL = "http://localhost:5295";
     public const string DEVTUNNEL_URL = "https://sjf1zkj0-7013.asse.devtunnels.ms";
 
     public static string GetBaseUrl()
     {
-        return PlayerPrefs.GetString("ApiBaseUrl", DEVTUNNEL_URL);
+        return PlayerPrefs.GetString("ApiBaseUrl", DEFAULT_BASE_URL);
+    }
+
+    public static void ConfigureRequest(UnityWebRequest request, string url)
+    {
+        if (request == null || string.IsNullOrEmpty(url)) return;
+
+        if (url.StartsWith("https://localhost", StringComparison.OrdinalIgnoreCase)
+            || url.StartsWith("https://127.0.0.1", StringComparison.OrdinalIgnoreCase))
+        {
+            request.certificateHandler = new LocalhostCertificateHandler();
+        }
+    }
+
+    private sealed class LocalhostCertificateHandler : CertificateHandler
+    {
+        protected override bool ValidateCertificate(byte[] certificateData) => true;
     }
 }
 
-// Dữ liệu gửi lên Backend
 [Serializable]
-public class PlayerNameRequest
+public class AuthCredentialsRequest
 {
     public string playerName;
+    public string password;
 }
 
-// Dữ liệu Backend trả về
 [Serializable]
 public class PlayerApiResponse
 {
@@ -32,22 +47,24 @@ public class PlayerApiResponse
     public string createdAt;
 }
 
-// Dữ liệu lỗi
 [Serializable]
 public class PlayerApiError
 {
     public string message;
+    public string title;
 }
 
 /// <summary>
-/// Client kết nối API xác thực (Đăng ký / Đăng nhập).
-/// Tối ưu hóa: timeout an toàn, xử lý URL linh hoạt, kiểm tra kết quả đồng bộ.
+/// Client kết nối API xác thực (Đăng ký / Đăng nhập kèm mật khẩu).
+/// Tối ưu: dùng chung một luồng request, chống gửi trùng khi đang xử lý, tách thông báo lỗi rõ ràng.
 /// </summary>
 public class AuthApiClient : MonoBehaviour
 {
     [Header("Backend API")]
-    [SerializeField]
-    private string baseUrl = ApiConfig.DEVTUNNEL_URL;
+    [SerializeField] private string baseUrl = ApiConfig.DEFAULT_BASE_URL;
+    [SerializeField] private int timeoutSeconds = 15;
+
+    public bool IsBusy { get; private set; }
 
     public string BaseUrl
     {
@@ -55,114 +72,118 @@ public class AuthApiClient : MonoBehaviour
         set => baseUrl = value;
     }
 
-    // ĐĂNG KÝ
-    public void Register(string playerName, Action<bool, PlayerApiResponse, string> callback)
+    public void Register(string playerName, string password, Action<bool, PlayerApiResponse, string> callback)
     {
-        PlayerNameRequest data = new PlayerNameRequest
-        {
-            playerName = playerName.Trim()
-        };
-
-        StartCoroutine(RegisterCoroutine(data, callback));
+        SendAuthRequest("/api/Players/register", playerName, password, false, "Đăng ký thành công! Hãy đăng nhập.", callback);
     }
 
-    private IEnumerator RegisterCoroutine(PlayerNameRequest data, Action<bool, PlayerApiResponse, string> callback)
+    public void Login(string playerName, string password, Action<bool, PlayerApiResponse, string> callback)
     {
-        string json = JsonUtility.ToJson(data);
-        string url = BaseUrl.TrimEnd('/') + "/api/Players/register";
+        SendAuthRequest("/api/Players/login", playerName, password, true, "Đăng nhập thành công!", callback);
+    }
 
-        using (UnityWebRequest request = CreatePostRequest(url, json))
+    private void SendAuthRequest(
+        string endpoint,
+        string playerName,
+        string password,
+        bool savePlayerSession,
+        string successMessage,
+        Action<bool, PlayerApiResponse, string> callback)
+    {
+        if (IsBusy)
         {
-            yield return request.SendWebRequest();
-            string responseText = request.downloadHandler?.text;
-
-            if (request.result == UnityWebRequest.Result.Success)
-            {
-                PlayerApiResponse response = JsonUtility.FromJson<PlayerApiResponse>(responseText);
-                callback?.Invoke(
-                    response != null,
-                    response,
-                    response != null ? "Đăng ký thành công!" : "Không đọc được dữ liệu từ Backend!"
-                );
-            }
-            else
-            {
-                callback?.Invoke(false, null, GetErrorMessage(responseText, request));
-            }
+            callback?.Invoke(false, null, "Đang xử lý yêu cầu, vui lòng chờ...");
+            return;
         }
-    }
 
-    // ĐĂNG NHẬP
-    public void Login(string playerName, Action<bool, PlayerApiResponse, string> callback)
-    {
-        PlayerNameRequest data = new PlayerNameRequest
+        var payload = new AuthCredentialsRequest
         {
-            playerName = playerName.Trim()
+            playerName = (playerName ?? string.Empty).Trim(),
+            password = password ?? string.Empty
         };
 
-        StartCoroutine(LoginCoroutine(data, callback));
+        StartCoroutine(SendAuthRequestCoroutine(endpoint, payload, savePlayerSession, successMessage, callback));
     }
 
-    private IEnumerator LoginCoroutine(PlayerNameRequest data, Action<bool, PlayerApiResponse, string> callback)
+    private IEnumerator SendAuthRequestCoroutine(
+        string endpoint,
+        AuthCredentialsRequest payload,
+        bool savePlayerSession,
+        string successMessage,
+        Action<bool, PlayerApiResponse, string> callback)
     {
-        string json = JsonUtility.ToJson(data);
-        string url = BaseUrl.TrimEnd('/') + "/api/Players/login";
+        IsBusy = true;
+        string url = BaseUrl.TrimEnd('/') + endpoint;
+        string json = JsonUtility.ToJson(payload);
 
         using (UnityWebRequest request = CreatePostRequest(url, json))
         {
             yield return request.SendWebRequest();
+            IsBusy = false;
+
             string responseText = request.downloadHandler?.text;
 
             if (request.result == UnityWebRequest.Result.Success)
             {
                 PlayerApiResponse response = JsonUtility.FromJson<PlayerApiResponse>(responseText);
+                if (response == null || response.playerId <= 0)
+                {
+                    callback?.Invoke(false, null, "Không đọc được dữ liệu người chơi từ máy chủ!");
+                    yield break;
+                }
 
-                if (response != null)
+                if (savePlayerSession)
                 {
                     PlayerPrefs.SetInt("PlayerId", response.playerId);
                     PlayerPrefs.SetString("PlayerName", response.playerName);
+                    PlayerPrefs.SetInt("PendingLoginEvent", 1);
+                    PlayerPrefs.DeleteKey("SessionId");
                     PlayerPrefs.Save();
+                }
 
-                    callback?.Invoke(true, response, "Đăng nhập thành công!");
-                }
-                else
-                {
-                    callback?.Invoke(false, null, "Không đọc được dữ liệu người chơi!");
-                }
+                callback?.Invoke(true, response, successMessage);
             }
             else
             {
-                callback?.Invoke(false, null, GetErrorMessage(responseText, request));
+                callback?.Invoke(false, null, ParseErrorMessage(responseText, request));
             }
         }
     }
 
     private UnityWebRequest CreatePostRequest(string url, string json)
     {
-        UnityWebRequest request = new UnityWebRequest(url, "POST");
+        var request = new UnityWebRequest(url, UnityWebRequest.kHttpVerbPOST);
         byte[] body = Encoding.UTF8.GetBytes(json);
         request.uploadHandler = new UploadHandlerRaw(body);
         request.downloadHandler = new DownloadHandlerBuffer();
         request.SetRequestHeader("Content-Type", "application/json");
-        request.timeout = 15;
+        request.timeout = timeoutSeconds;
+        ApiConfig.ConfigureRequest(request, url);
         return request;
     }
 
-    private string GetErrorMessage(string responseText, UnityWebRequest request)
+    private static string ParseErrorMessage(string responseText, UnityWebRequest request)
     {
-        if (!string.IsNullOrEmpty(responseText))
+        if (!string.IsNullOrWhiteSpace(responseText))
         {
             try
             {
-                PlayerApiError error = JsonUtility.FromJson<PlayerApiError>(responseText);
-                if (error != null && !string.IsNullOrEmpty(error.message))
-                {
-                    return error.message;
-                }
+                PlayerApiError err = JsonUtility.FromJson<PlayerApiError>(responseText);
+                if (err != null && !string.IsNullOrWhiteSpace(err.message))
+                    return err.message;
+                if (err != null && !string.IsNullOrWhiteSpace(err.title))
+                    return err.title;
             }
-            catch { }
+            catch
+            {
+                // Fallback sang mã trạng thái HTTP
+            }
         }
 
-        return $"Lỗi kết nối ({request.responseCode}): {request.error}";
+        if (request.responseCode == 401) return "Sai tên đăng nhập hoặc mật khẩu!";
+        if (request.responseCode == 409) return "Tên người chơi đã tồn tại!";
+        if (request.responseCode == 400) return "Thông tin nhập chưa hợp lệ!";
+
+        return $"Không thể kết nối máy chủ ({request.error})";
     }
 }

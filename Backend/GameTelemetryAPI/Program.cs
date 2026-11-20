@@ -17,6 +17,25 @@ builder.Services.AddDbContext<GameTelemetryContext>(options =>
 
 var app = builder.Build();
 
+// Tự động đảm bảo cột PasswordHash tồn tại trong bảng Players khi khởi động Backend
+using (var scope = app.Services.CreateScope())
+{
+    try
+    {
+        var db = scope.ServiceProvider.GetRequiredService<GameTelemetryContext>();
+        db.Database.ExecuteSqlRaw(@"
+            IF OBJECT_ID(N'dbo.Players', N'U') IS NOT NULL AND COL_LENGTH(N'dbo.Players', N'PasswordHash') IS NULL
+            BEGIN
+                ALTER TABLE dbo.Players
+                ADD PasswordHash NVARCHAR(256) NOT NULL CONSTRAINT DF_Players_PasswordHash DEFAULT '';
+            END");
+    }
+    catch (Exception ex)
+    {
+        app.Logger.LogWarning(ex, "Không thể tự động kiểm tra/cập nhật cột PasswordHash khi khởi động.");
+    }
+}
+
 // Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())
 {
@@ -33,7 +52,10 @@ if (app.Environment.IsDevelopment())
 app.UseDefaultFiles();
 app.UseStaticFiles();
 
-app.UseHttpsRedirection();
+if (!app.Environment.IsDevelopment())
+{
+    app.UseHttpsRedirection();
+}
 
 app.UseAuthorization();
 

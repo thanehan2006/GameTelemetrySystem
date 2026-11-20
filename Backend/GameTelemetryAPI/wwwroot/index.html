@@ -1837,12 +1837,13 @@
 
             try {
                 // Step 1: Register or Login Player
+                const botPassword = 'BotPass123!';
                 logTerm(`POST /api/Players/register -> { playerName: "${botName}" }`);
                 let playerId = null;
                 const regRes = await fetch('/api/Players/register', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ playerName: botName })
+                    body: JSON.stringify({ playerName: botName, password: botPassword })
                 });
 
                 if (regRes.ok) {
@@ -1854,7 +1855,7 @@
                     const loginRes = await fetch('/api/Players/login', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ playerName: botName })
+                        body: JSON.stringify({ playerName: botName, password: botPassword })
                     });
                     const loginData = await loginRes.json();
                     playerId = loginData.playerId;

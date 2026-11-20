@@ -23,6 +23,12 @@ public class EnemyHealth : MonoBehaviour
         isDead = false;
     }
 
+    public void SetMaxHealth(int newMaxHealth)
+    {
+        maxHealth = Mathf.Max(1, newMaxHealth);
+        currentHealth = maxHealth;
+    }
+
     public void TakeDamage(int damage)
     {
         if (isDead) return;

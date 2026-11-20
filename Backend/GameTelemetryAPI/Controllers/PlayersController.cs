@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using GameTelemetryAPI.Data;
 using GameTelemetryAPI.DTOs;
 using GameTelemetryAPI.Models;
+using GameTelemetryAPI.Services;
 
 namespace GameTelemetryAPI.Controllers
 {
@@ -18,7 +19,7 @@ namespace GameTelemetryAPI.Controllers
         }
 
         /// <summary>
-        /// Đăng ký người chơi mới (nếu tên đã tồn tại thì báo lỗi 409 Conflict)
+        /// Đăng ký tài khoản người chơi mới kèm mật khẩu (mã hóa PBKDF2).
         /// </summary>
         [HttpPost("register")]
         public async Task<ActionResult<PlayerResponseDto>> Register([FromBody] RegisterPlayerDto dto)
@@ -28,11 +29,14 @@ namespace GameTelemetryAPI.Controllers
                 return BadRequest(ModelState);
             }
 
-            var trimmedName = dto.PlayerName.Trim();
-            var existingPlayer = await _context.Players
-                .FirstOrDefaultAsync(p => p.PlayerName == trimmedName);
+            string trimmedName = dto.PlayerName.Trim();
+            if (trimmedName.Length < 3)
+            {
+                return BadRequest(new { message = "Tên người chơi phải có ít nhất 3 ký tự." });
+            }
 
-            if (existingPlayer != null)
+            bool exists = await _context.Players.AnyAsync(p => p.PlayerName == trimmedName);
+            if (exists)
             {
                 return Conflict(new { message = $"Tên người chơi '{trimmedName}' đã tồn tại. Vui lòng chọn tên khác hoặc đăng nhập." });
             }
@@ -40,22 +44,18 @@ namespace GameTelemetryAPI.Controllers
             var newPlayer = new Player
             {
                 PlayerName = trimmedName,
+                PasswordHash = PasswordHasherHelper.Hash(dto.Password),
                 CreatedAt = DateTime.UtcNow
             };
 
             _context.Players.Add(newPlayer);
             await _context.SaveChangesAsync();
 
-            return CreatedAtAction(nameof(GetPlayerById), new { id = newPlayer.PlayerId }, new PlayerResponseDto
-            {
-                PlayerId = newPlayer.PlayerId,
-                PlayerName = newPlayer.PlayerName,
-                CreatedAt = newPlayer.CreatedAt
-            });
+            return CreatedAtAction(nameof(GetPlayerById), new { id = newPlayer.PlayerId }, ToDto(newPlayer));
         }
 
         /// <summary>
-        /// Đăng nhập người chơi bằng PlayerName
+        /// Đăng nhập người chơi bằng PlayerName + Password.
         /// </summary>
         [HttpPost("login")]
         public async Task<ActionResult<PlayerResponseDto>> Login([FromBody] LoginPlayerDto dto)
@@ -65,50 +65,52 @@ namespace GameTelemetryAPI.Controllers
                 return BadRequest(ModelState);
             }
 
-            var trimmedName = dto.PlayerName.Trim();
+            string trimmedName = dto.PlayerName.Trim();
             var player = await _context.Players
+                .AsNoTracking()
                 .FirstOrDefaultAsync(p => p.PlayerName == trimmedName);
 
             if (player == null)
             {
-                return NotFound(new { message = $"Không tìm thấy người chơi có tên '{trimmedName}'. Vui lòng đăng ký trước." });
+                return Unauthorized(new { message = "Sai tên đăng nhập hoặc mật khẩu!" });
             }
 
-            return Ok(new PlayerResponseDto
+            if (string.IsNullOrEmpty(player.PasswordHash))
             {
-                PlayerId = player.PlayerId,
-                PlayerName = player.PlayerName,
-                CreatedAt = player.CreatedAt
-            });
+                return Unauthorized(new { message = "Tài khoản cũ chưa có mật khẩu. Vui lòng đăng ký tài khoản mới." });
+            }
+
+            if (!PasswordHasherHelper.Verify(dto.Password, player.PasswordHash))
+            {
+                return Unauthorized(new { message = "Sai tên đăng nhập hoặc mật khẩu!" });
+            }
+
+            return Ok(ToDto(player));
         }
 
         /// <summary>
-        /// Lấy thông tin người chơi theo ID
+        /// Lấy thông tin người chơi theo ID.
         /// </summary>
         [HttpGet("{id:int}")]
         public async Task<ActionResult<PlayerResponseDto>> GetPlayerById(int id)
         {
-            var player = await _context.Players.FindAsync(id);
+            var player = await _context.Players.AsNoTracking().FirstOrDefaultAsync(p => p.PlayerId == id);
             if (player == null)
             {
                 return NotFound(new { message = $"Không tìm thấy người chơi với ID {id}" });
             }
 
-            return Ok(new PlayerResponseDto
-            {
-                PlayerId = player.PlayerId,
-                PlayerName = player.PlayerName,
-                CreatedAt = player.CreatedAt
-            });
+            return Ok(ToDto(player));
         }
 
         /// <summary>
-        /// Lấy danh sách tất cả người chơi
+        /// Lấy danh sách tất cả người chơi.
         /// </summary>
         [HttpGet]
         public async Task<ActionResult<List<PlayerResponseDto>>> GetAllPlayers()
         {
             var players = await _context.Players
+                .AsNoTracking()
                 .OrderByDescending(p => p.CreatedAt)
                 .Select(p => new PlayerResponseDto
                 {
@@ -121,5 +123,12 @@ namespace GameTelemetryAPI.Controllers
 
             return Ok(players);
         }
+
+        private static PlayerResponseDto ToDto(Player player) => new PlayerResponseDto
+        {
+            PlayerId = player.PlayerId,
+            PlayerName = player.PlayerName,
+            CreatedAt = player.CreatedAt
+        };
     }
 }

@@ -8,7 +8,9 @@ BEGIN
     CREATE TABLE dbo.Players
     (
         PlayerId INT IDENTITY(1,1) PRIMARY KEY,
-        PlayerName NVARCHAR(50) NOT NULL,
+        PlayerName NVARCHAR(50) NOT NULL UNIQUE,
+        PasswordHash NVARCHAR(256) NOT NULL
+            DEFAULT '',
         CreatedAt DATETIME2 NOT NULL
             DEFAULT SYSDATETIME()
     );

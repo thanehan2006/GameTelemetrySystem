@@ -6,6 +6,10 @@ namespace GameTelemetryAPI.Models
     {
         public int PlayerId { get; set; }
         public string PlayerName { get; set; } = string.Empty;
+
+        [JsonIgnore]
+        public string PasswordHash { get; set; } = string.Empty;
+
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
         [JsonIgnore]
