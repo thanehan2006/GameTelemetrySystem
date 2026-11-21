@@ -88,6 +88,7 @@ public class CharacterSelectController : MonoBehaviour
     private int selectedIndex;
     private float targetHpStat, targetAtkStat, targetSpdStat, targetDefStat;
     private bool isDraggingHero;
+    private bool isTransitioning;
     private float dragStartMouseX;
     private float[] turntableYaws = new float[4];
     private MaterialPropertyBlock ringPropBlock;
@@ -242,11 +243,14 @@ public class CharacterSelectController : MonoBehaviour
 
     public void ConfirmAndPlay()
     {
+        if (isTransitioning) return;
+        isTransitioning = true;
+
         SelectedCharacterStore.SelectedIndex = selectedIndex;
         GameAudioManager.PlayWeaponEquip();
 
         string target = string.IsNullOrWhiteSpace(gameplaySceneName) ? "Lv1" : gameplaySceneName;
-        SceneManager.LoadScene(target);
+        LoadingController.LoadScene(target);
     }
 
     public void GoBackToLogin()

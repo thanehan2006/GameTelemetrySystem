@@ -264,16 +264,24 @@ public class GoldPickup : MonoBehaviour
         ps.Play();
     }
 
+    public static void RegisterPreloadedPrefabs(GameObject coinCrown, GameObject coinStar, GameObject bag, GameObject chestGold)
+    {
+        if (coinCrown != null) cachedCoinCrownPrefab = coinCrown;
+        if (coinStar != null) cachedCoinStarPrefab = coinStar;
+        if (bag != null) cachedBagPrefab = bag;
+        if (chestGold != null) cachedChestGoldPrefab = chestGold;
+    }
+
     private static void EnsureRewardPrefabs()
     {
         if (cachedCoinCrownPrefab == null)
-            cachedCoinCrownPrefab = Resources.Load<GameObject>("Rewards/SM_Rewards_CoinCrown");
+            cachedCoinCrownPrefab = GameAssetPreloader.GetAsset<GameObject>("Rewards/SM_Rewards_CoinCrown") ?? Resources.Load<GameObject>("Rewards/SM_Rewards_CoinCrown");
         if (cachedCoinStarPrefab == null)
-            cachedCoinStarPrefab = Resources.Load<GameObject>("Rewards/SM_Rewards_CoinStar");
+            cachedCoinStarPrefab = GameAssetPreloader.GetAsset<GameObject>("Rewards/SM_Rewards_CoinStar") ?? Resources.Load<GameObject>("Rewards/SM_Rewards_CoinStar");
         if (cachedBagPrefab == null)
-            cachedBagPrefab = Resources.Load<GameObject>("Rewards/SM_Rewards_Bag");
+            cachedBagPrefab = GameAssetPreloader.GetAsset<GameObject>("Rewards/SM_Rewards_Bag") ?? Resources.Load<GameObject>("Rewards/SM_Rewards_Bag");
         if (cachedChestGoldPrefab == null)
-            cachedChestGoldPrefab = Resources.Load<GameObject>("Rewards/SM_Rewards_ChestGold");
+            cachedChestGoldPrefab = GameAssetPreloader.GetAsset<GameObject>("Rewards/SM_Rewards_ChestGold") ?? Resources.Load<GameObject>("Rewards/SM_Rewards_ChestGold");
 
 #if UNITY_EDITOR
         if (cachedCoinCrownPrefab == null)

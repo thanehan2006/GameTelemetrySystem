@@ -152,8 +152,12 @@ MonoBehaviour:
   progressText: {fileID: 1413210094}
   loadingStatus: {fileID: 2089804636}
   sceneToLoad: LoginScene
-  startDelay: 0.35
-  loadingDuration: 3.2
+  startDelay: 0.25
+  minDisplayDuration: 0.6
+  progressSmoothSpeed: 2
+  readyHoldDuration: 0.25
+  preloadCoreAssets: 1
+  blockOnMissingRequiredAsset: 0
   keyArtRect: {fileID: 2145495629}
   tipText: {fileID: 1037001074}
 --- !u!4 &280825719

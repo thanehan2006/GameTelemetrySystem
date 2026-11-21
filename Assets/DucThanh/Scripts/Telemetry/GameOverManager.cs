@@ -468,7 +468,7 @@ public class GameOverManager : MonoBehaviour
         PlayerPrefs.Save();
 
         Scene currentScene = SceneManager.GetActiveScene();
-        SceneManager.LoadScene(currentScene.name);
+        LoadingController.LoadScene(currentScene.name);
     }
 
     public void QuitGame()

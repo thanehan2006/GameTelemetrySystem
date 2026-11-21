@@ -442,17 +442,16 @@ public class AuthUIController : MonoBehaviour
 
         authApiClient.Login(playerName, password, (success, response, message) =>
         {
-            SetInteractable(true);
-
             if (success)
             {
                 SetMessage(loginMessageText, message, SuccessColor);
                 Debug.Log($"[AuthUI] Đăng nhập thành công: #{response.playerId} ({response.playerName})");
                 string targetScene = Application.CanStreamedLevelBeLoaded(nextSceneName) ? nextSceneName : "Lv1";
-                SceneManager.LoadScene(targetScene);
+                LoadingController.LoadScene(targetScene);
             }
             else
             {
+                SetInteractable(true);
                 SetMessage(loginMessageText, message, ErrorColor);
                 if (loginPasswordInput != null)
                 {

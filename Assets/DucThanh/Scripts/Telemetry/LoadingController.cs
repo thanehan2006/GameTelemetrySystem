@@ -8,10 +8,15 @@ using TMPro;
 /// Màn hình Loading phong cách Action RPG AAA:
 /// - Hình nền nghệ thuật Rừng Orc & Mỏ Vàng kèm hiệu ứng Ken Burns zoom mượt + đom đóm bay.
 /// - Logo game VANGUARD: RAID OF THE ORC WOODS, mẹo chơi luân phiên chuẩn gameplay 3 Màn.
-/// - Thanh tiến trình vàng kim mượt mà, trạng thái nạp theo giai đoạn và chuyển sang LoginScene.
+/// - Tải trước toàn bộ asset bắt buộc (UI, Audio BGM/SFX, Nhân vật 3D, Phần thưởng, Shader) trước khi nạp Scene đích.
+/// - Chỉ hoàn tất & kích hoạt Scene đích khi cả tài nguyên lẫn Scene đã tải xong 100%.
 /// </summary>
 public class LoadingController : MonoBehaviour
 {
+    public const string LoadingSceneName = "LoadingScene";
+
+    private static string pendingTargetScene;
+
     [Header("UI")]
     [SerializeField] private Slider progressBar;
     [SerializeField] private TMP_Text progressText;
@@ -21,8 +26,17 @@ public class LoadingController : MonoBehaviour
     [SerializeField] private string sceneToLoad = "LoginScene";
 
     [Header("Loading Settings")]
-    [SerializeField] private float startDelay = 0.35f;
-    [SerializeField] private float loadingDuration = 3.2f;
+    [SerializeField] private float startDelay = 0.25f;
+    [SerializeField] private float minDisplayDuration = 0.6f;
+    [SerializeField] private float progressSmoothSpeed = 2.0f;
+    [SerializeField] private float readyHoldDuration = 0.25f;
+
+    [Header("Asset Preloading")]
+    [SerializeField] private bool preloadCoreAssets = true;
+    [SerializeField] private bool blockOnMissingRequiredAsset = false;
+    [SerializeField] private string[] extraResourcePaths;
+    [SerializeField] private Object[] directPreloadAssets;
+    [SerializeField] private ShaderVariantCollection[] shaderVariantCollections;
 
     private static readonly string[] GameplayTips =
     {
@@ -33,26 +47,50 @@ public class LoadingController : MonoBehaviour
         "Mẹo hồi phục: Nhặt Bình Hồi Máu phát sáng trên đường hoặc rơi từ quái và chạm Trại Lửa Checkpoint để hồi HP."
     };
 
-    private static readonly string[] StatusStages =
-    {
-        "Khởi tạo hệ thống Aegis Telemetry...",
-        "Nạp địa hình Rừng Orc & 3 Cứ Điểm...",
-        "Chuẩn bị vũ khí & hiệu ứng chiến đấu...",
-        "Đồng bộ kết nối máy chủ..."
-    };
-
     [Header("Optional Pre-Baked UI References")]
     [SerializeField] private RectTransform keyArtRect;
     [SerializeField] private TMP_Text tipText;
 
+    private float realProgress;
+    private float displayedProgress;
+    private float loadingStartRealtime;
+    private float nextTipSwitchTime;
+    private int tipIndex;
+    private int lastUiUpdateFrame = -1;
+
+    [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+    private static void ResetStaticState()
+    {
+        pendingTargetScene = null;
+    }
+
+    /// <summary>
+    /// Chuyển sang bất kỳ Scene nào thông qua LoadingScene để đảm bảo asset đã được tải đầy đủ trước khi vào màn.
+    /// </summary>
+    public static void LoadScene(string targetSceneName)
+    {
+        if (string.IsNullOrWhiteSpace(targetSceneName)) return;
+
+        Time.timeScale = 1f;
+        string currentSceneName = SceneManager.GetActiveScene().name;
+        if (Application.CanStreamedLevelBeLoaded(LoadingSceneName) && currentSceneName != LoadingSceneName)
+        {
+            pendingTargetScene = targetSceneName;
+            SceneManager.LoadScene(LoadingSceneName);
+            return;
+        }
+
+        SceneManager.LoadScene(targetSceneName);
+    }
+
     private void Start()
     {
+        Time.timeScale = 1f;
         Cursor.lockState = CursorLockMode.None;
         Cursor.visible = true;
 
-        // Giảm độ trễ quá dài từ cấu hình cũ để cảm giác tải game mượt mà chuẩn AAA
-        if (startDelay > 1.5f) startDelay = 0.35f;
-        if (loadingDuration > 5f) loadingDuration = 3.2f;
+        startDelay = Mathf.Clamp(startDelay, 0f, 1.5f);
+        minDisplayDuration = Mathf.Max(0f, minDisplayDuration);
 
         EnsureLoadingVisuals();
         StartCoroutine(LoadSceneAsync());
@@ -291,69 +329,177 @@ public class LoadingController : MonoBehaviour
             yield break;
         }
 
-        int tipIndex = Random.Range(0, GameplayTips.Length);
-        if (tipText != null) tipText.text = GameplayTips[tipIndex];
+        string requestedScene = pendingTargetScene;
+        pendingTargetScene = null;
 
-        progressBar.value = 0f;
-        progressText.text = "0%";
-        loadingStatus.text = StatusStages[0];
+        // Tự chuyển hướng MainScene cũ sang LoginScene theo luồng Loading -> Login -> PickCharacter -> Lv1
+        string targetScene = !string.IsNullOrWhiteSpace(requestedScene)
+            ? requestedScene.Trim()
+            : (string.IsNullOrWhiteSpace(sceneToLoad) || sceneToLoad == "MainScene" ? "LoginScene" : sceneToLoad.Trim());
 
-        // Tự chuyển hướng MainScene cũ sang LoginScene theo luồng Loading -> Login -> Lv1
-        string targetScene = string.IsNullOrWhiteSpace(sceneToLoad) || sceneToLoad == "MainScene"
-            ? "LoginScene"
-            : sceneToLoad;
-
-        AsyncOperation operation = SceneManager.LoadSceneAsync(targetScene);
-        if (operation == null)
+        if (string.Equals(targetScene, LoadingSceneName, System.StringComparison.OrdinalIgnoreCase))
         {
-            Debug.LogError("[LoadingController] Không thể tải Scene: " + targetScene);
+            targetScene = "LoginScene";
+        }
+
+        if (!Application.CanStreamedLevelBeLoaded(targetScene))
+        {
+            progressBar.value = 0f;
+            progressText.text = "0%";
+            loadingStatus.text = $"Lỗi: Không tìm thấy Scene '{targetScene}' trong Build Settings!";
+            Debug.LogError($"[LoadingController] Không thể tải Scene '{targetScene}' (chưa có trong Build Settings).");
             yield break;
         }
 
-        operation.allowSceneActivation = false;
+        tipIndex = Random.Range(0, GameplayTips.Length);
+        if (tipText != null) tipText.text = GameplayTips[tipIndex];
+
+        realProgress = 0f;
+        displayedProgress = 0f;
+        lastUiUpdateFrame = -1;
+        progressBar.value = 0f;
+        progressText.text = "0%";
+        loadingStatus.text = "Khởi tạo hệ thống tải tài nguyên...";
 
         if (startDelay > 0f)
         {
             yield return new WaitForSecondsRealtime(startDelay);
         }
 
-        float elapsedTime = 0f;
-        float nextTipSwitch = 1.9f;
+        loadingStartRealtime = Time.realtimeSinceStartup;
+        nextTipSwitchTime = loadingStartRealtime + 2.2f;
 
-        while (elapsedTime < loadingDuration || operation.progress < 0.9f)
+        // Giai đoạn 1: Tải xong toàn bộ asset trước khi gọi SceneManager.LoadSceneAsync (tránh kẹt hàng đợi PreloadManager)
+        GameAssetPreloader preloader = GameAssetPreloader.EnsureInstance();
+        bool needsCorePreload = preloadCoreAssets && (!GameAssetPreloader.IsCoreAssetsLoaded || GameAssetPreloader.HasMissingCoreAssets);
+        bool hasExtras = (extraResourcePaths != null && extraResourcePaths.Length > 0)
+            || (shaderVariantCollections != null && shaderVariantCollections.Length > 0);
+
+        float assetWeight = needsCorePreload ? 0.70f : (hasExtras ? 0.25f : 0.10f);
+        float sceneWeight = 1f - assetWeight;
+
+        while (true)
         {
-            elapsedTime += Time.unscaledDeltaTime;
+            yield return preloader.PreloadAssetsCoroutine(
+                preloadCoreAssets,
+                extraResourcePaths,
+                directPreloadAssets,
+                shaderVariantCollections,
+                (assetProgress, status) => UpdateLoadingUi(assetProgress * assetWeight, status));
 
-            float timeProgress = loadingDuration > 0.01f ? Mathf.Clamp01(elapsedTime / loadingDuration) : 1f;
-            float actualProgress = Mathf.Clamp01(operation.progress / 0.9f);
-            float displayProgress = Mathf.Min(timeProgress, actualProgress);
-
-            // Easing nhẹ cho thanh tải chạy mượt mắt
-            float eased = Mathf.SmoothStep(0f, 1f, displayProgress);
-            progressBar.value = eased;
-
-            int percentage = Mathf.RoundToInt(eased * 100f);
-            progressText.text = percentage + "%";
-
-            int stageIdx = Mathf.Clamp(Mathf.FloorToInt(eased * StatusStages.Length), 0, StatusStages.Length - 1);
-            loadingStatus.text = StatusStages[stageIdx];
-
-            if (tipText != null && elapsedTime >= nextTipSwitch)
+            if (!blockOnMissingRequiredAsset || preloader.MissingRequiredAssets.Count == 0)
             {
-                nextTipSwitch += 2.0f;
-                tipIndex = (tipIndex + 1) % GameplayTips.Length;
-                tipText.text = GameplayTips[tipIndex];
+                break;
             }
 
+            string firstMissing = preloader.MissingRequiredAssets[0];
+            loadingStatus.text = $"Thiếu {preloader.MissingRequiredAssets.Count} tài nguyên bắt buộc ({firstMissing}). Nhấn [R] để tải lại.";
+
+            while (!Input.GetKeyDown(KeyCode.R))
+            {
+                yield return null;
+            }
+
+            realProgress = 0f;
+            displayedProgress = 0f;
+            lastUiUpdateFrame = -1;
+            progressBar.value = 0f;
+            progressText.text = "0%";
+            loadingStatus.text = "Đang tải lại tài nguyên...";
             yield return null;
         }
 
+        // Giai đoạn 2: Tải bất đồng bộ Scene đích sau khi toàn bộ asset đã hoàn tất
+        AsyncOperation operation = SceneManager.LoadSceneAsync(targetScene);
+        if (operation == null)
+        {
+            loadingStatus.text = $"Lỗi: Không thể tải Scene '{targetScene}'!";
+            Debug.LogError("[LoadingController] Không thể tải Scene: " + targetScene);
+            yield break;
+        }
+
+        operation.allowSceneActivation = false;
+        string displaySceneName = GetSceneDisplayName(targetScene);
+
+        while (operation.progress < 0.9f
+            || displayedProgress < 0.999f
+            || (Time.realtimeSinceStartup - loadingStartRealtime) < minDisplayDuration)
+        {
+            float sceneProgress = Mathf.Clamp01(operation.progress / 0.9f);
+            float targetReal = assetWeight + sceneProgress * sceneWeight;
+            string status = operation.progress < 0.9f
+                ? $"Đang nạp tài nguyên cảnh {displaySceneName} ({Mathf.RoundToInt(sceneProgress * 100f)}%)..."
+                : $"Hoàn tất nạp tài nguyên {displaySceneName}...";
+
+            UpdateLoadingUi(targetReal, status);
+            yield return null;
+        }
+
+        // Giai đoạn 3: Chốt 100% và kích hoạt Scene đích
         progressBar.value = 1f;
         progressText.text = "100%";
-        loadingStatus.text = "Sẵn sàng ra trận!";
+        loadingStatus.text = "Đã tải xong tài nguyên — Sẵn sàng ra trận!";
 
-        yield return new WaitForSecondsRealtime(0.35f);
+        if (readyHoldDuration > 0f)
+        {
+            yield return new WaitForSecondsRealtime(readyHoldDuration);
+        }
 
         operation.allowSceneActivation = true;
+        while (!operation.isDone)
+        {
+            yield return null;
+        }
+    }
+
+    private void UpdateLoadingUi(float targetRealProgress, string statusText)
+    {
+        realProgress = Mathf.Max(realProgress, Mathf.Clamp01(targetRealProgress));
+
+        int currentFrame = Time.frameCount;
+        if (currentFrame != lastUiUpdateFrame)
+        {
+            lastUiUpdateFrame = currentFrame;
+            float speed = Mathf.Max(0.1f, progressSmoothSpeed);
+            displayedProgress = Mathf.Min(
+                realProgress,
+                Mathf.MoveTowards(displayedProgress, realProgress, speed * Time.unscaledDeltaTime));
+        }
+
+        if (progressBar != null)
+        {
+            progressBar.value = displayedProgress;
+        }
+
+        if (progressText != null)
+        {
+            int percentage = displayedProgress >= 0.999f
+                ? 100
+                : Mathf.Clamp(Mathf.FloorToInt(displayedProgress * 100f), 0, 99);
+            progressText.text = percentage + "%";
+        }
+
+        if (loadingStatus != null && !string.IsNullOrEmpty(statusText))
+        {
+            loadingStatus.text = statusText;
+        }
+
+        if (tipText != null && Time.realtimeSinceStartup >= nextTipSwitchTime)
+        {
+            nextTipSwitchTime = Time.realtimeSinceStartup + 2.2f;
+            tipIndex = (tipIndex + 1) % GameplayTips.Length;
+            tipText.text = GameplayTips[tipIndex];
+        }
+    }
+
+    private static string GetSceneDisplayName(string sceneName)
+    {
+        return sceneName switch
+        {
+            "LoginScene" => "Đăng Nhập",
+            "PickCharacter" => "Chọn Nhân Vật",
+            "Lv1" => "Rừng Orc (Màn 1)",
+            _ => sceneName
+        };
     }
 }

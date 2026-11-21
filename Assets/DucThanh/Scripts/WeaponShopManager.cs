@@ -565,8 +565,8 @@ public class WeaponShopManager : MonoBehaviour
         if (canvas == null) return;
 
         TMP_FontAsset font = canvas.GetComponentInChildren<TMP_Text>(true)?.font;
-        Texture2D potionTex = Resources.Load<Texture2D>("UI/icon_potion");
-        Texture2D goldTex = Resources.Load<Texture2D>("UI/icon_gold");
+        Texture2D potionTex = GameAssetPreloader.GetAsset<Texture2D>("UI/icon_potion") ?? Resources.Load<Texture2D>("UI/icon_potion");
+        Texture2D goldTex = GameAssetPreloader.GetAsset<Texture2D>("UI/icon_gold") ?? Resources.Load<Texture2D>("UI/icon_gold");
 
         // 1. Nền phủ tối kèm hạt tàn lửa vàng kim
         shopOverlayRoot = new GameObject("WeaponShopOverlay", typeof(RectTransform), typeof(Image), typeof(CanvasGroup));

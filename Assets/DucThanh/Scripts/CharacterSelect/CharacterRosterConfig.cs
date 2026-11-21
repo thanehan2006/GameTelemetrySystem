@@ -65,6 +65,21 @@ public static class SelectedCharacterStore
     private static int cachedIndex = -1;
     private static CharacterRosterConfig cachedRoster;
 
+    [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+    private static void ResetStaticState()
+    {
+        cachedIndex = -1;
+        cachedRoster = null;
+    }
+
+    public static void SetPreloadedRoster(CharacterRosterConfig roster)
+    {
+        if (roster != null)
+        {
+            cachedRoster = roster;
+        }
+    }
+
     public static int SelectedIndex
     {
         get
@@ -87,7 +102,8 @@ public static class SelectedCharacterStore
     {
         if (cachedRoster == null)
         {
-            cachedRoster = Resources.Load<CharacterRosterConfig>(CharacterRosterConfig.ResourcePath);
+            cachedRoster = GameAssetPreloader.GetAsset<CharacterRosterConfig>(CharacterRosterConfig.ResourcePath)
+                ?? Resources.Load<CharacterRosterConfig>(CharacterRosterConfig.ResourcePath);
         }
         return cachedRoster;
     }

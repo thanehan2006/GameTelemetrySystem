@@ -286,8 +286,10 @@ public static class SceneObjectBakerTool
 
         ctrlSo.FindProperty("keyArtRect").objectReferenceValue = artRt;
         ctrlSo.FindProperty("tipText").objectReferenceValue = tip;
-        ctrlSo.FindProperty("startDelay").floatValue = 0.35f;
-        ctrlSo.FindProperty("loadingDuration").floatValue = 3.2f;
+        var startDelayProp = ctrlSo.FindProperty("startDelay");
+        if (startDelayProp != null) startDelayProp.floatValue = 0.25f;
+        var minDisplayProp = ctrlSo.FindProperty("minDisplayDuration");
+        if (minDisplayProp != null) minDisplayProp.floatValue = 0.6f;
         ctrlSo.ApplyModifiedPropertiesWithoutUndo();
 
         EditorSceneManager.MarkSceneDirty(scene);

@@ -237,12 +237,38 @@ public class GameAudioManager : MonoBehaviour
         src.PlayOneShot(clip, Mathf.Clamp01(sfxVolume * volumeScale));
     }
 
+    public void RegisterPreloadedClip(string clipName, AudioClip clip)
+    {
+        if (string.IsNullOrEmpty(clipName) || clip == null) return;
+        clipCache[clipName] = clip;
+    }
+
+    public bool HasCachedClip(string clipName)
+    {
+        if (string.IsNullOrEmpty(clipName)) return false;
+        return clipCache.TryGetValue(clipName, out AudioClip cached) && cached != null;
+    }
+
     private AudioClip LoadClip(string clipName)
     {
         if (string.IsNullOrEmpty(clipName)) return null;
-        if (clipCache.TryGetValue(clipName, out AudioClip cached)) return cached;
+        if (clipCache.TryGetValue(clipName, out AudioClip cached))
+        {
+            if (cached != null) return cached;
+            AudioClip preloaded = GameAssetPreloader.GetAsset<AudioClip>("Audio/" + clipName);
+            if (preloaded != null)
+            {
+                clipCache[clipName] = preloaded;
+                return preloaded;
+            }
+            return null;
+        }
 
-        AudioClip loaded = Resources.Load<AudioClip>("Audio/" + clipName);
+        AudioClip loaded = GameAssetPreloader.GetAsset<AudioClip>("Audio/" + clipName);
+        if (loaded == null)
+        {
+            loaded = Resources.Load<AudioClip>("Audio/" + clipName);
+        }
         clipCache[clipName] = loaded;
         return loaded;
     }

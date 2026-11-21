@@ -39,11 +39,20 @@ public class HealthPickup : MonoBehaviour
     private float phaseOffset;
     private bool collected;
 
+    public static void RegisterPreloadedPrefab(GameObject potionPrefab)
+    {
+        if (potionPrefab != null)
+        {
+            cachedPotionPrefab = potionPrefab;
+        }
+    }
+
     public static GameObject GetPotionPrefab()
     {
         if (cachedPotionPrefab == null)
         {
-            cachedPotionPrefab = Resources.Load<GameObject>("Rewards/SM_Rewards_Bottle");
+            cachedPotionPrefab = GameAssetPreloader.GetAsset<GameObject>("Rewards/SM_Rewards_Bottle")
+                ?? Resources.Load<GameObject>("Rewards/SM_Rewards_Bottle");
         }
 #if UNITY_EDITOR
         if (cachedPotionPrefab == null)

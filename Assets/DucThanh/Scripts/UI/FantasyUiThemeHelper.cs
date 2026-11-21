@@ -45,7 +45,7 @@ public static class FantasyUiThemeHelper
         StretchFull(rt);
 
         RawImage raw = bgObj.GetComponent<RawImage>();
-        Texture2D tex = Resources.Load<Texture2D>(resourcePath);
+        Texture2D tex = GameAssetPreloader.GetAsset<Texture2D>(resourcePath) ?? Resources.Load<Texture2D>(resourcePath);
         if (tex != null)
         {
             raw.texture = tex;
@@ -241,6 +241,13 @@ public static class FantasyUiThemeHelper
         rt.anchorMax = Vector2.one;
         rt.offsetMin = Vector2.zero;
         rt.offsetMax = Vector2.zero;
+    }
+
+    public static void PrewarmUiSprites()
+    {
+        GetSoftDotSprite();
+        GetVerticalGradientSprite();
+        GetHorizontalGradientSprite();
     }
 
     public static Sprite GetSoftDotSprite()
