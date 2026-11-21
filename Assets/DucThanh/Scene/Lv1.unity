@@ -3518,7 +3518,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: f3e948f58697dca498984f5cf0d8a43b, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::TelemetryManager
-  baseUrl: https://localhost:7013
+  baseUrl: https://sjf1zkj0-7013.asse.devtunnels.ms
   sendToBackend: 1
   sessionApiClient: {fileID: 0}
   currentLevel: 1
@@ -6529,7 +6529,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: ad742023f7a7dc547956a015e97cf281, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::SessionApiClient
-  baseUrl: https://localhost:7013
+  baseUrl: https://sjf1zkj0-7013.asse.devtunnels.ms
 --- !u!4 &1711366523
 Transform:
   m_ObjectHideFlags: 0

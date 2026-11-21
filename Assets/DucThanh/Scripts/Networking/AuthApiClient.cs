@@ -6,9 +6,10 @@ using UnityEngine.Networking;
 
 public static class ApiConfig
 {
-    public const string DEFAULT_BASE_URL = "https://localhost:7013";
+    public const string LOCAL_HTTPS_URL = "https://localhost:7013";
     public const string LOCAL_HTTP_URL = "http://localhost:5295";
     public const string DEVTUNNEL_URL = "https://sjf1zkj0-7013.asse.devtunnels.ms";
+    public const string DEFAULT_BASE_URL = DEVTUNNEL_URL;
 
     public static string GetBaseUrl()
     {
@@ -23,6 +24,11 @@ public static class ApiConfig
             || url.StartsWith("https://127.0.0.1", StringComparison.OrdinalIgnoreCase))
         {
             request.certificateHandler = new LocalhostCertificateHandler();
+        }
+
+        if (url.IndexOf(".devtunnels.ms", StringComparison.OrdinalIgnoreCase) >= 0)
+        {
+            request.SetRequestHeader("X-Tunnel-Skip-AntiPhishing-Page", "true");
         }
     }
 

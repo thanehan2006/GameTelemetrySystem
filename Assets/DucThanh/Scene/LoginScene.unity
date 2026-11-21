@@ -148,7 +148,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 0b7f3daa6be03b240bdaa0d048e6d7cc, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::AuthApiClient
-  baseUrl: https://localhost:7013
+  baseUrl: https://sjf1zkj0-7013.asse.devtunnels.ms
 --- !u!4 &76071031
 Transform:
   m_ObjectHideFlags: 0

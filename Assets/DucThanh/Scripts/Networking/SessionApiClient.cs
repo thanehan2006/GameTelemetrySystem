@@ -100,7 +100,7 @@ public class SessionApiClient : MonoBehaviour
             else
             {
                 string error = request.downloadHandler?.text;
-                Debug.LogError($"[SessionApiClient] Start Session Error: {error}");
+                Debug.LogError($"[SessionApiClient] Start Session Error ({request.responseCode} {request.error}) [{url}]: {error}");
                 callback?.Invoke(false, 0, $"{request.error} - {error}");
             }
         }
@@ -157,7 +157,7 @@ public class SessionApiClient : MonoBehaviour
             else
             {
                 string error = request.downloadHandler?.text;
-                Debug.LogError($"[SessionApiClient] End Session Error: {error}");
+                Debug.LogError($"[SessionApiClient] End Session Error ({request.responseCode} {request.error}) [{url}]: {error}");
                 callback?.Invoke(false, $"{request.error} - {error}");
             }
         }
