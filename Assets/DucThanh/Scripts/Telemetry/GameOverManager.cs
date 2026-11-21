@@ -249,6 +249,7 @@ public class GameOverManager : MonoBehaviour
             oldTryAgain.SetParent(cardGo.transform, false);
             tryAgainButton = oldTryAgain.GetComponent<Button>();
             SetCardRect(oldTryAgain.GetComponent<RectTransform>(), -195f, -504f, 360f, 68f);
+            ConfigureActionButton(tryAgainButton, TryAgain);
         }
 
         if (oldQuit != null)
@@ -256,6 +257,33 @@ public class GameOverManager : MonoBehaviour
             oldQuit.SetParent(cardGo.transform, false);
             quitButton = oldQuit.GetComponent<Button>();
             SetCardRect(oldQuit.GetComponent<RectTransform>(), 195f, -504f, 360f, 68f);
+            ConfigureActionButton(quitButton, QuitGame);
+        }
+    }
+
+    private static void ConfigureActionButton(Button btn, UnityEngine.Events.UnityAction fallbackAction)
+    {
+        if (btn == null) return;
+
+        btn.interactable = true;
+        btn.transform.SetAsLastSibling();
+
+        Image bg = btn.GetComponent<Image>();
+        if (bg != null) bg.raycastTarget = true;
+
+        Graphic[] childGraphics = btn.GetComponentsInChildren<Graphic>(true);
+        for (int i = 0; i < childGraphics.Length; i++)
+        {
+            if (childGraphics[i] != null && childGraphics[i] != bg)
+            {
+                childGraphics[i].raycastTarget = false;
+            }
+        }
+
+        if (fallbackAction != null && btn.onClick.GetPersistentEventCount() == 0)
+        {
+            btn.onClick.RemoveListener(fallbackAction);
+            btn.onClick.AddListener(fallbackAction);
         }
     }
 
@@ -448,7 +476,12 @@ public class GameOverManager : MonoBehaviour
         GameAudioManager.PlayUiClick();
         TelemetryManager.Instance?.TrackGameEnded("Quit");
         Time.timeScale = 1f;
+        IsGameOver = false;
+#if UNITY_EDITOR
+        UnityEditor.EditorApplication.isPlaying = false;
+#else
         Application.Quit();
+#endif
         Debug.Log("[GameOverManager] QUIT GAME");
     }
 }

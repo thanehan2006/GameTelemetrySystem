@@ -75,18 +75,23 @@ public class OrcWeaponHitbox : MonoBehaviour
                 CombatVfxManager.SpawnBlockSpark(guardPos, guardDir, perfectParry);
                 GameAudioManager.PlayWeaponEquip();
 
-                if (Camera.main != null)
+                if (ThirdPersonCamera.Instance != null)
                 {
-                    ThirdPersonCamera cam = Camera.main.GetComponent<ThirdPersonCamera>();
-                    if (cam != null) cam.AddCameraShake(perfectParry ? 0.14f : 0.08f, 0.09f);
+                    ThirdPersonCamera.Instance.AddCameraShake(perfectParry ? 0.14f : 0.08f, 0.09f);
                 }
 
                 if (perfectParry)
                 {
-                    // Perfect Parry: 0 sát thương + đẩy choáng ngược lại Orc!
+                    // Perfect Parry: 0 sát thương + đẩy choáng ngược lại Orc + hồi 5% Max HP!
+                    int healedHp = playerHealth.HealPercent(playerController.perfectParryHealPercent);
+
+                    CombatVfxManager.SpawnFloatingText(guardPos + Vector3.up * 0.55f, "PARRY!", new Color(1f, 0.9f, 0.3f), 1.2f, 1.0f);
+                    CombatVfxManager.SpawnHealEffect(playerHealth.transform, healedHp, true);
+
                     if (ownerAI != null)
                     {
-                        ownerAI.ApplyKnockback(playerHealth.transform.position, 9.5f, true);
+                        ownerAI.ApplyParryStun(playerHealth.transform.position, 9.5f);
+                        CombatVfxManager.SpawnFloatingText(ownerAI.transform.position + Vector3.up * 2.45f, "CHOÁNG!", new Color(1f, 0.92f, 0.35f), 1.05f, 1.2f);
                     }
 
                     if (TelemetryManager.Instance != null)
@@ -96,10 +101,11 @@ public class OrcWeaponHitbox : MonoBehaviour
 
                     if (StageManager.Instance != null)
                     {
-                        StageManager.Instance.ShowBanner("ĐỠ ĐÒN HOÀN HẢO! (PARRY)", new Color(1f, 0.86f, 0.25f), 1.4f);
+                        string bannerText = healedHp > 0
+                            ? $"ĐỠ ĐÒN HOÀN HẢO! (PARRY +{healedHp} HP)"
+                            : "ĐỠ ĐÒN HOÀN HẢO! (PARRY)";
+                        StageManager.Instance.ShowBanner(bannerText, new Color(1f, 0.86f, 0.25f), 1.4f);
                     }
-
-                    Debug.Log($"[OrcWeaponHitbox] Player PERFECT PARRY đòn đánh của {(ownerAI != null ? ownerAI.gameObject.name : gameObject.name)}!");
                 }
                 else
                 {
@@ -108,6 +114,8 @@ public class OrcWeaponHitbox : MonoBehaviour
                     int blockedAmount = Mathf.Max(0, damage - reducedDamage);
                     playerHealth.TakeDamage(reducedDamage);
 
+                    CombatVfxManager.SpawnFloatingText(guardPos + Vector3.up * 0.45f, $"ĐỠ -{reducedDamage}", new Color(0.55f, 0.92f, 1f), 0.92f, 0.85f);
+
                     float kbForce = (ownerAI != null ? ownerAI.playerKnockbackForce : 6.5f) * 0.25f;
                     playerController.ApplyKnockback(sourcePos, kbForce);
 
@@ -115,8 +123,6 @@ public class OrcWeaponHitbox : MonoBehaviour
                     {
                         TelemetryManager.Instance.TrackBlockHit(blockedAmount);
                     }
-
-                    Debug.Log($"[OrcWeaponHitbox] Player ĐỠ ĐÒN! Chặn {blockedAmount} DMG, chỉ nhận {reducedDamage} DMG.");
                 }
 
                 return;
@@ -124,14 +130,13 @@ public class OrcWeaponHitbox : MonoBehaviour
 
             playerHealth.TakeDamage(damage);
             CombatVfxManager.SpawnBloodHit(hitPoint, playerHealth.transform.position - sourcePos, damage >= 24);
+            CombatVfxManager.SpawnFloatingText(hitPoint + Vector3.up * 0.75f, $"-{damage}", new Color(1f, 0.3f, 0.26f), damage >= 24 ? 1.05f : 0.9f, 0.85f);
 
             if (playerController != null)
             {
                 float kbForce = ownerAI != null ? ownerAI.playerKnockbackForce : 6.5f;
                 playerController.ApplyKnockback(sourcePos, kbForce);
             }
-
-            Debug.Log($"[OrcWeaponHitbox] Vũ khí của {(ownerAI != null ? ownerAI.gameObject.name : gameObject.name)} chém TRÚNG Player! Gây {damage} damage.");
         }
     }
 }

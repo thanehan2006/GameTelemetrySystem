@@ -13,6 +13,7 @@ public class EnemyHealth : MonoBehaviour
     private static readonly int BaseColorId = Shader.PropertyToID("_BaseColor");
     private static readonly int ColorId = Shader.PropertyToID("_Color");
     private static readonly int DeathStateHash = Animator.StringToHash("Death");
+    private static readonly WaitForSeconds HitFlashWait = new WaitForSeconds(0.1f);
 
     [Header("Health Settings")]
     public int maxHealth = 100;
@@ -56,7 +57,6 @@ public class EnemyHealth : MonoBehaviour
 
         currentHealth = Mathf.Clamp(currentHealth - damage, 0, maxHealth);
         OnHealthChanged?.Invoke(currentHealth, maxHealth);
-        Debug.Log($"[EnemyHealth] {gameObject.name} HP: {currentHealth}/{maxHealth}");
 
         if (currentHealth <= 0)
         {
@@ -78,7 +78,7 @@ public class EnemyHealth : MonoBehaviour
     private IEnumerator HitFlashCoroutine()
     {
         ApplyTintToRenderers(new Color(1f, 0.32f, 0.28f, 1f));
-        yield return new WaitForSeconds(0.1f);
+        yield return HitFlashWait;
         ClearTintFromRenderers();
         hitFlashRoutine = null;
     }
@@ -143,7 +143,7 @@ public class EnemyHealth : MonoBehaviour
 
         if (goldReward > 0)
         {
-            GoldPickup.SpawnGoldBurst(transform.position, goldReward, isBoss ? 6 : 3);
+            GoldPickup.SpawnGoldBurst(transform.position, goldReward, isBoss ? 8 : 3, isBoss);
         }
 
         // Tỷ lệ rơi nấm hồi máu sau khi hạ quái thường
@@ -215,13 +215,20 @@ public class EnemyHealth : MonoBehaviour
         if (isBoss || dropHealChance <= 0f) return;
         if (UnityEngine.Random.value > dropHealChance) return;
 
-        Vector3 dropPos = transform.position + Vector3.up * 0.25f;
-        GameObject dropObj = healPickupPrefab != null
-            ? Instantiate(healPickupPrefab, dropPos, Quaternion.identity)
+        Vector3 dropPos = transform.position + Vector3.up * 0.2f;
+        GameObject potionPrefab = HealthPickup.GetPotionPrefab();
+        GameObject prefabToUse = potionPrefab != null ? potionPrefab : healPickupPrefab;
+
+        GameObject dropObj = prefabToUse != null
+            ? Instantiate(prefabToUse, dropPos, Quaternion.identity)
             : GameObject.CreatePrimitive(PrimitiveType.Sphere);
 
-        dropObj.name = "Dropped_HealthPickup";
-        if (healPickupPrefab == null)
+        dropObj.name = "Dropped_HealthPotion";
+        if (prefabToUse == potionPrefab && potionPrefab != null)
+        {
+            dropObj.transform.localScale = Vector3.one * 1.95f;
+        }
+        else if (prefabToUse == null)
         {
             dropObj.transform.position = dropPos;
             dropObj.transform.localScale = Vector3.one * 0.5f;

@@ -18,7 +18,7 @@ public class AuthUIController : MonoBehaviour
 
     [Header("API & Navigation")]
     [SerializeField] private AuthApiClient authApiClient;
-    [SerializeField] private string nextSceneName = "Lv1";
+    [SerializeField] private string nextSceneName = "PickCharacter";
 
     [Header("Panels")]
     [SerializeField] private GameObject loginPanel;
@@ -448,7 +448,8 @@ public class AuthUIController : MonoBehaviour
             {
                 SetMessage(loginMessageText, message, SuccessColor);
                 Debug.Log($"[AuthUI] Đăng nhập thành công: #{response.playerId} ({response.playerName})");
-                SceneManager.LoadScene(nextSceneName);
+                string targetScene = Application.CanStreamedLevelBeLoaded(nextSceneName) ? nextSceneName : "Lv1";
+                SceneManager.LoadScene(targetScene);
             }
             else
             {

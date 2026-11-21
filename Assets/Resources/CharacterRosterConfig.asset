@@ -1,0 +1,103 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 65a534d84f1ed9248bc7af52666b1b78, type: 3}
+  m_Name: CharacterRosterConfig
+  m_EditorClassIdentifier: Assembly-CSharp::CharacterRosterConfig
+  characters:
+  - id: vanguard
+    displayName: VANGUARD
+    title: "Chi\u1EBFn Binh Ti\xEAn Phong"
+    roleBadge: "C\xC2N B\u1EB0NG"
+    description: "Hi\u1EC7p s\u0129 thi\u1EBFt gi\xE1p to\xE0n di\u1EC7n v\u1EDBi
+      ki\u1EBFm ph\xE1p v\u1EEFng ch\u1EAFc, ph\xF9 h\u1EE3p m\u1ECDi t\xECnh hu\u1ED1ng
+      giao tranh v\xE0 ph\u1EA3n \u0111\xF2n Parry."
+    signaturePerk: "V\u0169 kh\xED: Ki\u1EBFm Thi\u1EBFt Gi\xE1p  \u2022  C\xF4ng
+      & Th\u1EE7 c\xE2n b\u1EB1ng"
+    themeColor: {r: 0.95, g: 0.74, b: 0.28, a: 1}
+    modelPrefab: {fileID: 919132149155446097, guid: 4aeedd7805a214440a59db1e9147f2bb, type: 3}
+    startingWeaponPrefab: {fileID: 1753325093932854839, guid: a3884a940f9a8d3418a27008b045837c, type: 3}
+    maxHealth: 180
+    attackDamage: 35
+    moveSpeed: 6.5
+    knockbackForce: 7.5
+    blockDamageReduction: 0.8
+    perfectParryHealPercent: 0.05
+    statHealth: 76
+    statAttack: 72
+    statSpeed: 72
+    statDefense: 78
+  - id: maria
+    displayName: MARIA
+    title: "Ki\u1EBFm S\u0129 B\xE3o T\u1ED1"
+    roleBadge: "T\u1ED0C \u0110\u1ED8 CAO"
+    description: "N\u1EEF ki\u1EBFm s\u0129 linh ho\u1EA1t s\u1EDF h\u1EEFu b\u01B0\u1EDBc
+      ch\u1EA1y th\u1EA7n t\u1ED1c v\xE0 nh\xE1t ch\xE9m s\u1EAFc b\xE9n, d\u1EC5
+      d\xE0ng n\xE9 b\u1EABy v\xE0 \xE1p s\xE1t m\u1EE5c ti\xEAu."
+    signaturePerk: "V\u0169 kh\xED: B\u0103ng Tinh Ki\u1EBFm  \u2022  Ch\u1EA1y nhanh
+      7.3 m/s"
+    themeColor: {r: 0.28, g: 0.84, b: 0.98, a: 1}
+    modelPrefab: {fileID: 919132149155446097, guid: b955f54666376bd46a1f5f6c278edfbe, type: 3}
+    startingWeaponPrefab: {fileID: 2839524829476184550, guid: b31cf3d5ac315214a950e823cb9e2b9f, type: 3}
+    maxHealth: 155
+    attackDamage: 38
+    moveSpeed: 7.3
+    knockbackForce: 7
+    blockDamageReduction: 0.78
+    perfectParryHealPercent: 0.05
+    statHealth: 64
+    statAttack: 79
+    statSpeed: 94
+    statDefense: 70
+  - id: vampire
+    displayName: VAMPIRE
+    title: "L\xE3nh Ch\xFAa Huy\u1EBFt Nguy\u1EC7t"
+    roleBadge: "S\xC1T TH\u01AF\u01A0NG / H\u1ED2I PH\u1EE4C"
+    description: "Huy\u1EBFt t\u1ED9c mang l\u01B0\u1EE1i h\xE1i t\u1EED th\u1EA7n
+      v\u1EDBi s\xE1t th\u01B0\u01A1ng c\u01A1 b\u1EA3n cao nh\u1EA5t v\xE0 kh\u1EA3
+      n\u0103ng h\xFAt sinh l\u1EF1c v\u01B0\u1EE3t tr\u1ED9i khi Parry."
+    signaturePerk: "V\u0169 kh\xED: L\u01B0\u1EE1i H\xE1i Huy\u1EBFt Nguy\u1EC7t 
+      \u2022  Parry h\u1ED3i 8% HP"
+    themeColor: {r: 0.95, g: 0.26, b: 0.36, a: 1}
+    modelPrefab: {fileID: 919132149155446097, guid: 1f2a8e7e6f4d3ef4499337842d52dcae, type: 3}
+    startingWeaponPrefab: {fileID: 5221380844292194378, guid: f0f31d6958f5de143bf9963ec2a41351, type: 3}
+    maxHealth: 165
+    attackDamage: 42
+    moveSpeed: 6.8
+    knockbackForce: 7.8
+    blockDamageReduction: 0.75
+    perfectParryHealPercent: 0.08
+    statHealth: 69
+    statAttack: 92
+    statSpeed: 80
+    statDefense: 66
+  - id: maw
+    displayName: MAW
+    title: "Kh\u1ED5ng L\u1ED3 Ph\xE1 Gi\xE1p"
+    roleBadge: "TANKER / \u0110\u1EA8Y L\xD9I"
+    description: "Chi\u1EBFn t\u01B0\u1EDBng h\u1ED9 ph\xE1p v\u1EDBi l\u01B0\u1EE3ng
+      sinh l\u1EF1c d\u1ED3i d\xE0o, gi\xE1p \u0111\u1EE1 85% s\xE1t th\u01B0\u01A1ng
+      v\xE0 c\xFA n\u1EC7n b\xFAa h\u1EA5t v\u0103ng c\u1EA3 b\u1EA7y Orc."
+    signaturePerk: "V\u0169 kh\xED: \u0110\u1EA1i Ch\xF9y Chi\u1EBFn Th\u1EA7n  \u2022 
+      230 HP & \u0110\u1EE1 85%"
+    themeColor: {r: 0.74, g: 0.44, b: 0.98, a: 1}
+    modelPrefab: {fileID: 919132149155446097, guid: 9d71d71273d014343a410cc81c3ccefa, type: 3}
+    startingWeaponPrefab: {fileID: 5882740418562934682, guid: dea89ad487fba0d43998917fd5f30879, type: 3}
+    maxHealth: 230
+    attackDamage: 40
+    moveSpeed: 6
+    knockbackForce: 9.5
+    blockDamageReduction: 0.85
+    perfectParryHealPercent: 0.05
+    statHealth: 96
+    statAttack: 84
+    statSpeed: 60
+    statDefense: 94

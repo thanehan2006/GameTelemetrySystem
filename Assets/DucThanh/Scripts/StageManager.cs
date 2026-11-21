@@ -13,6 +13,10 @@ using TMPro;
 /// </summary>
 public class StageManager : MonoBehaviour
 {
+    private static readonly int BaseColorId = Shader.PropertyToID("_BaseColor");
+    private static readonly int ColorId = Shader.PropertyToID("_Color");
+    private static readonly RaycastHit[] TerrainHitBuffer = new RaycastHit[16];
+
     public static StageManager Instance { get; private set; }
 
     private enum StagePhase
@@ -67,8 +71,12 @@ public class StageManager : MonoBehaviour
     private OrcEnemyAI activeBossAI;
     private bool bossEnraged;
 
-    // Waypoint Beacon dẫn đường
+    // Waypoint Beacon dẫn đường (HDR Light Pillar + Rotating Rune Ring + Motes)
     private GameObject beaconObject;
+    private Transform beaconRingTransform;
+    private Material beaconBeamMat;
+    private Material beaconRingMat;
+    private ParticleSystem beaconMotesPs;
     private Vector3 currentWaypointTarget;
 
     // Runtime HUD
@@ -83,6 +91,12 @@ public class StageManager : MonoBehaviour
     private TMP_Text bannerText;
     private float bannerHideTime;
 
+    // Dirty-tracking cho HUD (tránh tạo string & rebuild TMP mỗi frame)
+    private StagePhase lastHudPhase = (StagePhase)(-1);
+    private int lastHudWave = -1;
+    private int lastHudMetric = int.MinValue;
+    private int lastDashBlockingState = -1;
+
     private void Awake()
     {
         if (Instance != null && Instance != this)
@@ -96,6 +110,7 @@ public class StageManager : MonoBehaviour
 
     private void Start()
     {
+        ApplyRuntimePerformanceOptimizations();
         ResolvePlayer();
 
         // Đồng bộ để ScoreManager chỉ quản lý EXP nhân vật, không gửi trùng level_start/complete của Màn chơi
@@ -117,14 +132,25 @@ public class StageManager : MonoBehaviour
         StartCoroutine(BeginStage1Routine());
     }
 
+    private void OnDestroy()
+    {
+        if (beaconBeamMat != null) Destroy(beaconBeamMat);
+        if (beaconRingMat != null) Destroy(beaconRingMat);
+    }
+
     private void Update()
     {
+        if (beaconRingTransform != null && beaconObject != null && beaconObject.activeSelf)
+        {
+            beaconRingTransform.Rotate(Vector3.up, 38f * Time.deltaTime, Space.World);
+        }
+
         if (bannerRoot != null && bannerRoot.activeSelf && Time.unscaledTime >= bannerHideTime)
         {
             bannerRoot.SetActive(false);
         }
 
-        if (GameOverManager.IsGameOver || LevelUpChoiceManager.IsPaused) return;
+        if (GameOverManager.IsGameOver || WeaponShopManager.IsShopOpen) return;
 
         if (playerTransform == null)
         {
@@ -172,8 +198,15 @@ public class StageManager : MonoBehaviour
         switch (phase)
         {
             case StagePhase.Stage1Combat:
-                SetHudStage("MÀN 1/3 • TRẠI RỪNG NGOẠI VI", $"Đợt {currentWaveIndex}/{totalWavesInStage} — Quái còn lại: {activeWaveEnemies.Count}");
-                if (!spawningWave && activeWaveEnemies.Count == 0)
+                int count1 = activeWaveEnemies.Count;
+                if (lastHudPhase != phase || lastHudWave != currentWaveIndex || lastHudMetric != count1)
+                {
+                    lastHudPhase = phase;
+                    lastHudWave = currentWaveIndex;
+                    lastHudMetric = count1;
+                    SetHudStage("MÀN 1/3 • TRẠI RỪNG NGOẠI VI", $"Đợt {currentWaveIndex}/{totalWavesInStage} — Quái còn lại: {count1}");
+                }
+                if (!spawningWave && count1 == 0)
                 {
                     if (currentWaveIndex < totalWavesInStage)
                     {
@@ -189,7 +222,13 @@ public class StageManager : MonoBehaviour
 
             case StagePhase.TravelToStage2:
                 float dist2 = HorizontalDistance(playerTransform.position, stage2Center);
-                SetHudStage("ĐẾN MÀN 2 • THUNG LŨNG BẪY", $"Theo cột sáng vàng tới Trại 2 ({Mathf.RoundToInt(dist2)}m)");
+                int dist2Int = Mathf.RoundToInt(dist2);
+                if (lastHudPhase != phase || lastHudMetric != dist2Int)
+                {
+                    lastHudPhase = phase;
+                    lastHudMetric = dist2Int;
+                    SetHudStage("ĐẾN MÀN 2 • THUNG LŨNG BẪY", $"Theo cột sáng vàng tới Trại 2 ({dist2Int}m)");
+                }
                 if (dist2 <= zoneTriggerRadius)
                 {
                     StartStage2();
@@ -197,8 +236,15 @@ public class StageManager : MonoBehaviour
                 break;
 
             case StagePhase.Stage2Combat:
-                SetHudStage("MÀN 2/3 • THUNG LŨNG BẪY & LÍNH KHIÊN", $"Đợt {currentWaveIndex}/{totalWavesInStage} — Quái còn lại: {activeWaveEnemies.Count} (Coi chừng bẫy gai!)");
-                if (!spawningWave && activeWaveEnemies.Count == 0)
+                int count2 = activeWaveEnemies.Count;
+                if (lastHudPhase != phase || lastHudWave != currentWaveIndex || lastHudMetric != count2)
+                {
+                    lastHudPhase = phase;
+                    lastHudWave = currentWaveIndex;
+                    lastHudMetric = count2;
+                    SetHudStage("MÀN 2/3 • THUNG LŨNG BẪY & LÍNH KHIÊN", $"Đợt {currentWaveIndex}/{totalWavesInStage} — Quái còn lại: {count2} (Coi chừng bẫy gai!)");
+                }
+                if (!spawningWave && count2 == 0)
                 {
                     if (currentWaveIndex < totalWavesInStage)
                     {
@@ -214,7 +260,13 @@ public class StageManager : MonoBehaviour
 
             case StagePhase.TravelToStage3:
                 float dist3 = HorizontalDistance(playerTransform.position, stage3Center);
-                SetHudStage("ĐẾN MÀN 3 • MỎ VÀNG BỊ CHIẾM (BOSS)", $"Theo cột sáng đỏ tới Đấu Trường Boss ({Mathf.RoundToInt(dist3)}m)");
+                int dist3Int = Mathf.RoundToInt(dist3);
+                if (lastHudPhase != phase || lastHudMetric != dist3Int)
+                {
+                    lastHudPhase = phase;
+                    lastHudMetric = dist3Int;
+                    SetHudStage("ĐẾN MÀN 3 • MỎ VÀNG BỊ CHIẾM (BOSS)", $"Theo cột sáng đỏ tới Đấu Trường Boss ({dist3Int}m)");
+                }
                 if (dist3 <= zoneTriggerRadius)
                 {
                     StartStage3Boss();
@@ -228,10 +280,15 @@ public class StageManager : MonoBehaviour
                     if (activeWaveEnemies[i] != null && !activeWaveEnemies[i].isBoss && !activeWaveEnemies[i].IsDead)
                         adds++;
                 }
-                string subObj = adds > 0
-                    ? $"Hạ Đại Tướng Orc Warlord (Còn {adds} hộ vệ)"
-                    : "Hạ Đại Tướng Orc Warlord để giành chiến thắng!";
-                SetHudStage("MÀN 3/3 • ĐẤU TRƯỜNG MỎ VÀNG", subObj);
+                if (lastHudPhase != phase || lastHudMetric != adds)
+                {
+                    lastHudPhase = phase;
+                    lastHudMetric = adds;
+                    string subObj = adds > 0
+                        ? $"Hạ Đại Tướng Orc Warlord (Còn {adds} hộ vệ)"
+                        : "Hạ Đại Tướng Orc Warlord để giành chiến thắng!";
+                    SetHudStage("MÀN 3/3 • ĐẤU TRƯỜNG MỎ VÀNG", subObj);
+                }
                 break;
         }
     }
@@ -394,14 +451,17 @@ public class StageManager : MonoBehaviour
                 activeBossAI.ApplyCombatStats(4.7f, 32, 2.5f, 0.85f, 1.15f);
             }
 
-            if (Camera.main != null)
+            if (ThirdPersonCamera.Instance != null)
             {
-                ThirdPersonCamera cam = Camera.main.GetComponent<ThirdPersonCamera>();
-                if (cam != null) cam.AddCameraShake(0.25f, 0.35f);
+                ThirdPersonCamera.Instance.AddCameraShake(0.25f, 0.35f);
             }
 
             ShowBanner("BOSS CUỒNG NỘ — GỌI VIỆN BINH!", new Color(1f, 0.2f, 0.2f), 3.0f);
             GameAudioManager.PlayBossRoar();
+            if (activeBoss != null)
+            {
+                CombatVfxManager.SpawnBossEnrageEffect(activeBoss.transform);
+            }
 
             // Triệu hồi 2 Orc hộ vệ
             GameObject addPref = axeOrcPrefab != null ? axeOrcPrefab : scoutOrcPrefab;
@@ -426,6 +486,7 @@ public class StageManager : MonoBehaviour
         }
 
         ShowBanner("CHIẾN THẮNG! ĐẠI TƯỚNG ORC ĐÃ BỊ TIÊU DIỆT!", new Color(0.2f, 1f, 0.45f), 4.0f);
+        CombatVfxManager.SpawnVictoryCelebration(playerTransform != null ? playerTransform.position : stage3Center);
         StartCoroutine(ShowVictoryDelayed());
     }
 
@@ -470,6 +531,7 @@ public class StageManager : MonoBehaviour
         GameObject enemy = Instantiate(prefab, spawnPos, Quaternion.identity);
         enemy.name = unitName;
         enemy.transform.localScale = Vector3.one * scale;
+        CombatVfxManager.SpawnEnemySpawnEffect(spawnPos, isBoss);
 
         EnemyHealth eh = enemy.GetComponent<EnemyHealth>();
         if (eh != null)
@@ -477,7 +539,8 @@ public class StageManager : MonoBehaviour
             eh.isBoss = isBoss;
             eh.scoreValue = scoreVal;
             eh.goldReward = isBoss ? 200 : Mathf.Max(30, Mathf.RoundToInt(scoreVal * 0.42f));
-            eh.healPickupPrefab = mushroomPickupPrefab;
+            GameObject potionPrefab = HealthPickup.GetPotionPrefab();
+            eh.healPickupPrefab = potionPrefab != null ? potionPrefab : mushroomPickupPrefab;
             eh.dropHealChance = isBoss ? 0f : 0.30f;
             eh.SetMaxHealth(hp);
             activeWaveEnemies.Add(eh);
@@ -613,19 +676,51 @@ public class StageManager : MonoBehaviour
         if (hazard == null) hazard = trapObj.AddComponent<TrapHazard>();
         hazard.damage = 22;
         hazard.triggerRadius = 1.75f;
+    }
 
-        // Đèn đỏ cảnh báo nhẹ giúp người chơi quan sát né bẫy
-        AddUnitAuraLight(trapObj, new Color(1f, 0.28f, 0.15f), 3.8f, 1.5f);
+    /// <summary>
+    /// Tối ưu hiệu năng runtime cho Terrain, Camera và Frame Pacing mà không cần sửa trực tiếp Prefab map dùng chung.
+    /// </summary>
+    private static void ApplyRuntimePerformanceOptimizations()
+    {
+        QualitySettings.vSyncCount = 0;
+        if (Application.targetFrameRate <= 0 || Application.targetFrameRate > 120)
+        {
+            Application.targetFrameRate = 60;
+        }
+
+        Camera mainCam = Camera.main;
+        if (mainCam != null && mainCam.farClipPlane > 240f)
+        {
+            mainCam.farClipPlane = 240f;
+        }
+
+        Terrain terrain = Terrain.activeTerrain;
+        if (terrain != null)
+        {
+            terrain.drawInstanced = true;
+            terrain.heightmapPixelError = Mathf.Max(terrain.heightmapPixelError, 16f);
+            terrain.treeDistance = Mathf.Min(terrain.treeDistance, 140f);
+            terrain.treeBillboardDistance = Mathf.Min(terrain.treeBillboardDistance, 35f);
+            terrain.treeMaximumFullLODCount = Mathf.Min(terrain.treeMaximumFullLODCount, 24);
+            terrain.detailObjectDistance = Mathf.Min(terrain.detailObjectDistance, 45f);
+            terrain.detailObjectDensity = Mathf.Min(terrain.detailObjectDensity, 0.65f);
+            terrain.basemapDistance = Mathf.Min(terrain.basemapDistance, 180f);
+            terrain.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+        }
     }
 
     private void SpawnHealthPickupAt(Vector3 rawPos, int healAmt, Transform parent = null)
     {
-        Vector3 pos = SnapPositionToTerrain(rawPos) + Vector3.up * 0.2f;
+        Vector3 pos = SnapPositionToTerrain(rawPos) + Vector3.up * 0.16f;
+        GameObject potionPrefab = HealthPickup.GetPotionPrefab();
+        GameObject prefabToUse = potionPrefab != null ? potionPrefab : mushroomPickupPrefab;
+
         GameObject obj;
-        if (mushroomPickupPrefab != null)
+        if (prefabToUse != null)
         {
-            obj = Instantiate(mushroomPickupPrefab, pos, Quaternion.identity, parent);
-            obj.transform.localScale = Vector3.one * 1.6f;
+            obj = Instantiate(prefabToUse, pos, Quaternion.identity, parent);
+            obj.transform.localScale = Vector3.one * (prefabToUse == potionPrefab ? 2.15f : 1.6f);
         }
         else
         {
@@ -637,7 +732,7 @@ public class StageManager : MonoBehaviour
             if (r != null) r.material.color = new Color(0.2f, 0.95f, 0.45f);
         }
 
-        obj.name = "HealthPickup_Mushroom";
+        obj.name = "HealthPickup_Potion";
         HealthPickup pickup = obj.GetComponent<HealthPickup>();
         if (pickup == null) pickup = obj.AddComponent<HealthPickup>();
         pickup.healAmount = healAmt;
@@ -671,25 +766,73 @@ public class StageManager : MonoBehaviour
         DynamicGI.UpdateEnvironment();
     }
 
-    // ==================== WAYPOINT BEACON ====================
+    // ==================== WAYPOINT BEACON (HDR LIGHT PILLAR + RUNE RING + MOTES) ====================
     private void CreateWaypointBeacon()
     {
-        beaconObject = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
-        beaconObject.name = "StageWaypointBeacon";
-        Collider col = beaconObject.GetComponent<Collider>();
-        if (col != null) Destroy(col);
+        beaconObject = new GameObject("StageWaypointBeacon");
 
-        beaconObject.transform.localScale = new Vector3(1.1f, 35f, 1.1f);
-        Renderer r = beaconObject.GetComponent<Renderer>();
-        if (r != null)
+        // 1. Trụ sáng HDR mờ dần lên trời
+        GameObject pillar = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+        pillar.name = "BeaconPillar";
+        pillar.transform.SetParent(beaconObject.transform, false);
+        Collider col = pillar.GetComponent<Collider>();
+        if (col != null) Destroy(col);
+        pillar.transform.localPosition = Vector3.up * 26f;
+        pillar.transform.localScale = new Vector3(1.45f, 26f, 1.45f);
+
+        Renderer pr = pillar.GetComponent<Renderer>();
+        if (pr != null)
         {
-            Shader unlit = Shader.Find("Universal Render Pipeline/Unlit") ?? Shader.Find("Sprites/Default");
-            Material mat = new Material(unlit);
-            mat.color = new Color(1f, 0.8f, 0.15f, 0.45f);
-            r.material = mat;
+            beaconBeamMat = new Material(CombatVfxManager.GetAdditiveBeamMaterial());
+            Color initCol = new Color(1.9f, 1.45f, 0.3f, 0.55f);
+            if (beaconBeamMat.HasProperty("_BaseColor")) beaconBeamMat.SetColor("_BaseColor", initCol);
+            if (beaconBeamMat.HasProperty("_Color")) beaconBeamMat.SetColor("_Color", initCol);
+            pr.material = beaconBeamMat;
+            pr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            pr.receiveShadows = false;
         }
 
-        AddUnitAuraLight(beaconObject, new Color(1f, 0.8f, 0.2f), 14f, 4f);
+        // 2. Vòng ma pháp xoay tròn trên mặt đất
+        GameObject ring = new GameObject("BeaconGroundRing");
+        ring.transform.SetParent(beaconObject.transform, false);
+        ring.transform.localPosition = Vector3.up * 0.16f;
+        ring.transform.localScale = new Vector3(5.6f, 1f, 5.6f);
+        MeshFilter mf = ring.AddComponent<MeshFilter>();
+        mf.sharedMesh = CombatVfxManager.GetHorizontalQuadMesh();
+        MeshRenderer rmr = ring.AddComponent<MeshRenderer>();
+        beaconRingMat = new Material(CombatVfxManager.GetAdditiveRingMaterial());
+        rmr.material = beaconRingMat;
+        rmr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+        rmr.receiveShadows = false;
+        beaconRingTransform = ring.transform;
+
+        // 3. Các đốm sáng bay dọc theo trụ dẫn đường
+        GameObject motesObj = new GameObject("BeaconMotes");
+        motesObj.transform.SetParent(beaconObject.transform, false);
+        motesObj.transform.localPosition = Vector3.up * 0.5f;
+        beaconMotesPs = motesObj.AddComponent<ParticleSystem>();
+        beaconMotesPs.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
+        var main = beaconMotesPs.main;
+        main.duration = 4f;
+        main.loop = true;
+        main.startLifetime = new ParticleSystem.MinMaxCurve(1.8f, 3.2f);
+        main.startSpeed = new ParticleSystem.MinMaxCurve(3.2f, 6.8f);
+        main.startSize = new ParticleSystem.MinMaxCurve(0.18f, 0.42f);
+        main.gravityModifier = -0.35f;
+        main.simulationSpace = ParticleSystemSimulationSpace.World;
+
+        var emission = beaconMotesPs.emission;
+        emission.rateOverTime = 14f;
+
+        var shape = beaconMotesPs.shape;
+        shape.shapeType = ParticleSystemShapeType.Circle;
+        shape.radius = 1.6f;
+        shape.rotation = new Vector3(-90f, 0f, 0f);
+
+        var rend = beaconMotesPs.GetComponent<ParticleSystemRenderer>();
+        rend.material = CombatVfxManager.GetAdditiveStarMaterial();
+
+        AddUnitAuraLight(beaconObject, new Color(1f, 0.8f, 0.2f), 16f, 4.5f);
         beaconObject.SetActive(false);
     }
 
@@ -698,16 +841,31 @@ public class StageManager : MonoBehaviour
         currentWaypointTarget = SnapPositionToTerrain(targetPos);
         if (beaconObject == null) return;
 
-        beaconObject.transform.position = currentWaypointTarget + Vector3.up * 35f;
-        Renderer r = beaconObject.GetComponent<Renderer>();
-        if (r != null && r.material != null)
+        beaconObject.transform.position = currentWaypointTarget;
+        Color hdrBeam = new Color(color.r * 1.9f, color.g * 1.9f, color.b * 1.9f, 0.58f);
+        Color hdrRing = new Color(color.r * 2.1f, color.g * 2.1f, color.b * 2.1f, 0.78f);
+
+        if (beaconBeamMat != null)
         {
-            r.material.color = new Color(color.r, color.g, color.b, 0.45f);
+            if (beaconBeamMat.HasProperty(BaseColorId)) beaconBeamMat.SetColor(BaseColorId, hdrBeam);
+            if (beaconBeamMat.HasProperty(ColorId)) beaconBeamMat.SetColor(ColorId, hdrBeam);
         }
+        if (beaconRingMat != null)
+        {
+            if (beaconRingMat.HasProperty(BaseColorId)) beaconRingMat.SetColor(BaseColorId, hdrRing);
+            if (beaconRingMat.HasProperty(ColorId)) beaconRingMat.SetColor(ColorId, hdrRing);
+        }
+        if (beaconMotesPs != null)
+        {
+            var main = beaconMotesPs.main;
+            main.startColor = new Color(color.r * 2.2f, color.g * 2.2f, color.b * 2.2f, 0.95f);
+        }
+
         Light l = beaconObject.GetComponentInChildren<Light>();
         if (l != null) l.color = color;
 
         beaconObject.SetActive(true);
+        if (beaconMotesPs != null) beaconMotesPs.Play();
     }
 
     private void HideWaypointBeacon()
@@ -855,7 +1013,11 @@ public class StageManager : MonoBehaviour
     {
         if (hudDashText == null || playerController == null) return;
 
-        if (playerController.IsBlocking)
+        int state = playerController.IsBlocking ? 1 : 0;
+        if (state == lastDashBlockingState) return;
+        lastDashBlockingState = state;
+
+        if (state == 1)
         {
             hudDashText.text = "[Chuột Phải] ĐANG ĐỠ ĐÒN (BLOCK / PARRY)";
             hudDashText.color = new Color(1f, 0.86f, 0.32f);
@@ -925,26 +1087,26 @@ public class StageManager : MonoBehaviour
     private Vector3 SnapPositionToTerrain(Vector3 rawPos)
     {
         Vector3 rayOrigin = new Vector3(rawPos.x, rawPos.y + 120f, rawPos.z);
-        RaycastHit[] hits = Physics.RaycastAll(rayOrigin, Vector3.down, 280f, ~0, QueryTriggerInteraction.Ignore);
+        int hitCount = Physics.RaycastNonAlloc(rayOrigin, Vector3.down, TerrainHitBuffer, 280f, ~0, QueryTriggerInteraction.Ignore);
 
         // Ưu tiên bề mặt TerrainCollider trước
-        for (int i = 0; i < hits.Length; i++)
+        for (int i = 0; i < hitCount; i++)
         {
-            if (hits[i].collider is TerrainCollider)
+            if (TerrainHitBuffer[i].collider is TerrainCollider)
             {
-                return new Vector3(rawPos.x, hits[i].point.y, rawPos.z);
+                return new Vector3(rawPos.x, TerrainHitBuffer[i].point.y, rawPos.z);
             }
         }
 
         // Fallback: bề mặt cao nhất bất kỳ
         float highestY = float.MinValue;
         bool found = false;
-        for (int i = 0; i < hits.Length; i++)
+        for (int i = 0; i < hitCount; i++)
         {
-            if (hits[i].collider == null) continue;
-            if (hits[i].point.y > highestY)
+            if (TerrainHitBuffer[i].collider == null) continue;
+            if (TerrainHitBuffer[i].point.y > highestY)
             {
-                highestY = hits[i].point.y;
+                highestY = TerrainHitBuffer[i].point.y;
                 found = true;
             }
         }
@@ -961,6 +1123,13 @@ public class StageManager : MonoBehaviour
 
     private void ResolvePlayer()
     {
+        if (PlayerController.Instance != null)
+        {
+            playerController = PlayerController.Instance;
+            playerTransform = playerController.transform;
+            return;
+        }
+
         GameObject playerObj = GameObject.FindWithTag("Player");
         if (playerObj != null)
         {

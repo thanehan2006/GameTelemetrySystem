@@ -12,6 +12,9 @@ EditorBuildSettings:
     path: Assets/DucThanh/Scene/LoginScene.unity
     guid: 9b6d461dc49851c44b8983a1e6d49dcf
   - enabled: 1
+    path: Assets/DucThanh/Scene/PickCharacter.unity
+    guid: c86bc1a5addb9de41a7a45caf1436096
+  - enabled: 1
     path: Assets/DucThanh/Scene/Lv1.unity
     guid: 833069c6f1ac3ba4289263bc86180326
   m_configObjects:

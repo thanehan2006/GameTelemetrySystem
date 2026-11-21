@@ -2207,7 +2207,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::AuthUIController
   authApiClient: {fileID: 76071030}
-  nextSceneName: Lv1
+  nextSceneName: PickCharacter
   loginPanel: {fileID: 1575735085}
   registerPanel: {fileID: 2118927157}
   loginUsernameInput: {fileID: 1827103343}

@@ -7,6 +7,9 @@ using UnityEngine.AI;
 public class OrcEnemyAI : MonoBehaviour
 {
     private static readonly List<OrcEnemyAI> ActiveEnemies = new List<OrcEnemyAI>();
+    private static readonly RaycastHit[] GroundHitBuffer = new RaycastHit[16];
+    private const float DestinationUpdateInterval = 0.15f;
+    private const float DestinationMoveThresholdSqr = 0.16f;
 
     [Header("Movement Settings")]
     public float moveSpeed = 3.5f;
@@ -20,6 +23,10 @@ public class OrcEnemyAI : MonoBehaviour
     public float knockbackResistance = 0f;
     public float knockbackDamping = 16f;
     public float hitStunDuration = 0.16f;
+
+    [Header("Parry Stun Settings")]
+    public float parryStunDuration = 1.6f;
+    public string hitStateName = "Hit";
 
     [Header("Attack Settings")]
     public float attackRange = 1.8f;
@@ -44,16 +51,35 @@ public class OrcEnemyAI : MonoBehaviour
 
     private float nextAttackTime;
     private bool isAttacking;
-    private string currentState = "";
+    private int idleStateHash;
+    private int runStateHash;
+    private int attackStateHash;
+    private int hitStateHash;
+    private int currentStateHash;
     private Coroutine attackRoutine;
     private Vector3 knockbackVelocity;
     private float hitStunTimer;
+    private float parryStunTimer;
+
+    public bool IsParryStunned => parryStunTimer > 0f;
+    private float nextDestinationTime;
+    private Vector3 lastDestinationTarget;
+    private WaitForSeconds waitHitboxStart;
+    private WaitForSeconds waitHitboxDuration;
+    private WaitForSeconds waitAttackTail;
+    private float cachedStartDelay = -1f;
+    private float cachedDuration = -1f;
+    private float cachedCooldown = -1f;
 
     private bool AgentReady => navAgent != null && navAgent.isActiveAndEnabled && navAgent.isOnNavMesh;
 
     void Awake()
     {
         animator = GetComponentInChildren<Animator>();
+        idleStateHash = Animator.StringToHash(idleStateName);
+        runStateHash = Animator.StringToHash(runStateName);
+        attackStateHash = Animator.StringToHash(attackStateName);
+        hitStateHash = string.IsNullOrEmpty(hitStateName) ? 0 : Animator.StringToHash(hitStateName);
 
         // Đảm bảo collider thân của enemy là collider cứng để Player không đi xuyên qua
         CapsuleCollider bodyCollider = GetComponent<CapsuleCollider>();
@@ -78,7 +104,7 @@ public class OrcEnemyAI : MonoBehaviour
     {
         SnapToGround();
         FindPlayerTarget();
-        PlayAnimation(idleStateName);
+        PlayAnimation(idleStateHash);
     }
 
     void SetupNavMeshAgent()
@@ -122,17 +148,17 @@ public class OrcEnemyAI : MonoBehaviour
     void SnapToGround()
     {
         Vector3 origin = transform.position + Vector3.up * 20f;
-        RaycastHit[] hits = Physics.RaycastAll(origin, Vector3.down, 60f, ~0, QueryTriggerInteraction.Ignore);
+        int hitCount = Physics.RaycastNonAlloc(origin, Vector3.down, GroundHitBuffer, 60f, ~0, QueryTriggerInteraction.Ignore);
 
         float bestY = float.MinValue;
         bool found = false;
-        for (int i = 0; i < hits.Length; i++)
+        for (int i = 0; i < hitCount; i++)
         {
-            Collider col = hits[i].collider;
+            Collider col = GroundHitBuffer[i].collider;
             if (col == null || col.transform.IsChildOf(transform)) continue;
-            if (hits[i].point.y > bestY)
+            if (GroundHitBuffer[i].point.y > bestY)
             {
-                bestY = hits[i].point.y;
+                bestY = GroundHitBuffer[i].point.y;
                 found = true;
             }
         }
@@ -155,22 +181,22 @@ public class OrcEnemyAI : MonoBehaviour
         BoxCollider[] boxColliders = GetComponentsInChildren<BoxCollider>(true);
         BoxCollider axeCollider = null;
 
-        foreach (var col in boxColliders)
+        for (int i = 0; i < boxColliders.Length; i++)
         {
-            if (col.gameObject.name.ToLower().Contains("axe"))
+            if (boxColliders[i].gameObject.name.IndexOf("axe", System.StringComparison.OrdinalIgnoreCase) >= 0)
             {
-                axeCollider = col;
+                axeCollider = boxColliders[i];
                 break;
             }
         }
 
         if (axeCollider == null)
         {
-            foreach (var col in boxColliders)
+            for (int i = 0; i < boxColliders.Length; i++)
             {
-                if (col.gameObject != gameObject)
+                if (boxColliders[i].gameObject != gameObject)
                 {
-                    axeCollider = col;
+                    axeCollider = boxColliders[i];
                     break;
                 }
             }
@@ -190,6 +216,19 @@ public class OrcEnemyAI : MonoBehaviour
 
     void Update()
     {
+        if (parryStunTimer > 0f)
+        {
+            parryStunTimer -= Time.deltaTime;
+            StopAgent();
+            if (parryStunTimer <= 0f)
+            {
+                parryStunTimer = 0f;
+                if (animator != null) animator.speed = 1f;
+                currentStateHash = 0;
+            }
+            return;
+        }
+
         if (hitStunTimer > 0f)
         {
             hitStunTimer -= Time.deltaTime;
@@ -225,9 +264,9 @@ public class OrcEnemyAI : MonoBehaviour
 
         Vector3 toPlayer = player.position - transform.position;
         toPlayer.y = 0f;
-        float distance = toPlayer.magnitude;
+        float sqrDistance = toPlayer.sqrMagnitude;
 
-        if (distance <= attackRange)
+        if (sqrDistance <= attackRange * attackRange)
         {
             StopAgent();
             FaceDirection(toPlayer, rotationSpeed);
@@ -238,39 +277,47 @@ public class OrcEnemyAI : MonoBehaviour
             }
             else
             {
-                PlayAnimation(idleStateName);
+                PlayAnimation(idleStateHash);
             }
             return;
         }
 
-        PlayAnimation(runStateName);
+        PlayAnimation(runStateHash);
 
         if (AgentReady)
         {
-            navAgent.isStopped = false;
-            navAgent.speed = moveSpeed;
-            navAgent.SetDestination(player.position);
+            if (navAgent.isStopped) navAgent.isStopped = false;
+            if (!Mathf.Approximately(navAgent.speed, moveSpeed)) navAgent.speed = moveSpeed;
+
+            Vector3 targetPos = player.position;
+            if (Time.time >= nextDestinationTime || (targetPos - lastDestinationTarget).sqrMagnitude >= DestinationMoveThresholdSqr)
+            {
+                nextDestinationTime = Time.time + DestinationUpdateInterval;
+                lastDestinationTarget = targetPos;
+                navAgent.SetDestination(targetPos);
+            }
             return;
         }
 
         // Fallback khi NavMesh chưa bake kịp
         FaceDirection(toPlayer, rotationSpeed);
 
-        if (distance > stoppingDistance)
+        if (sqrDistance > stoppingDistance * stoppingDistance)
         {
-            transform.position += toPlayer.normalized * (moveSpeed * Time.deltaTime);
+            float dist = Mathf.Sqrt(sqrDistance);
+            transform.position += (toPlayer / dist) * (moveSpeed * Time.deltaTime);
         }
 
-        RaycastHit[] groundHits = Physics.RaycastAll(transform.position + Vector3.up * 5f, Vector3.down, 14f, ~0, QueryTriggerInteraction.Ignore);
+        int groundHitCount = Physics.RaycastNonAlloc(transform.position + Vector3.up * 5f, Vector3.down, GroundHitBuffer, 14f, ~0, QueryTriggerInteraction.Ignore);
         float highestGroundY = float.MinValue;
         bool hasGround = false;
-        for (int i = 0; i < groundHits.Length; i++)
+        for (int i = 0; i < groundHitCount; i++)
         {
-            Collider col = groundHits[i].collider;
+            Collider col = GroundHitBuffer[i].collider;
             if (col == null || col.transform.IsChildOf(transform)) continue;
-            if (groundHits[i].point.y > highestGroundY)
+            if (GroundHitBuffer[i].point.y > highestGroundY)
             {
-                highestGroundY = groundHits[i].point.y;
+                highestGroundY = GroundHitBuffer[i].point.y;
                 hasGround = true;
             }
         }
@@ -313,6 +360,45 @@ public class OrcEnemyAI : MonoBehaviour
         {
             hitStunTimer = Mathf.Max(hitStunTimer, hitStunDuration);
         }
+    }
+
+    /// <summary>
+    /// Làm choáng quái khi Player Parry hoàn hảo: ngắt đòn đang vung, đẩy lùi, phát anim khựng và vòng sao choáng.
+    /// </summary>
+    public void ApplyParryStun(Vector3 attackerPosition, float knockbackForce, float duration = -1f)
+    {
+        if (attackRoutine != null)
+        {
+            StopCoroutine(attackRoutine);
+            attackRoutine = null;
+        }
+        isAttacking = false;
+        weaponHitbox?.DisableHitbox();
+
+        ApplyKnockback(attackerPosition, knockbackForce, applyHitStun: false);
+
+        float baseDur = duration > 0f ? duration : parryStunDuration;
+        float finalDur = Mathf.Max(0.6f, Mathf.Lerp(baseDur, baseDur * 0.65f, Mathf.Clamp01(knockbackResistance)));
+
+        parryStunTimer = Mathf.Max(parryStunTimer, finalDur);
+        nextAttackTime = Mathf.Max(nextAttackTime, Time.time + finalDur + 0.35f);
+        StopAgent();
+
+        if (animator != null)
+        {
+            if (hitStateHash != 0 && animator.HasState(0, hitStateHash))
+            {
+                currentStateHash = hitStateHash;
+                animator.Play(hitStateHash, 0, 0f);
+            }
+            else
+            {
+                PlayAnimation(idleStateHash);
+            }
+            animator.speed = 0.45f;
+        }
+
+        CombatVfxManager.SpawnParryStunEffect(transform, finalDur);
     }
 
     private void ProcessKnockback()
@@ -397,7 +483,7 @@ public class OrcEnemyAI : MonoBehaviour
 
     void StopAgent()
     {
-        if (AgentReady)
+        if (AgentReady && !navAgent.isStopped)
         {
             navAgent.isStopped = true;
         }
@@ -406,7 +492,7 @@ public class OrcEnemyAI : MonoBehaviour
     void Idle()
     {
         StopAgent();
-        PlayAnimation(idleStateName);
+        PlayAnimation(idleStateHash);
     }
 
     void FaceDirection(Vector3 direction, float speed)
@@ -421,6 +507,13 @@ public class OrcEnemyAI : MonoBehaviour
 
     void FindPlayerTarget()
     {
+        if (PlayerController.Instance != null)
+        {
+            player = PlayerController.Instance.transform;
+            playerHealth = PlayerHealth.Instance != null ? PlayerHealth.Instance : PlayerController.Instance.GetComponent<PlayerHealth>();
+            return;
+        }
+
         GameObject playerObj = GameObject.FindGameObjectWithTag("Player");
         if (playerObj != null)
         {
@@ -439,13 +532,30 @@ public class OrcEnemyAI : MonoBehaviour
         attackRoutine = StartCoroutine(AttackSequence());
     }
 
+    private void EnsureAttackWaits()
+    {
+        if (!Mathf.Approximately(cachedStartDelay, hitboxStartDelay)
+            || !Mathf.Approximately(cachedDuration, hitboxDuration)
+            || !Mathf.Approximately(cachedCooldown, attackCooldown))
+        {
+            cachedStartDelay = hitboxStartDelay;
+            cachedDuration = hitboxDuration;
+            cachedCooldown = attackCooldown;
+            waitHitboxStart = new WaitForSeconds(hitboxStartDelay);
+            waitHitboxDuration = new WaitForSeconds(hitboxDuration);
+            float remainingAnimTime = Mathf.Max(0.1f, attackCooldown - hitboxStartDelay - hitboxDuration);
+            waitAttackTail = new WaitForSeconds(remainingAnimTime * 0.5f);
+        }
+    }
+
     IEnumerator AttackSequence()
     {
+        EnsureAttackWaits();
         isAttacking = true;
-        PlayAnimation(attackStateName);
+        PlayAnimation(attackStateHash);
         GameAudioManager.PlayOrcAttack();
 
-        yield return new WaitForSeconds(hitboxStartDelay);
+        yield return waitHitboxStart;
 
         if (weaponHitbox != null)
         {
@@ -453,26 +563,25 @@ public class OrcEnemyAI : MonoBehaviour
             weaponHitbox.EnableHitbox();
         }
 
-        yield return new WaitForSeconds(hitboxDuration);
+        yield return waitHitboxDuration;
 
         if (weaponHitbox != null)
         {
             weaponHitbox.DisableHitbox();
         }
 
-        float remainingAnimTime = Mathf.Max(0.1f, attackCooldown - hitboxStartDelay - hitboxDuration);
-        yield return new WaitForSeconds(remainingAnimTime * 0.5f);
+        yield return waitAttackTail;
 
         isAttacking = false;
         attackRoutine = null;
     }
 
-    void PlayAnimation(string stateName)
+    void PlayAnimation(int stateHash)
     {
-        if (animator == null || string.IsNullOrEmpty(stateName) || currentState == stateName) return;
+        if (animator == null || stateHash == 0 || currentStateHash == stateHash) return;
 
-        currentState = stateName;
-        animator.Play(stateName, 0, 0f);
+        currentStateHash = stateHash;
+        animator.Play(stateHash, 0, 0f);
     }
 
     private void OnDisable()
@@ -483,5 +592,10 @@ public class OrcEnemyAI : MonoBehaviour
             weaponHitbox.DisableHitbox();
         }
         isAttacking = false;
+        parryStunTimer = 0f;
+        if (animator != null)
+        {
+            animator.speed = 1f;
+        }
     }
 }

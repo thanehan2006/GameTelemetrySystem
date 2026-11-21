@@ -12,8 +12,8 @@ using UnityEngine;
 public class WeaponGripToolWindow : EditorWindow
 {
     private const string WeaponsFolder = "Assets/DucThanh/Assets/Weapons";
-    private const string IdleFbxPath = "Assets/DucThanh/Assets/Player/Idle.fbx";
-    private const string AtkFbxPath = "Assets/DucThanh/Assets/Player/Atk1.fbx";
+    private const string IdleFbxPath = "Assets/DucThanh/Assets/Player1/Idle.fbx";
+    private const string AtkFbxPath = "Assets/DucThanh/Assets/Player1/Atk1.fbx";
 
     private enum HandSide { RightHand, LeftHand }
     private enum PosePreview { None, Idle, Atk1 }
@@ -434,7 +434,7 @@ public class WeaponGripToolWindow : EditorWindow
         if (applyToAllWeapons)
         {
             weaponConfig.SaveGripForAllWeapons(activeWeapon.transform);
-            Debug.Log($"[WeaponGripTool] Đã lưu vị trí hiện tại áp dụng cho TẤT CẢ vũ khí trong '{LevelUpChoiceManager.DefaultConfigAssetPath}'.");
+            Debug.Log($"[WeaponGripTool] Đã lưu vị trí hiện tại áp dụng cho TẤT CẢ vũ khí trong '{WeaponShopManager.DefaultConfigPath}'.");
         }
         else
         {

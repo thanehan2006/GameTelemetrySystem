@@ -8,6 +8,8 @@ using TMPro;
 /// </summary>
 public class PlayerHealth : MonoBehaviour
 {
+    public static PlayerHealth Instance { get; private set; }
+
     [Header("Health Settings")]
     public int maxHealth = 100;
     public int currentHealth;
@@ -32,6 +34,7 @@ public class PlayerHealth : MonoBehaviour
 
     private void Awake()
     {
+        Instance = this;
         currentHealth = maxHealth;
         isDead = false;
 
@@ -87,13 +90,10 @@ public class PlayerHealth : MonoBehaviour
         CombatVfxManager.TriggerPlayerDamageFlash(damage >= 24 ? 0.5f : 0.35f);
         GameAudioManager.PlayPlayerHurt();
 
-        if (Camera.main != null)
+        if (ThirdPersonCamera.Instance != null)
         {
-            ThirdPersonCamera cam = Camera.main.GetComponent<ThirdPersonCamera>();
-            if (cam != null) cam.AddCameraShake(0.14f, 0.14f);
+            ThirdPersonCamera.Instance.AddCameraShake(0.14f, 0.14f);
         }
-
-        Debug.Log($"Player HP: {currentHealth}/{maxHealth}");
 
         if (currentHealth <= 0 && !isDead)
         {
@@ -105,7 +105,6 @@ public class PlayerHealth : MonoBehaviour
     {
         isDead = true;
         UpdateHealthUI(false);
-        Debug.Log("PLAYER DEAD!");
 
         // Ghi nhận sự kiện telemetry khi player hy sinh
         if (TelemetryManager.Instance != null)
@@ -120,11 +119,25 @@ public class PlayerHealth : MonoBehaviour
         }
     }
 
+    private void OnDestroy()
+    {
+        if (Instance == this) Instance = null;
+    }
+
     public void Heal(int amount)
     {
-        if (isDead) return;
+        if (isDead || amount <= 0) return;
         currentHealth = Mathf.Min(maxHealth, currentHealth + amount);
         UpdateHealthUI(false);
+    }
+
+    public int HealPercent(float percent)
+    {
+        if (isDead || percent <= 0f || maxHealth <= 0) return 0;
+        int healAmount = Mathf.Max(1, Mathf.RoundToInt(maxHealth * percent));
+        int healthBefore = currentHealth;
+        Heal(healAmount);
+        return currentHealth - healthBefore;
     }
 
     public void FullHeal()

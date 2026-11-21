@@ -15,11 +15,11 @@ using UnityEngine.AI;
 /// </summary>
 public static class PlayerSetup
 {
-    const string Dir = "Assets/DucThanh/Assets/Player/";
+    const string Dir = "Assets/DucThanh/Assets/Player1/";
     const string IdleFbx = Dir + "Idle.fbx";
     const string Idle2Fbx = Dir + "Standing Idle.fbx";
     const string Idle3Fbx = Dir + "Fishing Idle.fbx";
-    const string RunFbx = Dir + "Run.fbx";
+    const string RunFbx = Dir + "Fast Run.fbx";
     const string BlockFbx = Dir + "Standing Block Idle.fbx";
     const string Atk1Fbx = Dir + "Atk1.fbx";
     const string Atk2Fbx = Dir + "Standing Melee Attack Horizontal.fbx";
@@ -69,7 +69,7 @@ public static class PlayerSetup
 
         ConfigureImport(Idle2Fbx, true, baseAvatar);
         ConfigureImport(Idle3Fbx, true, baseAvatar);
-        ConfigureImport(RunFbx, true, null);
+        ConfigureImport(RunFbx, true, null, isLocomotion: true);
         // Standing Block Idle.fbx là tư thế đỡ đòn giữ liên tục bằng Chuột Phải -> loop = true
         ConfigureImport(BlockFbx, true, baseAvatar);
         ConfigureImport(Atk1Fbx, false, null);
@@ -79,7 +79,7 @@ public static class PlayerSetup
         return baseAvatar;
     }
 
-    static void ConfigureImport(string path, bool loop, Avatar sourceAvatar)
+    static void ConfigureImport(string path, bool loop, Avatar sourceAvatar, bool isLocomotion = false)
     {
         var importer = AssetImporter.GetAtPath(path) as ModelImporter;
         if (importer == null)
@@ -117,20 +117,22 @@ public static class PlayerSetup
             importer = AssetImporter.GetAtPath(path) as ModelImporter;
         }
 
-        // Cấu hình Loop + Bake Into Pose để nhân vật không bị trôi khỏi CharacterController
+        // Cấu hình Loop + Root Transform:
+        // Với clip chạy Mixamo không bật "In Place" (di chuyển theo trục Z), giữ Based Upon = Original
+        // và TẮT Bake Into Pose XZ để applyRootMotion = false tự loại bỏ trôi/lắc ngang hoàn toàn.
         var clips = importer.clipAnimations;
         if (clips == null || clips.Length == 0) clips = importer.defaultClipAnimations;
 
         foreach (var c in clips)
         {
             c.loopTime = loop;
-            c.loopPose = loop;
+            c.loopPose = loop && !isLocomotion;
             c.lockRootRotation = true;
             c.lockRootHeightY = true;
-            c.lockRootPositionXZ = true;
-            c.keepOriginalOrientation = false;
+            c.lockRootPositionXZ = !isLocomotion;
+            c.keepOriginalOrientation = isLocomotion;
             c.keepOriginalPositionY = false;
-            c.keepOriginalPositionXZ = false;
+            c.keepOriginalPositionXZ = isLocomotion;
             c.heightFromFeet = true;
         }
         importer.clipAnimations = clips;

@@ -250,18 +250,23 @@ public static class FantasyUiThemeHelper
         const int size = 32;
         Texture2D tex = new Texture2D(size, size, TextureFormat.RGBA32, false);
         tex.wrapMode = TextureWrapMode.Clamp;
+        Color32[] pixels = new Color32[size * size];
         float half = size * 0.5f;
+        float invHalf = 1f / half;
+
         for (int y = 0; y < size; y++)
         {
+            int row = y * size;
+            float dy = (y - half + 0.5f) * invHalf;
             for (int x = 0; x < size; x++)
             {
-                float dx = (x - half + 0.5f) / half;
-                float dy = (y - half + 0.5f) / half;
+                float dx = (x - half + 0.5f) * invHalf;
                 float a = Mathf.Clamp01(1f - Mathf.Sqrt(dx * dx + dy * dy));
-                tex.SetPixel(x, y, new Color(1f, 1f, 1f, a * a));
+                pixels[row + x] = new Color32(255, 255, 255, (byte)(a * a * 255f));
             }
         }
-        tex.Apply();
+        tex.SetPixels32(pixels);
+        tex.Apply(false, true);
         cachedSoftDotSprite = Sprite.Create(tex, new Rect(0, 0, size, size), new Vector2(0.5f, 0.5f));
         return cachedSoftDotSprite;
     }
@@ -273,18 +278,21 @@ public static class FantasyUiThemeHelper
         const int h = 128;
         Texture2D tex = new Texture2D(2, h, TextureFormat.RGBA32, false);
         tex.wrapMode = TextureWrapMode.Clamp;
+        Color32[] pixels = new Color32[2 * h];
+
         for (int y = 0; y < h; y++)
         {
             float t = (float)y / (h - 1); // 0 = bottom, 1 = top
             // Đậm ở đáy (0..0.35) và dịu ở đỉnh (0.8..1.0), trong suốt ở giữa để lộ key art
             float bottomDark = Mathf.Pow(Mathf.Clamp01(1f - t / 0.45f), 1.6f) * 0.94f;
             float topDark = Mathf.Pow(Mathf.Clamp01((t - 0.72f) / 0.28f), 1.8f) * 0.48f;
-            float alpha = Mathf.Clamp01(bottomDark + topDark);
-            Color c = new Color(1f, 1f, 1f, alpha);
-            tex.SetPixel(0, y, c);
-            tex.SetPixel(1, y, c);
+            byte a = (byte)(Mathf.Clamp01(bottomDark + topDark) * 255f);
+            Color32 c = new Color32(255, 255, 255, a);
+            pixels[y * 2] = c;
+            pixels[y * 2 + 1] = c;
         }
-        tex.Apply();
+        tex.SetPixels32(pixels);
+        tex.Apply(false, true);
         cachedVerticalGradientSprite = Sprite.Create(tex, new Rect(0, 0, 2, h), new Vector2(0.5f, 0.5f));
         return cachedVerticalGradientSprite;
     }
@@ -296,16 +304,19 @@ public static class FantasyUiThemeHelper
         const int w = 128;
         Texture2D tex = new Texture2D(w, 2, TextureFormat.RGBA32, false);
         tex.wrapMode = TextureWrapMode.Clamp;
+        Color32[] pixels = new Color32[w * 2];
+
         for (int x = 0; x < w; x++)
         {
             float t = (float)x / (w - 1); // 0 = left, 1 = right
             // Bên trái sáng để lộ hiệp sĩ & lửa trại, bên phải tối dần làm nổi bật bảng Login
-            float rightDark = Mathf.Pow(Mathf.Clamp01((t - 0.35f) / 0.65f), 1.35f) * 0.76f;
-            Color c = new Color(1f, 1f, 1f, rightDark);
-            tex.SetPixel(x, 0, c);
-            tex.SetPixel(x, 1, c);
+            byte a = (byte)(Mathf.Pow(Mathf.Clamp01((t - 0.35f) / 0.65f), 1.35f) * 0.76f * 255f);
+            Color32 c = new Color32(255, 255, 255, a);
+            pixels[x] = c;
+            pixels[w + x] = c;
         }
-        tex.Apply();
+        tex.SetPixels32(pixels);
+        tex.Apply(false, true);
         cachedHorizontalGradientSprite = Sprite.Create(tex, new Rect(0, 0, w, 2), new Vector2(0.5f, 0.5f));
         return cachedHorizontalGradientSprite;
     }

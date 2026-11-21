@@ -27,9 +27,7 @@ public class ScoreManager : MonoBehaviour
     public TMP_Text scoreText;
     public TMP_Text levelText;
     public Slider expSlider;
-    [SerializeField] private float barSmoothSpeed = 10f;
 
-    public event Action<int> OnLevelUp;
     public event Action<int> OnGoldChanged;
 
     private void Awake()
@@ -56,7 +54,7 @@ public class ScoreManager : MonoBehaviour
 
     private void Start()
     {
-        // Tự khởi tạo Cửa Hàng Vũ Khí (thay thế hoàn toàn LevelUpChoiceManager)
+        // Tự khởi tạo Cửa Hàng Vũ Khí
         if (WeaponShopManager.Instance == null && GetComponent<WeaponShopManager>() == null)
         {
             gameObject.AddComponent<WeaponShopManager>();
@@ -77,7 +75,6 @@ public class ScoreManager : MonoBehaviour
         totalGoldEarned += amount;
         UpdateGoldHud();
         OnGoldChanged?.Invoke(gold);
-        Debug.Log($"[ScoreManager] +{amount} Gold | Hiện có: {gold} G (Tổng: {totalGoldEarned} G)");
     }
 
     public bool TrySpendGold(int cost)

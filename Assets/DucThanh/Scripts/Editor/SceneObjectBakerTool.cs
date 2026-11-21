@@ -183,7 +183,7 @@ public static class SceneObjectBakerTool
         footRt.sizeDelta = new Vector2(-176f, 130f);
 
         TMP_Text tip = FantasyUiThemeHelper.CreateText(footer.transform, "GameplayTipText",
-            "Mẹo chiến đấu: Giữ [Chuột Phải] để Đỡ Đòn (giảm 80% sát thương) — bấm đúng lúc sẽ Parry đẩy choáng quái!",
+            "Mẹo chiến đấu: Giữ [Chuột Phải] để Đỡ Đòn (giảm 80% sát thương) — bấm đúng lúc sẽ Parry đẩy choáng quái & hồi 5% HP!",
             19f, FontStyles.Normal, new Color(0.88f, 0.91f, 0.96f, 0.95f), TextAlignmentOptions.Left, sharedFont);
         RectTransform tipRt = tip.rectTransform;
         tipRt.anchorMin = new Vector2(0f, 1f);
@@ -478,13 +478,20 @@ public static class SceneObjectBakerTool
         CreateCheckpointEditor("Checkpoint_Stage2", SnapToTerrainEditor(s2 + new Vector3(3f, 0f, 0f), terrain), 2, "Thung Lũng Bẫy", 50, propsRoot.transform);
         CreateCheckpointEditor("Checkpoint_Stage3", SnapToTerrainEditor(s3 + new Vector3(0f, 0f, 16f), terrain), 3, "Cổng Mỏ Vàng", 60, propsRoot.transform);
 
+        GameObject potionPrefab = AssetDatabase.LoadAssetAtPath<GameObject>(HealthPickup.PotionAssetPath) ?? sm.mushroomPickupPrefab;
+        if (potionPrefab != null)
+        {
+            sm.mushroomPickupPrefab = potionPrefab;
+            EditorUtility.SetDirty(sm);
+        }
+
         if (sm.runeStonePrefab != null)
         {
             SpawnPrefabEditor(sm.runeStonePrefab, SnapToTerrainEditor(s1 + new Vector3(9f, 0f, 6f), terrain), Quaternion.Euler(0f, -35f, 0f), Vector3.one * 1.3f, propsRoot.transform, "Stage1_RuneStone");
         }
-        SpawnMushroomEditor(sm.mushroomPickupPrefab, SnapToTerrainEditor(s1 + new Vector3(-6f, 0f, -5f), terrain), 40, propsRoot.transform, "Stage1_HealthMushroom");
-        SpawnMushroomEditor(sm.mushroomPickupPrefab, SnapToTerrainEditor(Vector3.Lerp(s1, s2, 0.35f), terrain), 40, propsRoot.transform, "Trail12_HealthMushroom_1");
-        SpawnMushroomEditor(sm.mushroomPickupPrefab, SnapToTerrainEditor(Vector3.Lerp(s1, s2, 0.68f), terrain), 40, propsRoot.transform, "Trail12_HealthMushroom_2");
+        SpawnHealthPotionEditor(potionPrefab, SnapToTerrainEditor(s1 + new Vector3(-6f, 0f, -5f), terrain), 40, propsRoot.transform, "Stage1_HealthPotion");
+        SpawnHealthPotionEditor(potionPrefab, SnapToTerrainEditor(Vector3.Lerp(s1, s2, 0.35f), terrain), 40, propsRoot.transform, "Trail12_HealthPotion_1");
+        SpawnHealthPotionEditor(potionPrefab, SnapToTerrainEditor(Vector3.Lerp(s1, s2, 0.68f), terrain), 40, propsRoot.transform, "Trail12_HealthPotion_2");
 
         Vector3[] trapOffsets =
         {
@@ -499,9 +506,9 @@ public static class SceneObjectBakerTool
         {
             SpawnTrapEditor(sm.spikeTrapPrefab, SnapToTerrainEditor(s2 + trapOffsets[i], terrain), propsRoot.transform, $"Stage2_SpikeTrap_{i + 1}");
         }
-        SpawnMushroomEditor(sm.mushroomPickupPrefab, SnapToTerrainEditor(s2 + new Vector3(-11f, 0f, 1f), terrain), 50, propsRoot.transform, "Stage2_HealthMushroom_1");
-        SpawnMushroomEditor(sm.mushroomPickupPrefab, SnapToTerrainEditor(s2 + new Vector3(11f, 0f, -2f), terrain), 50, propsRoot.transform, "Stage2_HealthMushroom_2");
-        SpawnMushroomEditor(sm.mushroomPickupPrefab, SnapToTerrainEditor(Vector3.Lerp(s2, s3, 0.5f), terrain), 50, propsRoot.transform, "Trail23_HealthMushroom");
+        SpawnHealthPotionEditor(potionPrefab, SnapToTerrainEditor(s2 + new Vector3(-11f, 0f, 1f), terrain), 50, propsRoot.transform, "Stage2_HealthPotion_1");
+        SpawnHealthPotionEditor(potionPrefab, SnapToTerrainEditor(s2 + new Vector3(11f, 0f, -2f), terrain), 50, propsRoot.transform, "Stage2_HealthPotion_2");
+        SpawnHealthPotionEditor(potionPrefab, SnapToTerrainEditor(Vector3.Lerp(s2, s3, 0.5f), terrain), 50, propsRoot.transform, "Trail23_HealthPotion");
 
         if (sm.goldMinePrefab != null)
         {
@@ -529,8 +536,8 @@ public static class SceneObjectBakerTool
         {
             SpawnPrefabEditor(sm.fireflyFxPrefab, s3 + Vector3.up * 1.5f, Quaternion.identity, Vector3.one, propsRoot.transform, "Stage3_Fireflies");
         }
-        SpawnMushroomEditor(sm.mushroomPickupPrefab, SnapToTerrainEditor(s3 + new Vector3(-12f, 0f, 4f), terrain), 60, propsRoot.transform, "Stage3_HealthMushroom_1");
-        SpawnMushroomEditor(sm.mushroomPickupPrefab, SnapToTerrainEditor(s3 + new Vector3(12f, 0f, 4f), terrain), 60, propsRoot.transform, "Stage3_HealthMushroom_2");
+        SpawnHealthPotionEditor(potionPrefab, SnapToTerrainEditor(s3 + new Vector3(-12f, 0f, 4f), terrain), 60, propsRoot.transform, "Stage3_HealthPotion_1");
+        SpawnHealthPotionEditor(potionPrefab, SnapToTerrainEditor(s3 + new Vector3(12f, 0f, 4f), terrain), 60, propsRoot.transform, "Stage3_HealthPotion_2");
 
         // Bake HUD Panels trực tiếp lên Canvas Lv1 để nhìn thấy ngay ở Edit Mode
         Canvas canvas = Object.FindFirstObjectByType<Canvas>();
@@ -994,17 +1001,17 @@ public static class SceneObjectBakerTool
         hz.triggerRadius = 1.75f;
     }
 
-    private static void SpawnMushroomEditor(GameObject prefab, Vector3 pos, int heal, Transform parent, string name)
+    private static void SpawnHealthPotionEditor(GameObject prefab, Vector3 pos, int heal, Transform parent, string name)
     {
         GameObject obj = prefab != null
-            ? SpawnPrefabEditor(prefab, pos + Vector3.up * 0.2f, Quaternion.identity, Vector3.one * 1.6f, parent, name)
+            ? SpawnPrefabEditor(prefab, pos + Vector3.up * 0.16f, Quaternion.identity, Vector3.one * 2.15f, parent, name)
             : GameObject.CreatePrimitive(PrimitiveType.Sphere);
 
         if (prefab == null)
         {
             obj.name = name;
             obj.transform.SetParent(parent, false);
-            obj.transform.position = pos + Vector3.up * 0.2f;
+            obj.transform.position = pos + Vector3.up * 0.16f;
         }
 
         HealthPickup hp = obj.GetComponent<HealthPickup>() ?? obj.AddComponent<HealthPickup>();

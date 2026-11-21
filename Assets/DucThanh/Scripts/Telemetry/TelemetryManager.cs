@@ -38,12 +38,14 @@ public class OfflineEventStore
 
 /// <summary>
 /// Quản lý và gửi sự kiện Telemetry lên Backend API (/api/Events & /api/Events/batch).
-/// - Tự động kết nối SessionApiClient để khởi tạo & kết thúc phiên chơi.
-/// - Lưu hàng đợi sự kiện offline xuống file JSON và tự retry khi mất mạng.
+/// - Gom nhóm (batching debounce) các sự kiện combat rồi đẩy 1 lần, tránh spam I/O và request mạng.
+/// - Lưu hàng đợi offline xuống đĩa chỉ khi lỗi mạng hoặc thoát/tạm dừng game.
 /// - Chống gửi trùng các sự kiện trạng thái (level_start, level_complete, level_failed, player_dead, game_exit).
 /// </summary>
 public class TelemetryManager : MonoBehaviour
 {
+    private const int ImmediateBatchSize = 10;
+
     public static TelemetryManager Instance { get; private set; }
 
     [Header("Backend API Configuration")]
@@ -55,6 +57,7 @@ public class TelemetryManager : MonoBehaviour
     [SerializeField] private int currentLevel = 1;
     [SerializeField] private int fallbackTestPlayerId = 1;
     [SerializeField] private float retryInterval = 5f;
+    [SerializeField] private float batchFlushDelay = 1.8f;
 
     public string SessionId { get; private set; }
     public int CurrentLevel
@@ -63,7 +66,12 @@ public class TelemetryManager : MonoBehaviour
         set => currentLevel = Mathf.Max(1, value);
     }
 
-    private readonly List<CreateGameEventRequest> pendingEvents = new List<CreateGameEventRequest>();
+    private readonly List<CreateGameEventRequest> pendingEvents = new List<CreateGameEventRequest>(16);
+    private readonly List<CreateGameEventRequest> sendBatch = new List<CreateGameEventRequest>(16);
+    private readonly CreateBatchGameEventsRequest reusableBatchDto = new CreateBatchGameEventsRequest();
+
+    private string offlineQueuePath;
+    private bool hasOfflineFileOnDisk;
     private bool isSending;
     private bool isStartingSession;
     private bool gameEnded;
@@ -71,8 +79,7 @@ public class TelemetryManager : MonoBehaviour
     private int startedLevel = -1;
     private int completedLevel = -1;
     private int failedLevel = -1;
-
-    private string OfflineQueuePath => Path.Combine(Application.persistentDataPath, "telemetry_offline_queue.json");
+    private Coroutine scheduledFlushRoutine;
 
     public string BaseUrl
     {
@@ -89,6 +96,7 @@ public class TelemetryManager : MonoBehaviour
         }
 
         Instance = this;
+        offlineQueuePath = Path.Combine(Application.persistentDataPath, "telemetry_offline_queue.json");
         LoadOfflineQueue();
     }
 
@@ -118,7 +126,6 @@ public class TelemetryManager : MonoBehaviour
         if (long.TryParse(savedSessionId, out long parsedSessionId) && parsedSessionId > 0)
         {
             SessionId = parsedSessionId.ToString();
-            Debug.Log($"[TelemetryManager] SESSION RESUMED: {SessionId}");
         }
         else
         {
@@ -180,7 +187,6 @@ public class TelemetryManager : MonoBehaviour
                     }
                 }
 
-                SaveOfflineQueue();
                 FlushPendingEvents();
             }
             else
@@ -201,34 +207,67 @@ public class TelemetryManager : MonoBehaviour
     }
 
     /// <summary>
-    /// Ghi nhận sự kiện telemetry vào hàng đợi và đẩy lên Backend (hoặc lưu offline nếu chưa có SessionId/mất mạng).
+    /// Ghi nhận sự kiện telemetry vào hàng đợi và gom nhóm trước khi đẩy lên Backend.
     /// </summary>
     public void TrackEvent(string eventType, int eventValue = 0)
     {
         if (string.IsNullOrWhiteSpace(eventType)) return;
 
-        if (gameEnded && eventType != "game_exit" && eventType != "game_end")
+        string normalizedType = eventType.Trim();
+        if (gameEnded && normalizedType != "game_exit" && normalizedType != "game_end")
         {
-            Debug.LogWarning("[TelemetryManager] Lượt chơi đã kết thúc, bỏ qua event!");
             return;
         }
 
-        long numericSessionId = long.TryParse(SessionId, out long parsed) && parsed > 0 ? parsed : 0;
-
-        CreateGameEventRequest evt = new CreateGameEventRequest
-        {
-            sessionId = numericSessionId,
-            eventType = eventType.Trim(),
-            eventTime = DateTime.UtcNow.ToString("o"),
-            value = eventValue
-        };
-
-        Debug.Log($"[TelemetryManager] Tracked: {evt.eventType} (value: {evt.value})");
-
         if (!sendToBackend) return;
 
-        pendingEvents.Add(evt);
-        SaveOfflineQueue();
+        long numericSessionId = long.TryParse(SessionId, out long parsed) && parsed > 0 ? parsed : 0;
+
+        pendingEvents.Add(new CreateGameEventRequest
+        {
+            sessionId = numericSessionId,
+            eventType = normalizedType,
+            eventTime = DateTime.UtcNow.ToString("o"),
+            value = eventValue
+        });
+
+#if UNITY_EDITOR
+        Debug.Log($"[TelemetryManager] Tracked: {normalizedType} (value: {eventValue})");
+#endif
+
+        if (IsCriticalEvent(normalizedType) || pendingEvents.Count >= ImmediateBatchSize)
+        {
+            FlushPendingEvents();
+        }
+        else
+        {
+            ScheduleDebouncedFlush();
+        }
+    }
+
+    private static bool IsCriticalEvent(string eventType)
+    {
+        return eventType == "player_dead"
+            || eventType == "level_complete"
+            || eventType == "level_failed"
+            || eventType == "game_exit"
+            || eventType == "game_end";
+    }
+
+    private void ScheduleDebouncedFlush()
+    {
+        if (!sendToBackend || isSending || scheduledFlushRoutine != null || !gameObject.activeInHierarchy)
+        {
+            return;
+        }
+
+        scheduledFlushRoutine = StartCoroutine(DebouncedFlushCoroutine());
+    }
+
+    private IEnumerator DebouncedFlushCoroutine()
+    {
+        yield return new WaitForSecondsRealtime(Mathf.Max(0.2f, batchFlushDelay));
+        scheduledFlushRoutine = null;
         FlushPendingEvents();
     }
 
@@ -282,11 +321,6 @@ public class TelemetryManager : MonoBehaviour
         TrackEvent("trap_hit", damage);
     }
 
-    public void TrackDashUsed(int stage)
-    {
-        TrackEvent("dash_used", stage);
-    }
-
     public void TrackBlockHit(int blockedDamage)
     {
         TrackEvent("block_hit", blockedDamage);
@@ -295,11 +329,6 @@ public class TelemetryManager : MonoBehaviour
     public void TrackPerfectParry(int stage)
     {
         TrackEvent("perfect_parry", stage);
-    }
-
-    public void TrackPlayerLevelUp(int playerLevel)
-    {
-        TrackEvent("player_level_up", playerLevel);
     }
 
     public void TrackGoldCollected(int amount)
@@ -347,6 +376,12 @@ public class TelemetryManager : MonoBehaviour
 
     private void FlushPendingEvents()
     {
+        if (scheduledFlushRoutine != null)
+        {
+            StopCoroutine(scheduledFlushRoutine);
+            scheduledFlushRoutine = null;
+        }
+
         if (!sendToBackend || isSending || !gameObject.activeInHierarchy) return;
         if (!HasSendableEvents()) return;
 
@@ -369,7 +404,7 @@ public class TelemetryManager : MonoBehaviour
         while (sendToBackend)
         {
             long targetSessionId = 0;
-            List<CreateGameEventRequest> batch = new List<CreateGameEventRequest>();
+            sendBatch.Clear();
 
             for (int i = 0; i < pendingEvents.Count; i++)
             {
@@ -382,34 +417,35 @@ public class TelemetryManager : MonoBehaviour
 
                 if (pendingEvents[i].sessionId == targetSessionId)
                 {
-                    batch.Add(pendingEvents[i]);
+                    sendBatch.Add(pendingEvents[i]);
                 }
             }
 
-            if (batch.Count == 0) break;
+            if (sendBatch.Count == 0) break;
 
             string url;
             string json;
 
-            if (batch.Count >= 2)
+            if (sendBatch.Count >= 2)
             {
                 url = BaseUrl.TrimEnd('/') + "/api/Events/batch";
-                var batchDto = new CreateBatchGameEventsRequest { sessionId = targetSessionId };
-                for (int i = 0; i < batch.Count; i++)
+                reusableBatchDto.sessionId = targetSessionId;
+                reusableBatchDto.events.Clear();
+                for (int i = 0; i < sendBatch.Count; i++)
                 {
-                    batchDto.events.Add(new SingleEventItemRequest
+                    reusableBatchDto.events.Add(new SingleEventItemRequest
                     {
-                        eventType = batch[i].eventType,
-                        eventTime = batch[i].eventTime,
-                        value = batch[i].value
+                        eventType = sendBatch[i].eventType,
+                        eventTime = sendBatch[i].eventTime,
+                        value = sendBatch[i].value
                     });
                 }
-                json = JsonUtility.ToJson(batchDto);
+                json = JsonUtility.ToJson(reusableBatchDto);
             }
             else
             {
                 url = BaseUrl.TrimEnd('/') + "/api/Events";
-                json = JsonUtility.ToJson(batch[0]);
+                json = JsonUtility.ToJson(sendBatch[0]);
             }
 
             bool removeBatch = false;
@@ -428,13 +464,15 @@ public class TelemetryManager : MonoBehaviour
                 if (request.result == UnityWebRequest.Result.Success)
                 {
                     removeBatch = true;
-                    Debug.Log($"[TelemetryManager] Sent {batch.Count} event(s) successfully.");
+#if UNITY_EDITOR
+                    Debug.Log($"[TelemetryManager] Sent {sendBatch.Count} event(s) successfully.");
+#endif
                 }
                 else if (request.responseCode == 400 || request.responseCode == 404)
                 {
                     // Dữ liệu lỗi hoặc SessionId không tồn tại -> bỏ khỏi hàng đợi để tránh retry vô hạn
                     removeBatch = true;
-                    Debug.LogWarning($"[TelemetryManager] Dropped {batch.Count} invalid/orphan event(s) (HTTP {request.responseCode}): {request.downloadHandler?.text}");
+                    Debug.LogWarning($"[TelemetryManager] Dropped {sendBatch.Count} invalid/orphan event(s) (HTTP {request.responseCode}): {request.downloadHandler?.text}");
                 }
                 else
                 {
@@ -444,11 +482,15 @@ public class TelemetryManager : MonoBehaviour
 
             if (removeBatch)
             {
-                for (int i = 0; i < batch.Count; i++)
+                for (int i = 0; i < sendBatch.Count; i++)
                 {
-                    pendingEvents.Remove(batch[i]);
+                    pendingEvents.Remove(sendBatch[i]);
                 }
-                SaveOfflineQueue();
+
+                if (hasOfflineFileOnDisk)
+                {
+                    SaveOfflineQueue();
+                }
             }
             else
             {
@@ -464,9 +506,14 @@ public class TelemetryManager : MonoBehaviour
     {
         try
         {
-            if (!File.Exists(OfflineQueuePath)) return;
+            if (string.IsNullOrEmpty(offlineQueuePath) || !File.Exists(offlineQueuePath))
+            {
+                hasOfflineFileOnDisk = false;
+                return;
+            }
 
-            string json = File.ReadAllText(OfflineQueuePath, Encoding.UTF8);
+            hasOfflineFileOnDisk = true;
+            string json = File.ReadAllText(offlineQueuePath, Encoding.UTF8);
             if (string.IsNullOrWhiteSpace(json)) return;
 
             OfflineEventStore store = JsonUtility.FromJson<OfflineEventStore>(json);
@@ -489,6 +536,8 @@ public class TelemetryManager : MonoBehaviour
 
     private void SaveOfflineQueue()
     {
+        if (string.IsNullOrEmpty(offlineQueuePath)) return;
+
         try
         {
             var store = new OfflineEventStore();
@@ -502,19 +551,29 @@ public class TelemetryManager : MonoBehaviour
 
             if (store.pendingEvents.Count == 0)
             {
-                if (File.Exists(OfflineQueuePath))
+                if (hasOfflineFileOnDisk && File.Exists(offlineQueuePath))
                 {
-                    File.Delete(OfflineQueuePath);
+                    File.Delete(offlineQueuePath);
                 }
+                hasOfflineFileOnDisk = false;
                 return;
             }
 
             string json = JsonUtility.ToJson(store);
-            File.WriteAllText(OfflineQueuePath, json, Encoding.UTF8);
+            File.WriteAllText(offlineQueuePath, json, Encoding.UTF8);
+            hasOfflineFileOnDisk = true;
         }
         catch (Exception ex)
         {
             Debug.LogWarning($"[TelemetryManager] Lỗi ghi offline queue: {ex.Message}");
+        }
+    }
+
+    private void OnApplicationPause(bool pauseStatus)
+    {
+        if (pauseStatus && pendingEvents.Count > 0)
+        {
+            SaveOfflineQueue();
         }
     }
 

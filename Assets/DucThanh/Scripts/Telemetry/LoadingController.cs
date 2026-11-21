@@ -26,11 +26,11 @@ public class LoadingController : MonoBehaviour
 
     private static readonly string[] GameplayTips =
     {
-        "Mẹo chiến đấu: Giữ [Chuột Phải] để Đỡ Đòn (giảm 80% sát thương) — bấm đúng lúc sẽ Parry đẩy choáng quái!",
+        "Mẹo chiến đấu: Giữ [Chuột Phải] để Đỡ Đòn (giảm 80% sát thương) — bấm đúng lúc sẽ Parry đẩy choáng quái & hồi 5% HP!",
         "Mẹo sinh tồn: Cẩn thận cụm Bẫy Gai ở Màn 2 (Thung Lũng Bẫy) — quan sát ánh sáng đỏ để né.",
         "Mẹo nâng cấp: Giết quái Orc nhặt Vàng rồi nhấn [B] (hoặc [E] gần Trại Lửa) để mở Cửa Hàng mua Vũ Khí & Bình Máu!",
         "Mẹo dẫn đường: Theo dõi Cột Sáng Dẫn Đường trên địa hình để tiến tới Đấu Trường Boss Mỏ Vàng.",
-        "Mẹo hồi phục: Nhặt Nấm Phát Sáng rơi từ quái và chạm Trại Lửa Checkpoint để hồi HP."
+        "Mẹo hồi phục: Nhặt Bình Hồi Máu phát sáng trên đường hoặc rơi từ quái và chạm Trại Lửa Checkpoint để hồi HP."
     };
 
     private static readonly string[] StatusStages =

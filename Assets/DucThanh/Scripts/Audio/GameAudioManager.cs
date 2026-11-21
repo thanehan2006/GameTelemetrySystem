@@ -34,7 +34,7 @@ public class GameAudioManager : MonoBehaviour
     private BgmTrack currentTrack = BgmTrack.None;
     private Coroutine crossfadeRoutine;
 
-    private readonly List<AudioSource> sfxPool = new List<AudioSource>();
+    private readonly AudioSource[] sfxPool = new AudioSource[6];
     private int sfxPoolIndex;
     private readonly Dictionary<string, AudioClip> clipCache = new Dictionary<string, AudioClip>();
 
@@ -102,9 +102,9 @@ public class GameAudioManager : MonoBehaviour
         bgmSourceA = CreateAudioSource("BGM_A", true);
         bgmSourceB = CreateAudioSource("BGM_B", true);
 
-        for (int i = 0; i < 6; i++)
+        for (int i = 0; i < sfxPool.Length; i++)
         {
-            sfxPool.Add(CreateAudioSource($"SFX_{i}", false));
+            sfxPool[i] = CreateAudioSource($"SFX_{i}", false);
         }
     }
 
@@ -126,7 +126,7 @@ public class GameAudioManager : MonoBehaviour
 
     private void SyncBgmForScene(string sceneName)
     {
-        if (sceneName == "LoadingScene" || sceneName == "LoginScene")
+        if (sceneName == "LoadingScene" || sceneName == "LoginScene" || sceneName == "PickCharacter")
         {
             PlayBgmInternal(BgmTrack.Menu, 0.8f);
         }
@@ -140,7 +140,6 @@ public class GameAudioManager : MonoBehaviour
     {
         isMuted = !isMuted;
         AudioListener.volume = isMuted ? 0f : 1f;
-        Debug.Log($"[GameAudioManager] Âm thanh: {(isMuted ? "TẮT (Muted)" : "BẬT")}");
     }
 
     // ==================== BGM CONTROL ====================
@@ -229,10 +228,10 @@ public class GameAudioManager : MonoBehaviour
     {
         if (isMuted) return;
         AudioClip clip = LoadClip(clipName);
-        if (clip == null || sfxPool.Count == 0) return;
+        if (clip == null || sfxPool.Length == 0) return;
 
         AudioSource src = sfxPool[sfxPoolIndex];
-        sfxPoolIndex = (sfxPoolIndex + 1) % sfxPool.Count;
+        sfxPoolIndex = (sfxPoolIndex + 1) % sfxPool.Length;
 
         src.pitch = Mathf.Approximately(pitchMin, pitchMax) ? pitchMin : Random.Range(pitchMin, pitchMax);
         src.PlayOneShot(clip, Mathf.Clamp01(sfxVolume * volumeScale));
@@ -253,7 +252,6 @@ public class GameAudioManager : MonoBehaviour
     public static void PlaySwordSwing() => EnsureInstance().PlaySfxClip("sfx_sword_swing", 0.72f, 0.92f, 1.08f);
     public static void PlaySwordHit(bool heavy = false) => EnsureInstance().PlaySfxClip("sfx_sword_hit", heavy ? 1.0f : 0.85f, heavy ? 0.84f : 0.94f, heavy ? 0.96f : 1.08f);
     public static void PlayPlayerHurt() => EnsureInstance().PlaySfxClip("sfx_player_hurt", 0.95f, 0.92f, 1.05f);
-    public static void PlayDash() => EnsureInstance().PlaySfxClip("sfx_dash", 0.78f, 0.95f, 1.12f);
     public static void PlayFootstep() => EnsureInstance().PlaySfxClip("sfx_footstep", 0.36f, 0.88f, 1.16f);
     public static void PlayOrcAttack() => EnsureInstance().PlaySfxClip("sfx_orc_attack", 0.65f, 0.88f, 1.06f);
     public static void PlayEnemyDeath(bool isBoss = false)
@@ -272,7 +270,6 @@ public class GameAudioManager : MonoBehaviour
     public static void PlayTrapHit() => EnsureInstance().PlaySfxClip("sfx_trap_hit", 0.90f, 0.95f, 1.06f);
     public static void PlayPickup() => EnsureInstance().PlaySfxClip("sfx_pickup", 0.82f, 0.98f, 1.06f);
     public static void PlayCheckpoint() => EnsureInstance().PlaySfxClip("sfx_checkpoint", 0.88f, 1f, 1f);
-    public static void PlayLevelUp() => EnsureInstance().PlaySfxClip("sfx_level_up", 0.92f, 1f, 1f);
     public static void PlayWeaponEquip() => EnsureInstance().PlaySfxClip("sfx_weapon_equip", 0.88f, 0.96f, 1.05f);
     public static void PlayStageClear() => EnsureInstance().PlaySfxClip("sfx_stage_clear", 0.92f, 1f, 1f);
     public static void PlayVictory()

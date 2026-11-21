@@ -24,6 +24,7 @@ public class PlayerAnimationController : MonoBehaviour
     private PlayerAttack playerAttack;
 
     private readonly List<int> availableIdleHashes = new List<int>();
+    private bool hasRunState;
     private bool hasBlockState;
     private int currentIdleIndex = -1;
     private bool wasMoving;
@@ -53,7 +54,7 @@ public class PlayerAnimationController : MonoBehaviour
             CacheAvailableStates();
         }
 
-        if (GameOverManager.IsGameOver || LevelUpChoiceManager.IsPaused)
+        if (GameOverManager.IsGameOver || WeaponShopManager.IsShopOpen)
         {
             animator.SetFloat(SpeedHash, 0f);
             return;
@@ -149,6 +150,7 @@ public class PlayerAnimationController : MonoBehaviour
     private void CacheAvailableStates()
     {
         availableIdleHashes.Clear();
+        hasRunState = false;
         hasBlockState = false;
         if (animator == null) return;
 
@@ -158,6 +160,7 @@ public class PlayerAnimationController : MonoBehaviour
             if (animator.HasState(0, h)) availableIdleHashes.Add(h);
         }
 
+        hasRunState = animator.HasState(0, RunHash);
         hasBlockState = animator.HasState(0, BlockHash);
     }
 
@@ -172,7 +175,8 @@ public class PlayerAnimationController : MonoBehaviour
 
     private void PlayRunAnimation(float fadeDuration)
     {
-        if (animator.HasState(0, RunHash))
+        if (!hasRunState) hasRunState = animator.HasState(0, RunHash);
+        if (hasRunState)
         {
             animator.CrossFadeInFixedTime(RunHash, fadeDuration, 0);
         }

@@ -6,6 +6,8 @@ using UnityEngine;
 [DefaultExecutionOrder(50)]
 public class ThirdPersonCamera : MonoBehaviour
 {
+    public static ThirdPersonCamera Instance { get; private set; }
+
     [Header("Target & Framing (AAA Over-the-Shoulder)")]
     public Transform target;
     public float distance = 4.2f;
@@ -49,12 +51,20 @@ public class ThirdPersonCamera : MonoBehaviour
     private float shakeIntensity;
     private float shakeTimer;
     private float shakeDuration;
+    private float fovPunch;
+    private readonly RaycastHit[] collisionHitBuffer = new RaycastHit[16];
 
     void Awake()
     {
+        Instance = this;
         cam = GetComponent<Camera>();
         desiredDistance = distance;
         currentDistance = distance;
+    }
+
+    void OnDestroy()
+    {
+        if (Instance == this) Instance = null;
     }
 
     void Start()
@@ -89,7 +99,7 @@ public class ThirdPersonCamera : MonoBehaviour
             smoothPivot = GetTargetPivot();
         }
 
-        if (GameOverManager.IsGameOver || LevelUpChoiceManager.IsPaused) return;
+        if (GameOverManager.IsGameOver || WeaponShopManager.IsShopOpen) return;
 
         HandleInput();
         UpdateCameraTransform();
@@ -106,12 +116,28 @@ public class ThirdPersonCamera : MonoBehaviour
         shakeTimer = shakeDuration;
     }
 
+    /// <summary>
+    /// Tạo cú giật FOV tức thì (Parry hoàn hảo, chém nặng, Boss cuồng nộ) rồi hồi mượt về FOV gốc.
+    /// </summary>
+    public void AddFovPunch(float deltaFov)
+    {
+        fovPunch = Mathf.Clamp(fovPunch + deltaFov, -8f, 12f);
+    }
+
     private void ResolveTarget()
     {
         if (target == null)
         {
-            var playerObj = GameObject.FindWithTag("Player");
-            if (playerObj != null) target = playerObj.transform;
+            if (PlayerController.Instance != null)
+            {
+                playerController = PlayerController.Instance;
+                target = playerController.transform;
+            }
+            else
+            {
+                var playerObj = GameObject.FindWithTag("Player");
+                if (playerObj != null) target = playerObj.transform;
+            }
         }
 
         if (target != null && playerController == null)
@@ -137,14 +163,15 @@ public class ThirdPersonCamera : MonoBehaviour
 
     private void UpdateCameraTransform()
     {
-        float rotT = 1f - Mathf.Exp(-rotationSmooth * Time.deltaTime);
+        float dt = Time.deltaTime;
+        float rotT = 1f - Mathf.Exp(-rotationSmooth * dt);
         currentYaw = Mathf.LerpAngle(currentYaw, targetYaw, rotT);
         currentPitch = Mathf.Lerp(currentPitch, targetPitch, rotT);
 
         Quaternion rot = Quaternion.Euler(currentPitch, currentYaw, 0f);
 
         Vector3 targetPivot = GetTargetPivot();
-        float followT = 1f - Mathf.Exp(-followSmooth * Time.deltaTime);
+        float followT = 1f - Mathf.Exp(-followSmooth * dt);
         smoothPivot = Vector3.Lerp(smoothPivot, targetPivot, followT);
 
         Vector3 shoulderShift = rot * Vector3.right * shoulderOffset;
@@ -152,14 +179,14 @@ public class ThirdPersonCamera : MonoBehaviour
 
         float safeDistance = ResolveCollisionDistance(pivotWithShoulder, rot, desiredDistance);
         float distSmooth = safeDistance < currentDistance ? collisionInSmooth : collisionOutSmooth;
-        currentDistance = Mathf.Lerp(currentDistance, safeDistance, 1f - Mathf.Exp(-distSmooth * Time.deltaTime));
+        currentDistance = Mathf.Lerp(currentDistance, safeDistance, 1f - Mathf.Exp(-distSmooth * dt));
 
         Vector3 finalPos = pivotWithShoulder - rot * Vector3.forward * currentDistance;
         finalPos.y = Mathf.Max(finalPos.y, target.position.y + 0.35f);
 
         if (shakeTimer > 0f)
         {
-            shakeTimer -= Time.deltaTime;
+            shakeTimer -= Time.unscaledDeltaTime;
             float falloff = Mathf.Clamp01(shakeTimer / shakeDuration);
             finalPos += Random.insideUnitSphere * (shakeIntensity * falloff);
             if (shakeTimer <= 0f) shakeIntensity = 0f;
@@ -172,24 +199,27 @@ public class ThirdPersonCamera : MonoBehaviour
     {
         if (cam == null) return;
 
+        float unscaledDt = Time.unscaledDeltaTime;
         bool isMoving = playerController != null && playerController.HasMovementInput;
-        float targetFov = baseFov + (isMoving ? moveFovBoost : 0f);
-        float t = 1f - Mathf.Exp(-fovSmooth * Time.deltaTime);
+        fovPunch = Mathf.Lerp(fovPunch, 0f, 1f - Mathf.Exp(-10f * unscaledDt));
+        float targetFov = baseFov + (isMoving ? moveFovBoost : 0f) + fovPunch;
+        float t = 1f - Mathf.Exp(-fovSmooth * unscaledDt);
         cam.fieldOfView = Mathf.Lerp(cam.fieldOfView, targetFov, t);
     }
 
     private float ResolveCollisionDistance(Vector3 origin, Quaternion rot, float maxDist)
     {
         Vector3 dir = -(rot * Vector3.forward);
-        RaycastHit[] hits = Physics.SphereCastAll(origin, collisionRadius, dir, maxDist, ~0, QueryTriggerInteraction.Ignore);
+        int hitCount = Physics.SphereCastNonAlloc(origin, collisionRadius, dir, collisionHitBuffer, maxDist, ~0, QueryTriggerInteraction.Ignore);
 
         float closest = maxDist;
-        for (int i = 0; i < hits.Length; i++)
+        float minAllowed = minDistance * 0.5f;
+        for (int i = 0; i < hitCount; i++)
         {
-            Collider col = hits[i].collider;
+            Collider col = collisionHitBuffer[i].collider;
             if (col == null || col.transform.IsChildOf(target)) continue;
 
-            float hitDist = Mathf.Max(hits[i].distance - collisionOffset, minDistance * 0.5f);
+            float hitDist = Mathf.Max(collisionHitBuffer[i].distance - collisionOffset, minAllowed);
             if (hitDist < closest)
             {
                 closest = hitDist;

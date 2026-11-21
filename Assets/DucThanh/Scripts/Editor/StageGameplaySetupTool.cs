@@ -30,7 +30,7 @@ public static class StageGameplaySetupTool
         stageManager.bossOrcPrefab = AssetDatabase.LoadAssetAtPath<GameObject>("Assets/DucThanh/Prefabs/Orc_Enemy_Combined3.prefab");
 
         stageManager.spikeTrapPrefab = AssetDatabase.LoadAssetAtPath<GameObject>("Assets/BluBlu Games/Low Poly Forest Mini Pack/Prefabs/SM_Spikes_01.prefab");
-        stageManager.mushroomPickupPrefab = AssetDatabase.LoadAssetAtPath<GameObject>("Assets/BluBlu Games/Low Poly Forest Mini Pack/Prefabs/SM_Mushroom_01.prefab");
+        stageManager.mushroomPickupPrefab = AssetDatabase.LoadAssetAtPath<GameObject>(HealthPickup.PotionAssetPath);
         stageManager.runeStonePrefab = AssetDatabase.LoadAssetAtPath<GameObject>("Assets/BluBlu Games/Low Poly Forest Mini Pack/Prefabs/SM_RuneStone_02.prefab");
         stageManager.goldMinePrefab = AssetDatabase.LoadAssetAtPath<GameObject>("Assets/PolyNext/Low Poly Orc Warrior/Environment/Prefabs/Gold_Mine.prefab");
         stageManager.trolleyGoldPrefab = AssetDatabase.LoadAssetAtPath<GameObject>("Assets/PolyNext/Low Poly Orc Warrior/Environment/Prefabs/Trolley_Gold.prefab");

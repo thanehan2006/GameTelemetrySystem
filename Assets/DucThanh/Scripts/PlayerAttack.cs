@@ -13,7 +13,16 @@ public class PlayerAttack : MonoBehaviour
 {
     private static readonly int AttackHash = Animator.StringToHash("Attack");
     private static readonly int CancelAttackHash = Animator.StringToHash("CancelAttack");
-    private static readonly string[] AttackCandidateNames = { "Atk1", "Atk2", "Atk3" };
+    private static readonly int RunHash = Animator.StringToHash("Run");
+    private static readonly int IdleHash = Animator.StringToHash("Idle");
+    private static readonly int BlockHash = Animator.StringToHash("Block");
+    private static readonly int[] AttackStateHashes =
+    {
+        Animator.StringToHash("Atk1"),
+        Animator.StringToHash("Atk2"),
+        Animator.StringToHash("Atk3")
+    };
+    private static Gradient[] cachedTrailGradients;
 
     [Header("Attack Settings")]
     public int attackDamage = 35;
@@ -44,10 +53,11 @@ public class PlayerAttack : MonoBehaviour
     private PlayerController playerController;
     private PlayerAnimationController animController;
     private Transform currentTargetEnemy;
+    private EnemyHealth currentTargetHealth;
     private Vector3 attackFacingDir = Vector3.forward;
 
-    private readonly List<int> availableAttackIndices = new List<int>();
-    private string currentAttackStateName = "Atk1";
+    private readonly List<int> availableAttackIndices = new List<int>(3);
+    private int currentAttackStateHash = AttackStateHashes[0];
     private int currentAttackVariant = 0;
     private int lastAttackVariant = -1;
     private TrailRenderer weaponTrail;
@@ -57,6 +67,7 @@ public class PlayerAttack : MonoBehaviour
     private bool queuedNextAttack;
     private bool wasCursorLocked;
     private readonly HashSet<EnemyHealth> hitEnemiesInSwing = new HashSet<EnemyHealth>();
+    private readonly Collider[] hitBuffer = new Collider[32];
 
     void Awake()
     {
@@ -88,7 +99,7 @@ public class PlayerAttack : MonoBehaviour
 
     void Update()
     {
-        if (GameOverManager.IsGameOver || LevelUpChoiceManager.IsPaused)
+        if (GameOverManager.IsGameOver || WeaponShopManager.IsShopOpen)
         {
             StopAttackState();
             wasCursorLocked = false;
@@ -160,13 +171,13 @@ public class PlayerAttack : MonoBehaviour
 
     void LateUpdate()
     {
-        if (!IsAttacking || GameOverManager.IsGameOver || LevelUpChoiceManager.IsPaused) return;
+        if (!IsAttacking || GameOverManager.IsGameOver || WeaponShopManager.IsShopOpen) return;
 
         float elapsed = Time.time - attackStartTime;
         if (elapsed < hitboxStartDelay) return;
 
         AnimatorStateInfo state = animator.GetCurrentAnimatorStateInfo(0);
-        if (state.IsName(currentAttackStateName) && !animator.IsInTransition(0) && state.normalizedTime > 0.90f) return;
+        if (state.shortNameHash == currentAttackStateHash && !animator.IsInTransition(0) && state.normalizedTime > 0.90f) return;
 
         CheckWeaponHit();
     }
@@ -179,7 +190,7 @@ public class PlayerAttack : MonoBehaviour
         }
 
         currentAttackVariant = PickRandomAttackVariant();
-        currentAttackStateName = AttackCandidateNames[currentAttackVariant];
+        currentAttackStateHash = AttackStateHashes[currentAttackVariant];
 
         IsAttacking = true;
         queuedNextAttack = false;
@@ -194,7 +205,8 @@ public class PlayerAttack : MonoBehaviour
         animator.ResetTrigger(AttackHash);
 
         // Phát ngẫu nhiên 1 trong 3 chiêu thức (Atk1 chém chéo, Atk2 chém ngang, Atk3 xoay 360° tầm thấp)
-        animator.CrossFadeInFixedTime(currentAttackStateName, 0.06f, 0, 0f);
+        animator.CrossFadeInFixedTime(currentAttackStateHash, 0.06f, 0, 0f);
+        UpdateWeaponTrailTheme(currentAttackVariant);
         SetWeaponTrailEmitting(true);
         CombatVfxManager.SpawnSlashArc(transform.position, attackFacingDir, currentAttackVariant);
         GameAudioManager.PlaySwordSwing();
@@ -205,9 +217,9 @@ public class PlayerAttack : MonoBehaviour
         availableAttackIndices.Clear();
         if (animator == null) return;
 
-        for (int i = 0; i < AttackCandidateNames.Length; i++)
+        for (int i = 0; i < AttackStateHashes.Length; i++)
         {
-            if (animator.HasState(0, Animator.StringToHash(AttackCandidateNames[i])))
+            if (animator.HasState(0, AttackStateHashes[i]))
             {
                 availableAttackIndices.Add(i);
             }
@@ -242,26 +254,24 @@ public class PlayerAttack : MonoBehaviour
     {
         if (playerController == null) return;
 
-        if (currentTargetEnemy != null)
+        if (currentTargetEnemy != null && currentTargetHealth != null && !currentTargetHealth.IsDead)
         {
-            EnemyHealth eh = currentTargetEnemy.GetComponentInParent<EnemyHealth>();
-            if (eh != null && !eh.IsDead)
+            Vector3 toEnemy = currentTargetEnemy.position - transform.position;
+            toEnemy.y = 0f;
+            if (toEnemy.sqrMagnitude > 0.01f)
             {
-                Vector3 toEnemy = currentTargetEnemy.position - transform.position;
-                toEnemy.y = 0f;
-                if (toEnemy.sqrMagnitude > 0.01f)
-                {
-                    attackFacingDir = toEnemy.normalized;
-                }
-            }
-            else
-            {
-                currentTargetEnemy = null;
+                attackFacingDir = toEnemy.normalized;
             }
         }
-        else if (elapsed < 0.35f && playerController.HasMovementInput && playerController.CurrentInputDirection.sqrMagnitude > 0.01f)
+        else
         {
-            attackFacingDir = playerController.CurrentInputDirection;
+            currentTargetEnemy = null;
+            currentTargetHealth = null;
+
+            if (elapsed < 0.35f && playerController.HasMovementInput && playerController.CurrentInputDirection.sqrMagnitude > 0.01f)
+            {
+                attackFacingDir = playerController.CurrentInputDirection;
+            }
         }
 
         // Xoay mượt (instant = false) với tốc độ vừa phải attackTurnSpeed
@@ -270,7 +280,8 @@ public class PlayerAttack : MonoBehaviour
 
     private void ResolveAttackDirectionAndTarget()
     {
-        currentTargetEnemy = FindBestTargetEnemy();
+        currentTargetHealth = FindBestTargetEnemy();
+        currentTargetEnemy = currentTargetHealth != null ? currentTargetHealth.transform : null;
         if (currentTargetEnemy != null)
         {
             Vector3 toTarget = currentTargetEnemy.position - transform.position;
@@ -298,35 +309,36 @@ public class PlayerAttack : MonoBehaviour
         }
     }
 
-    private Transform FindBestTargetEnemy()
+    private EnemyHealth FindBestTargetEnemy()
     {
-        Collider[] cols = Physics.OverlapSphere(transform.position, autoTargetRadius, enemyLayers, QueryTriggerInteraction.Collide);
-        Transform bestTarget = null;
+        int count = Physics.OverlapSphereNonAlloc(transform.position, autoTargetRadius, hitBuffer, enemyLayers, QueryTriggerInteraction.Collide);
+        EnemyHealth bestTarget = null;
         float bestScore = float.MaxValue;
 
         Vector3 preferredDir = (playerController != null && playerController.HasMovementInput)
             ? playerController.CurrentInputDirection
             : (playerController != null ? playerController.GetVisualForward() : transform.forward);
 
-        for (int i = 0; i < cols.Length; i++)
+        for (int i = 0; i < count; i++)
         {
-            Collider c = cols[i];
-            if (c.transform == transform || c.transform.IsChildOf(transform)) continue;
+            Collider c = hitBuffer[i];
+            if (c == null || c.transform == transform || c.transform.IsChildOf(transform)) continue;
 
             EnemyHealth eh = c.GetComponentInParent<EnemyHealth>();
             if (eh == null || eh.IsDead) continue;
 
             Vector3 toEnemy = eh.transform.position - transform.position;
             toEnemy.y = 0f;
-            float dist = toEnemy.magnitude;
-            if (dist < 0.05f || dist > autoTargetRadius) continue;
+            float sqrDist = toEnemy.sqrMagnitude;
+            if (sqrDist < 0.0025f || sqrDist > autoTargetRadius * autoTargetRadius) continue;
 
+            float dist = Mathf.Sqrt(sqrDist);
             float anglePenalty = 1f - Vector3.Dot(preferredDir, toEnemy / dist);
             float score = dist + anglePenalty * 0.85f;
             if (score < bestScore)
             {
                 bestScore = score;
-                bestTarget = eh.transform;
+                bestTarget = eh;
             }
         }
 
@@ -370,10 +382,10 @@ public class PlayerAttack : MonoBehaviour
         if (animator.IsInTransition(0))
         {
             AnimatorStateInfo next = animator.GetNextAnimatorStateInfo(0);
-            if (next.IsName(currentAttackStateName)) return false;
+            if (next.shortNameHash == currentAttackStateHash) return false;
         }
 
-        if (state.IsName(currentAttackStateName))
+        if (state.shortNameHash == currentAttackStateHash)
         {
             return state.normalizedTime >= 0.92f;
         }
@@ -394,7 +406,7 @@ public class PlayerAttack : MonoBehaviour
         }
         else
         {
-            animator.CrossFadeInFixedTime(wantsMove ? "Run" : "Idle", 0.08f, 0);
+            animator.CrossFadeInFixedTime(wantsMove ? RunHash : IdleHash, 0.08f, 0);
         }
     }
 
@@ -410,9 +422,9 @@ public class PlayerAttack : MonoBehaviour
             {
                 animController.ForceReturnToLocomotion();
             }
-            else if (animator.HasState(0, Animator.StringToHash("Block")))
+            else if (animator.HasState(0, BlockHash))
             {
-                animator.CrossFadeInFixedTime("Block", 0.06f, 0);
+                animator.CrossFadeInFixedTime(BlockHash, 0.06f, 0);
             }
         }
     }
@@ -451,23 +463,24 @@ public class PlayerAttack : MonoBehaviour
             new Vector3(Mathf.Abs(lossy.x), Mathf.Abs(lossy.y), Mathf.Abs(lossy.z))
         );
 
-        Collider[] hits = Physics.OverlapBox(worldCenter, halfExtents, wt.rotation, enemyLayers, QueryTriggerInteraction.Collide);
-        ProcessHitColliders(hits, worldCenter);
+        int hitCount = Physics.OverlapBoxNonAlloc(worldCenter, halfExtents, hitBuffer, wt.rotation, enemyLayers, QueryTriggerInteraction.Collide);
+        ProcessHitColliders(hitBuffer, hitCount, worldCenter);
 
         // Chiêu Atk3 (Xoay 360° tầm thấp) quét thêm vòng AoE xung quanh Player
         if (currentAttackVariant == 2 && (Time.time - attackStartTime) >= 0.14f)
         {
-            Collider[] spinHits = Physics.OverlapSphere(transform.position + Vector3.up * 0.85f, 2.65f, enemyLayers, QueryTriggerInteraction.Collide);
-            ProcessHitColliders(spinHits, transform.position + Vector3.up * 0.85f);
+            Vector3 spinCenter = transform.position + Vector3.up * 0.85f;
+            int spinCount = Physics.OverlapSphereNonAlloc(spinCenter, 2.65f, hitBuffer, enemyLayers, QueryTriggerInteraction.Collide);
+            ProcessHitColliders(hitBuffer, spinCount, spinCenter);
         }
     }
 
-    private void ProcessHitColliders(Collider[] hits, Vector3 originCenter)
+    private void ProcessHitColliders(Collider[] hits, int count, Vector3 originCenter)
     {
-        for (int i = 0; i < hits.Length; i++)
+        for (int i = 0; i < count; i++)
         {
             Collider col = hits[i];
-            if (col.transform == transform || col.transform.IsChildOf(transform)) continue;
+            if (col == null || col.transform == transform || col.transform.IsChildOf(transform)) continue;
 
             EnemyHealth enemy = col.GetComponentInParent<EnemyHealth>();
             if (enemy != null && !enemy.IsDead && hitEnemiesInSwing.Add(enemy))
@@ -495,12 +508,19 @@ public class PlayerAttack : MonoBehaviour
                 Vector3 hitDir = enemy.transform.position - transform.position;
                 bool heavyHit = enemy.isBoss || dealtDamage >= 55 || currentAttackVariant == 2;
                 CombatVfxManager.SpawnBloodHit(hitPoint, hitDir, heavyHit);
+                CombatVfxManager.SpawnFloatingText(
+                    hitPoint + Vector3.up * 0.55f,
+                    heavyHit ? $"{dealtDamage}!" : $"{dealtDamage}",
+                    heavyHit ? new Color(1f, 0.80f, 0.22f) : Color.white,
+                    heavyHit ? 1.12f : 0.90f,
+                    0.82f);
+                CombatVfxManager.TriggerHitStop(heavyHit ? 0.036f : 0.016f, heavyHit ? 0.10f : 0.18f);
                 GameAudioManager.PlaySwordHit(heavyHit);
 
-                if (Camera.main != null)
+                if (ThirdPersonCamera.Instance != null)
                 {
-                    ThirdPersonCamera cam = Camera.main.GetComponent<ThirdPersonCamera>();
-                    if (cam != null) cam.AddCameraShake(enemy.isBoss || currentAttackVariant == 2 ? 0.13f : 0.07f, 0.08f);
+                    ThirdPersonCamera.Instance.AddCameraShake(enemy.isBoss || currentAttackVariant == 2 ? 0.14f : 0.075f, 0.085f);
+                    if (heavyHit) ThirdPersonCamera.Instance.AddFovPunch(2.4f);
                 }
             }
         }
@@ -538,30 +558,78 @@ public class PlayerAttack : MonoBehaviour
         trailObj.transform.localPosition = weaponCollider.center + new Vector3(0f, weaponCollider.size.y * 0.42f, 0f);
 
         weaponTrail = trailObj.AddComponent<TrailRenderer>();
-        weaponTrail.time = 0.16f;
-        weaponTrail.minVertexDistance = 0.05f;
-        weaponTrail.startWidth = 0.24f;
+        weaponTrail.time = 0.19f;
+        weaponTrail.minVertexDistance = 0.04f;
+        weaponTrail.startWidth = 0.30f;
         weaponTrail.endWidth = 0.02f;
         weaponTrail.material = CombatVfxManager.GetWeaponTrailMaterial();
         weaponTrail.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
         weaponTrail.receiveShadows = false;
 
-        Gradient grad = new Gradient();
-        grad.SetKeys(
+        UpdateWeaponTrailTheme(0);
+        weaponTrail.emitting = false;
+    }
+
+    private void UpdateWeaponTrailTheme(int attackVariant)
+    {
+        if (weaponTrail == null) EnsureWeaponTrail();
+        if (weaponTrail == null) return;
+
+        EnsureTrailGradients();
+        int idx = Mathf.Clamp(attackVariant, 0, cachedTrailGradients.Length - 1);
+        weaponTrail.colorGradient = cachedTrailGradients[idx];
+    }
+
+    private static void EnsureTrailGradients()
+    {
+        if (cachedTrailGradients != null) return;
+
+        Gradient g0 = new Gradient();
+        g0.SetKeys(
             new[]
             {
-                new GradientColorKey(new Color(1f, 0.94f, 0.65f), 0f),
-                new GradientColorKey(new Color(1f, 0.55f, 0.18f), 0.55f),
-                new GradientColorKey(new Color(0.85f, 0.18f, 0.08f), 1f)
+                new GradientColorKey(new Color(0.95f, 0.98f, 1f), 0f),
+                new GradientColorKey(new Color(1f, 0.86f, 0.45f), 0.55f),
+                new GradientColorKey(new Color(0.95f, 0.52f, 0.16f), 1f)
             },
             new[]
             {
-                new GradientAlphaKey(0.88f, 0f),
-                new GradientAlphaKey(0.45f, 0.5f),
+                new GradientAlphaKey(0.90f, 0f),
+                new GradientAlphaKey(0.48f, 0.5f),
                 new GradientAlphaKey(0f, 1f)
             });
-        weaponTrail.colorGradient = grad;
-        weaponTrail.emitting = false;
+
+        Gradient g1 = new Gradient();
+        g1.SetKeys(
+            new[]
+            {
+                new GradientColorKey(new Color(1f, 0.96f, 0.72f), 0f),
+                new GradientColorKey(new Color(1f, 0.68f, 0.20f), 0.52f),
+                new GradientColorKey(new Color(0.92f, 0.28f, 0.08f), 1f)
+            },
+            new[]
+            {
+                new GradientAlphaKey(0.92f, 0f),
+                new GradientAlphaKey(0.50f, 0.52f),
+                new GradientAlphaKey(0f, 1f)
+            });
+
+        Gradient g2 = new Gradient();
+        g2.SetKeys(
+            new[]
+            {
+                new GradientColorKey(new Color(1f, 0.92f, 0.55f), 0f),
+                new GradientColorKey(new Color(1f, 0.42f, 0.12f), 0.5f),
+                new GradientColorKey(new Color(0.95f, 0.12f, 0.06f), 1f)
+            },
+            new[]
+            {
+                new GradientAlphaKey(0.95f, 0f),
+                new GradientAlphaKey(0.55f, 0.55f),
+                new GradientAlphaKey(0f, 1f)
+            });
+
+        cachedTrailGradients = new[] { g0, g1, g2 };
     }
 
     private void SetWeaponTrailEmitting(bool active)

@@ -19,59 +19,37 @@ public class OrcEnemySpawner : MonoBehaviour
     public int bonusHealthPerLevel = 20;
     public float bonusSpeedPerLevel = 0.3f;
 
-    private float baseSpawnInterval;
     private int currentLevel = 1;
     private float timer;
 
     void Start()
     {
-        baseSpawnInterval = spawnInterval;
+        // Nhường quyền sinh quái cho StageManager khi đang dùng kịch bản 3 Màn
+        if (StageManager.Instance != null)
+        {
+            enabled = false;
+            return;
+        }
 
         if (player == null)
         {
-            GameObject playerObj = GameObject.FindGameObjectWithTag("Player");
-            if (playerObj != null)
-            {
-                player = playerObj.transform;
-            }
+            ResolvePlayer();
         }
 
         if (ScoreManager.Instance != null)
         {
             currentLevel = ScoreManager.Instance.currentLevel;
-            ScoreManager.Instance.OnLevelUp += HandleLevelUp;
         }
-    }
-
-    private void OnDestroy()
-    {
-        if (ScoreManager.Instance != null)
-        {
-            ScoreManager.Instance.OnLevelUp -= HandleLevelUp;
-        }
-    }
-
-    private void HandleLevelUp(int newLevel)
-    {
-        currentLevel = newLevel;
-        spawnInterval = Mathf.Max(minSpawnInterval, baseSpawnInterval - (newLevel - 1) * spawnIntervalStepPerLevel);
-        Debug.Log($"[OrcEnemySpawner] Tăng độ khó Level {newLevel}: spawnInterval = {spawnInterval:0.0}s");
     }
 
     void Update()
     {
-        // Nhường quyền sinh quái cho StageManager khi đang dùng kịch bản 3 Màn
-        if (StageManager.Instance != null) return;
-        if (GameOverManager.IsGameOver || LevelUpChoiceManager.IsPaused) return;
+        if (GameOverManager.IsGameOver || WeaponShopManager.IsShopOpen) return;
 
         if (player == null)
         {
-            GameObject playerObj = GameObject.FindGameObjectWithTag("Player");
-            if (playerObj != null)
-            {
-                player = playerObj.transform;
-            }
-            else return;
+            ResolvePlayer();
+            if (player == null) return;
         }
 
         if (enemyPrefabs == null || enemyPrefabs.Length == 0) return;
@@ -82,6 +60,21 @@ public class OrcEnemySpawner : MonoBehaviour
         {
             timer = 0f;
             SpawnEnemy();
+        }
+    }
+
+    private void ResolvePlayer()
+    {
+        if (PlayerController.Instance != null)
+        {
+            player = PlayerController.Instance.transform;
+            return;
+        }
+
+        GameObject playerObj = GameObject.FindGameObjectWithTag("Player");
+        if (playerObj != null)
+        {
+            player = playerObj.transform;
         }
     }
 

@@ -1,11 +1,16 @@
 using UnityEngine;
+using UnityEngine.Rendering;
 
 /// <summary>
 /// Bẫy môi trường (Bẫy gai / Bụi gai ở Màn 2).
-/// Khi Player giẫm vào bán kính bẫy sẽ chịu sát thương, bị đẩy lùi nhẹ và gửi sự kiện Telemetry "trap_hit".
+/// - Hiển thị vòng cảnh báo đỏ nhấp nháy trên mặt đất để người chơi dễ quan sát né bẫy.
+/// - Khi Player giẫm vào bán kính bẫy: gây sát thương, tung tia lửa + máu + chữ nổi (-XX HP), đẩy lùi nhẹ và gửi Telemetry "trap_hit".
 /// </summary>
 public class TrapHazard : MonoBehaviour
 {
+    private static readonly int BaseColorId = Shader.PropertyToID("_BaseColor");
+    private static readonly int ColorId = Shader.PropertyToID("_Color");
+
     [Header("Trap Settings")]
     public int damage = 22;
     public float triggerRadius = 1.65f;
@@ -15,23 +20,35 @@ public class TrapHazard : MonoBehaviour
     private Transform playerTransform;
     private PlayerHealth playerHealth;
     private PlayerController playerController;
+    private Light childLight;
+    private Material dangerRingMat;
+    private bool ringHasBaseColor;
+    private bool ringHasColor;
     private float nextHitTime;
+    private float pulsePhase;
 
     void Start()
     {
-        // Tắt collider cứng trên model bẫy để Player có thể giẫm lên và dính sát thương mượt mà
+        pulsePhase = Random.Range(0f, Mathf.PI * 2f);
+        childLight = GetComponentInChildren<Light>();
+
         foreach (Collider col in GetComponentsInChildren<Collider>(true))
         {
             col.isTrigger = true;
         }
 
+        CreateDangerRingVisual();
         ResolvePlayer();
+    }
+
+    private void OnDestroy()
+    {
+        if (dangerRingMat != null) Destroy(dangerRingMat);
     }
 
     void Update()
     {
-        if (GameOverManager.IsGameOver || LevelUpChoiceManager.IsPaused) return;
-        if (Time.time < nextHitTime) return;
+        if (GameOverManager.IsGameOver || WeaponShopManager.IsShopOpen) return;
 
         if (playerTransform == null || playerHealth == null)
         {
@@ -39,16 +56,62 @@ public class TrapHazard : MonoBehaviour
             if (playerTransform == null || playerHealth == null) return;
         }
 
-        if (!playerHealth.IsAlive || playerHealth.IsInvulnerable) return;
-
         Vector3 diff = playerTransform.position - transform.position;
         float verticalDiff = Mathf.Abs(diff.y);
         diff.y = 0f;
+        float horizSqrDist = diff.sqrMagnitude;
 
-        if (verticalDiff <= 2.2f && diff.sqrMagnitude <= triggerRadius * triggerRadius)
+        // Distance culling: tắt đèn & ngừng update shader bẫy khi Player ở xa > 30m
+        const float activeRadiusSqr = 30f * 30f;
+        bool inRange = horizSqrDist <= activeRadiusSqr;
+        if (childLight != null && childLight.enabled != inRange)
+        {
+            childLight.enabled = inRange;
+        }
+        if (!inRange) return;
+
+        float now = Time.time;
+
+        if (dangerRingMat != null)
+        {
+            float pulse = 0.28f + 0.22f * Mathf.Sin(now * 4.2f + pulsePhase);
+            Color c = new Color(2.0f, 0.24f, 0.14f, pulse);
+            if (ringHasBaseColor) dangerRingMat.SetColor(BaseColorId, c);
+            if (ringHasColor) dangerRingMat.SetColor(ColorId, c);
+        }
+
+        if (now < nextHitTime) return;
+        if (!playerHealth.IsAlive || playerHealth.IsInvulnerable) return;
+
+        if (verticalDiff <= 2.2f && horizSqrDist <= triggerRadius * triggerRadius)
         {
             TriggerTrap();
         }
+    }
+
+    private void CreateDangerRingVisual()
+    {
+        if (transform.Find("TrapDangerRing") != null) return;
+
+        float invScale = transform.localScale.x > 0.01f ? 1f / transform.localScale.x : 1f;
+        GameObject ring = new GameObject("TrapDangerRing");
+        ring.transform.SetParent(transform, false);
+        ring.transform.localPosition = new Vector3(0f, 0.12f * invScale, 0f);
+        float d = triggerRadius * 1.95f * invScale;
+        ring.transform.localScale = new Vector3(d, 1f * invScale, d);
+
+        MeshFilter mf = ring.AddComponent<MeshFilter>();
+        mf.sharedMesh = CombatVfxManager.GetHorizontalQuadMesh();
+        MeshRenderer mr = ring.AddComponent<MeshRenderer>();
+        dangerRingMat = new Material(CombatVfxManager.GetAdditiveRingMaterial());
+        ringHasBaseColor = dangerRingMat.HasProperty(BaseColorId);
+        ringHasColor = dangerRingMat.HasProperty(ColorId);
+        Color c = new Color(2.0f, 0.24f, 0.14f, 0.4f);
+        if (ringHasBaseColor) dangerRingMat.SetColor(BaseColorId, c);
+        if (ringHasColor) dangerRingMat.SetColor(ColorId, c);
+        mr.material = dangerRingMat;
+        mr.shadowCastingMode = ShadowCastingMode.Off;
+        mr.receiveShadows = false;
     }
 
     private void TriggerTrap()
@@ -58,7 +121,9 @@ public class TrapHazard : MonoBehaviour
         playerHealth.TakeDamage(damage);
 
         Vector3 hitPoint = playerTransform.position + Vector3.up * 0.65f;
+        CombatVfxManager.SpawnTrapTriggerEffect(transform.position);
         CombatVfxManager.SpawnBloodHit(hitPoint, Vector3.up + (playerTransform.position - transform.position).normalized, true);
+        CombatVfxManager.SpawnFloatingText(playerTransform.position + Vector3.up * 1.9f, $"-{damage} HP", new Color(1f, 0.28f, 0.22f), 1.02f, 0.9f);
         GameAudioManager.PlayTrapHit();
 
         if (playerController != null)
@@ -75,12 +140,18 @@ public class TrapHazard : MonoBehaviour
         {
             StageManager.Instance.ShowBanner($"DÍNH BẪY GAI! (-{damage} HP)", new Color(1f, 0.35f, 0.25f), 1.6f);
         }
-
-        Debug.Log($"[TrapHazard] Player giẫm phải bẫy {gameObject.name}! Gây {damage} sát thương.");
     }
 
     private void ResolvePlayer()
     {
+        if (PlayerController.Instance != null)
+        {
+            playerController = PlayerController.Instance;
+            playerTransform = playerController.transform;
+            playerHealth = PlayerHealth.Instance != null ? PlayerHealth.Instance : playerController.GetComponent<PlayerHealth>();
+            return;
+        }
+
         GameObject playerObj = GameObject.FindWithTag("Player");
         if (playerObj != null)
         {

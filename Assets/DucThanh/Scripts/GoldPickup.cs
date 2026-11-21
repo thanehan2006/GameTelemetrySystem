@@ -1,139 +1,359 @@
 using UnityEngine;
+using UnityEngine.Rendering;
+#if UNITY_EDITOR
+using UnityEditor;
+#endif
 
 /// <summary>
-/// Đồng vàng rơi ra khi tiêu diệt quái Orc:
-/// - Bắn văng ra xa (4m - 7m) theo quỹ đạo parabol có độ nảy xuống đúng mặt đất Terrain.
-/// - Có cột ánh sáng vàng nhẹ (Loot Beam) giúp người chơi dễ nhìn thấy từ xa để chạy lại nhặt.
-/// - Chỉ hút vào người khi Player chạy sát lại gần (bán kính 2.1m) để tạo cảm giác chạy nhặt đồ thực sự.
+/// Phần thưởng Vàng (PolyOne Free Rewards):
+/// - Quái thường rơi Đồng Xu Vương Miện (SM_Rewards_CoinCrown) & Đồng Xu Ngôi Sao (SM_Rewards_CoinStar),
+///   với lượng vàng lớn rơi thêm Túi Vàng (SM_Rewards_Bag).
+/// - Boss rơi Rương Vàng Hoàng Kim (SM_Rewards_ChestGold) + Túi Vàng + mưa đồng xu.
+/// - Quỹ đạo bắn parabol nảy xuống Terrain, cột sáng HDR chuyển sắc mượt, hạt sao vàng lấp lánh,
+///   vòng sáng mặt đất và hiệu ứng bùng sao + chữ bay (+XX G) khi nhặt.
 /// </summary>
 public class GoldPickup : MonoBehaviour
 {
+    private static readonly int BaseColorId = Shader.PropertyToID("_BaseColor");
+    private static readonly int ColorId = Shader.PropertyToID("_Color");
+
     public int goldAmount = 20;
-    public float magnetRadius = 2.1f;
-    public float pickupRadius = 1.15f;
-    public float magnetSpeed = 12f;
+    public float magnetRadius = 2.35f;
+    public float pickupRadius = 1.25f;
+    public float magnetSpeed = 13.5f;
+
+    private static GameObject cachedCoinCrownPrefab;
+    private static GameObject cachedCoinStarPrefab;
+    private static GameObject cachedBagPrefab;
+    private static GameObject cachedChestGoldPrefab;
+
+    // Dùng chung Material theo 3 bậc (0=Coin, 1=Bag, 2=Chest) thay vì clone Material mới cho mỗi đồng xu
+    private static readonly Material[] SharedBeamMats = new Material[3];
+    private static readonly Material[] SharedRingMats = new Material[2];
+    private static Gradient cachedSparkleGradient;
 
     private Transform playerTransform;
+    private Terrain cachedTerrain;
+    private Transform visualPivot;
+    private Transform groundRingTransform;
+    private Light glowLight;
+
     private Vector3 velocity;
     private float settledGroundY;
+    private float spinSpeed = 200f;
+    private float baseLightIntensity = 2.2f;
+    private float groundHoverHeight = 0.35f;
     private int bounceCount;
     private bool landed;
     private bool collected;
     private float spawnTime;
 
-    public static void SpawnGoldBurst(Vector3 origin, int totalGold, int coinCount = 3)
+    public static void SpawnGoldBurst(Vector3 origin, int totalGold, int coinCount = 3, bool isBossDrop = false)
     {
         if (totalGold <= 0) return;
-        coinCount = Mathf.Clamp(coinCount, 2, 7);
+        EnsureRewardPrefabs();
+
+        coinCount = Mathf.Clamp(coinCount, 2, isBossDrop ? 9 : 7);
         int perCoin = Mathf.Max(1, totalGold / coinCount);
         int remainder = totalGold - perCoin * coinCount;
 
-        // Chia góc đều theo vòng tròn kèm độ lệch ngẫu nhiên để vàng văng tỏa đều ra xa
         float baseAngle = Random.Range(0f, 360f);
         float angleStep = 360f / coinCount;
 
         for (int i = 0; i < coinCount; i++)
         {
             int amt = perCoin + (i == 0 ? remainder : 0);
-            float angleRad = (baseAngle + i * angleStep + Random.Range(-24f, 24f)) * Mathf.Deg2Rad;
+            float angleRad = (baseAngle + i * angleStep + Random.Range(-22f, 22f)) * Mathf.Deg2Rad;
             Vector3 horizontalDir = new Vector3(Mathf.Cos(angleRad), 0f, Mathf.Sin(angleRad));
 
-            GameObject root = new GameObject("GoldCoin_Drop");
-            root.transform.position = origin + Vector3.up * 0.9f;
+            bool isChest = isBossDrop && i == 0 && cachedChestGoldPrefab != null;
+            bool isBag = !isChest && ((isBossDrop && i <= 2) || (!isBossDrop && i == 0 && totalGold >= 60)) && cachedBagPrefab != null;
 
-            // 1. Hình đồng xu vàng kim bóng
-            GameObject coinMesh = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
-            coinMesh.name = "CoinVisual";
-            coinMesh.transform.SetParent(root.transform, false);
-            Collider col = coinMesh.GetComponent<Collider>();
-            if (col != null) Destroy(col);
+            GameObject root = new GameObject(isChest ? "GoldChest_Drop" : isBag ? "GoldBag_Drop" : "GoldCoin_Drop");
+            root.transform.position = origin + Vector3.up * 0.95f;
 
-            coinMesh.transform.localScale = new Vector3(0.46f, 0.08f, 0.46f);
-            coinMesh.transform.localRotation = Quaternion.Euler(90f, 0f, 0f);
+            // 1. Pivot xoay + model 3D PolyOne Free Rewards
+            GameObject pivot = new GameObject("VisualPivot");
+            pivot.transform.SetParent(root.transform, false);
 
-            Renderer r = coinMesh.GetComponent<Renderer>();
-            if (r != null)
+            GameObject selectedPrefab = isChest
+                ? cachedChestGoldPrefab
+                : isBag
+                    ? cachedBagPrefab
+                    : (i % 2 == 0 ? cachedCoinCrownPrefab : (cachedCoinStarPrefab != null ? cachedCoinStarPrefab : cachedCoinCrownPrefab));
+
+            float hoverHeight = isChest ? 0.08f : isBag ? 0.12f : 0.42f;
+            float spin = isChest ? 85f : isBag ? 125f : 215f;
+
+            if (selectedPrefab != null)
             {
-                Shader sh = Shader.Find("Universal Render Pipeline/Lit") ?? Shader.Find("Standard");
-                Material mat = new Material(sh);
-                mat.color = new Color(1f, 0.82f, 0.16f, 1f);
-                if (mat.HasProperty("_BaseColor")) mat.SetColor("_BaseColor", new Color(1f, 0.84f, 0.18f, 1f));
-                if (mat.HasProperty("_Metallic")) mat.SetFloat("_Metallic", 0.90f);
-                if (mat.HasProperty("_Smoothness")) mat.SetFloat("_Smoothness", 0.85f);
-                if (mat.HasProperty("_EmissionColor"))
+                GameObject model = Instantiate(selectedPrefab, pivot.transform);
+                model.name = "RewardModel";
+                foreach (Collider c in model.GetComponentsInChildren<Collider>(true))
                 {
-                    mat.EnableKeyword("_EMISSION");
-                    mat.SetColor("_EmissionColor", new Color(1f, 0.72f, 0.12f) * 1.5f);
+                    Destroy(c);
                 }
-                r.material = mat;
+                foreach (Renderer mr in model.GetComponentsInChildren<Renderer>(true))
+                {
+                    mr.shadowCastingMode = ShadowCastingMode.Off;
+                    mr.receiveShadows = false;
+                }
+
+                if (isChest)
+                {
+                    model.transform.localPosition = Vector3.zero;
+                    model.transform.localRotation = Quaternion.identity;
+                    model.transform.localScale = Vector3.one * 1.15f;
+                }
+                else if (isBag)
+                {
+                    model.transform.localPosition = Vector3.zero;
+                    model.transform.localRotation = Quaternion.Euler(0f, 0f, 8f);
+                    model.transform.localScale = Vector3.one * 1.65f;
+                }
+                else
+                {
+                    // Coin FBX nằm phẳng (độ dày theo Y) -> dựng đứng 90° để xoay lấp lánh như đồng xu RPG
+                    model.transform.localPosition = new Vector3(0f, 0f, -0.03f);
+                    model.transform.localRotation = Quaternion.Euler(90f, 0f, 0f);
+                    model.transform.localScale = Vector3.one * 2.4f;
+                }
+            }
+            else
+            {
+                CreateFallbackCoinMesh(pivot.transform);
             }
 
-            // 2. Cột sáng vàng mảnh (Loot Beam kiểu Diablo/Elden Ring) giúp dễ thấy vàng văng xa trên cỏ
+            // 2. Cột sáng vàng HDR mờ dần 2 đầu (dùng chung Shared Material để tối ưu batching & tránh leak)
             GameObject beam = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
             beam.name = "LootBeam";
             beam.transform.SetParent(root.transform, false);
             Collider beamCol = beam.GetComponent<Collider>();
             if (beamCol != null) Destroy(beamCol);
-            beam.transform.localPosition = new Vector3(0f, 1.05f, 0f);
-            beam.transform.localScale = new Vector3(0.11f, 1.05f, 0.11f);
+
+            float beamHeight = isChest ? 3.2f : isBag ? 2.4f : 1.75f;
+            float beamWidth = isChest ? 0.34f : isBag ? 0.22f : 0.15f;
+            beam.transform.localPosition = new Vector3(0f, beamHeight * 0.5f, 0f);
+            beam.transform.localScale = new Vector3(beamWidth, beamHeight * 0.5f, beamWidth);
+
             Renderer br = beam.GetComponent<Renderer>();
             if (br != null)
             {
-                Shader unlit = Shader.Find("Sprites/Default") ?? Shader.Find("Universal Render Pipeline/Unlit");
-                Material bMat = new Material(unlit);
-                bMat.color = new Color(1f, 0.85f, 0.25f, 0.34f);
-                br.material = bMat;
-                br.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+                br.sharedMaterial = GetSharedBeamMaterial(isChest ? 2 : isBag ? 1 : 0);
+                br.shadowCastingMode = ShadowCastingMode.Off;
+                br.receiveShadows = false;
             }
 
-            // 3. Ánh sáng vàng ấm
-            GameObject lightObj = new GameObject("GoldGlow");
-            lightObj.transform.SetParent(root.transform, false);
-            lightObj.transform.localPosition = Vector3.up * 0.35f;
-            Light l = lightObj.AddComponent<Light>();
-            l.type = LightType.Point;
-            l.color = new Color(1f, 0.82f, 0.22f);
-            l.range = 4.2f;
-            l.intensity = 2.0f;
+            // 3. Vòng sáng vàng trên mặt đất (Ground Rune Ring)
+            GameObject ringObj = new GameObject("GroundRing");
+            ringObj.transform.SetParent(root.transform, false);
+            ringObj.transform.localPosition = new Vector3(0f, -hoverHeight + 0.08f, 0f);
+            float ringSize = isChest ? 1.55f : isBag ? 1.15f : 0.85f;
+            ringObj.transform.localScale = new Vector3(ringSize, 1f, ringSize);
+
+            MeshFilter rmf = ringObj.AddComponent<MeshFilter>();
+            rmf.sharedMesh = CombatVfxManager.GetHorizontalQuadMesh();
+            MeshRenderer rmr = ringObj.AddComponent<MeshRenderer>();
+            rmr.sharedMaterial = GetSharedRingMaterial(isChest ? 1 : 0);
+            rmr.shadowCastingMode = ShadowCastingMode.Off;
+            rmr.receiveShadows = false;
+
+            // 4. Hạt sao vàng lấp lánh bay nhẹ quanh phần thưởng
+            AttachGoldSparkles(root.transform, isChest ? 8f : isBag ? 5f : 2.5f, isChest ? 0.52f : 0.32f);
+
+            // 5. Chỉ gắn Point Light cho Rương/Túi vàng (tránh tạo hàng chục đèn động cho từng đồng xu lẻ gây lag)
+            Light l = null;
+            float baseInt = isChest ? 3.0f : 2.2f;
+            if (isChest || isBag)
+            {
+                GameObject lightObj = new GameObject("GoldGlow");
+                lightObj.transform.SetParent(root.transform, false);
+                lightObj.transform.localPosition = Vector3.up * 0.45f;
+                l = lightObj.AddComponent<Light>();
+                l.type = LightType.Point;
+                l.color = isChest ? new Color(1f, 0.76f, 0.2f) : new Color(1f, 0.84f, 0.28f);
+                l.range = isChest ? 6.0f : 4.5f;
+                l.intensity = baseInt;
+            }
 
             GoldPickup gp = root.AddComponent<GoldPickup>();
             gp.goldAmount = amt;
-            gp.InitScatter(horizontalDir);
+            gp.visualPivot = pivot.transform;
+            gp.groundRingTransform = ringObj.transform;
+            gp.glowLight = l;
+            gp.spinSpeed = spin;
+            gp.baseLightIntensity = baseInt;
+            gp.groundHoverHeight = hoverHeight;
+            gp.InitScatter(horizontalDir, isChest ? 0.65f : 1.0f);
         }
     }
 
-    private void InitScatter(Vector3 horizontalDir)
+    private static Material GetSharedBeamMaterial(int tier)
+    {
+        if (SharedBeamMats[tier] == null)
+        {
+            Material mat = new Material(CombatVfxManager.GetAdditiveBeamMaterial());
+            Color col = tier == 2
+                ? new Color(2.2f, 1.55f, 0.32f, 0.55f)
+                : tier == 1
+                    ? new Color(2.0f, 1.5f, 0.35f, 0.45f)
+                    : new Color(1.9f, 1.5f, 0.38f, 0.38f);
+            if (mat.HasProperty(BaseColorId)) mat.SetColor(BaseColorId, col);
+            if (mat.HasProperty(ColorId)) mat.SetColor(ColorId, col);
+            SharedBeamMats[tier] = mat;
+        }
+        return SharedBeamMats[tier];
+    }
+
+    private static Material GetSharedRingMaterial(int tier)
+    {
+        if (SharedRingMats[tier] == null)
+        {
+            Material mat = new Material(CombatVfxManager.GetAdditiveRingMaterial());
+            Color col = tier == 1
+                ? new Color(2.1f, 1.45f, 0.25f, 0.72f)
+                : new Color(1.9f, 1.55f, 0.35f, 0.55f);
+            if (mat.HasProperty(BaseColorId)) mat.SetColor(BaseColorId, col);
+            if (mat.HasProperty(ColorId)) mat.SetColor(ColorId, col);
+            SharedRingMats[tier] = mat;
+        }
+        return SharedRingMats[tier];
+    }
+
+    private static void AttachGoldSparkles(Transform parent, float rate, float radius)
+    {
+        GameObject go = new GameObject("GoldSparkles");
+        go.transform.SetParent(parent, false);
+        go.transform.localPosition = Vector3.up * 0.25f;
+
+        ParticleSystem ps = go.AddComponent<ParticleSystem>();
+        ps.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
+
+        var main = ps.main;
+        main.duration = 2f;
+        main.loop = true;
+        main.startLifetime = new ParticleSystem.MinMaxCurve(0.55f, 1.15f);
+        main.startSpeed = new ParticleSystem.MinMaxCurve(0.35f, 1.1f);
+        main.startSize = new ParticleSystem.MinMaxCurve(0.08f, 0.18f);
+        main.gravityModifier = -0.18f;
+        main.simulationSpace = ParticleSystemSimulationSpace.World;
+        main.startColor = new ParticleSystem.MinMaxGradient(
+            new Color(2.2f, 1.9f, 0.45f, 0.95f),
+            new Color(2.3f, 2.2f, 1.35f, 0.9f));
+
+        var emission = ps.emission;
+        emission.rateOverTime = rate;
+
+        var shape = ps.shape;
+        shape.shapeType = ParticleSystemShapeType.Sphere;
+        shape.radius = radius;
+
+        var colOver = ps.colorOverLifetime;
+        colOver.enabled = true;
+        if (cachedSparkleGradient == null)
+        {
+            cachedSparkleGradient = new Gradient();
+            cachedSparkleGradient.SetKeys(
+                new[] { new GradientColorKey(Color.white, 0f), new GradientColorKey(new Color(1f, 0.78f, 0.18f), 1f) },
+                new[] { new GradientAlphaKey(0f, 0f), new GradientAlphaKey(0.95f, 0.25f), new GradientAlphaKey(0f, 1f) });
+        }
+        colOver.color = cachedSparkleGradient;
+
+        var rend = ps.GetComponent<ParticleSystemRenderer>();
+        rend.sharedMaterial = CombatVfxManager.GetAdditiveStarMaterial();
+        ps.Play();
+    }
+
+    private static void EnsureRewardPrefabs()
+    {
+        if (cachedCoinCrownPrefab == null)
+            cachedCoinCrownPrefab = Resources.Load<GameObject>("Rewards/SM_Rewards_CoinCrown");
+        if (cachedCoinStarPrefab == null)
+            cachedCoinStarPrefab = Resources.Load<GameObject>("Rewards/SM_Rewards_CoinStar");
+        if (cachedBagPrefab == null)
+            cachedBagPrefab = Resources.Load<GameObject>("Rewards/SM_Rewards_Bag");
+        if (cachedChestGoldPrefab == null)
+            cachedChestGoldPrefab = Resources.Load<GameObject>("Rewards/SM_Rewards_ChestGold");
+
+#if UNITY_EDITOR
+        if (cachedCoinCrownPrefab == null)
+            cachedCoinCrownPrefab = AssetDatabase.LoadAssetAtPath<GameObject>("Assets/PolyOne/Free Rewards/Prefabs/SM_Rewards_CoinCrown.prefab");
+        if (cachedCoinStarPrefab == null)
+            cachedCoinStarPrefab = AssetDatabase.LoadAssetAtPath<GameObject>("Assets/PolyOne/Free Rewards/Prefabs/SM_Rewards_CoinStar.prefab");
+        if (cachedBagPrefab == null)
+            cachedBagPrefab = AssetDatabase.LoadAssetAtPath<GameObject>("Assets/PolyOne/Free Rewards/Prefabs/SM_Rewards_Bag.prefab");
+        if (cachedChestGoldPrefab == null)
+            cachedChestGoldPrefab = AssetDatabase.LoadAssetAtPath<GameObject>("Assets/PolyOne/Free Rewards/Prefabs/SM_Rewards_ChestGold.prefab");
+#endif
+    }
+
+    private static void CreateFallbackCoinMesh(Transform parent)
+    {
+        GameObject coinMesh = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+        coinMesh.name = "CoinVisualFallback";
+        coinMesh.transform.SetParent(parent, false);
+        Collider col = coinMesh.GetComponent<Collider>();
+        if (col != null) Destroy(col);
+        coinMesh.transform.localScale = new Vector3(0.46f, 0.08f, 0.46f);
+        coinMesh.transform.localRotation = Quaternion.Euler(90f, 0f, 0f);
+        Renderer r = coinMesh.GetComponent<Renderer>();
+        if (r != null)
+        {
+            Shader sh = Shader.Find("Universal Render Pipeline/Lit") ?? Shader.Find("Standard");
+            Material mat = new Material(sh);
+            mat.color = new Color(1f, 0.82f, 0.16f, 1f);
+            if (mat.HasProperty("_BaseColor")) mat.SetColor("_BaseColor", new Color(1f, 0.84f, 0.18f, 1f));
+            if (mat.HasProperty("_Metallic")) mat.SetFloat("_Metallic", 0.90f);
+            if (mat.HasProperty("_Smoothness")) mat.SetFloat("_Smoothness", 0.85f);
+            r.material = mat;
+        }
+    }
+
+    private void InitScatter(Vector3 horizontalDir, float distanceMul)
     {
         spawnTime = Time.time;
-        // Lực văng xa 4.6 - 7.4 m/s + tung cao 5.6 - 7.8 m/s để vàng rơi cách xác quái 4-7 mét
-        float outSpeed = Random.Range(4.6f, 7.4f);
-        float upSpeed = Random.Range(5.6f, 7.8f);
+        float outSpeed = Random.Range(4.2f, 7.0f) * distanceMul;
+        float upSpeed = Random.Range(5.4f, 7.6f);
         velocity = horizontalDir.normalized * outSpeed + Vector3.up * upSpeed;
-        settledGroundY = SampleGroundHeight(transform.position) + 0.35f;
+        settledGroundY = SampleGroundHeight(transform.position) + groundHoverHeight;
     }
 
     private void Start()
     {
         ResolvePlayer();
+        cachedTerrain = Terrain.activeTerrain;
         if (spawnTime == 0f) spawnTime = Time.time;
     }
 
     private void Update()
     {
-        if (collected || GameOverManager.IsGameOver || LevelUpChoiceManager.IsPaused) return;
+        if (collected || GameOverManager.IsGameOver || WeaponShopManager.IsShopOpen) return;
 
-        Transform visual = transform.Find("CoinVisual");
-        if (visual != null)
+        float dt = Time.deltaTime;
+        float now = Time.time;
+        float age = now - spawnTime;
+
+        if (visualPivot != null)
         {
-            visual.Rotate(Vector3.up, 200f * Time.deltaTime, Space.World);
+            visualPivot.Rotate(Vector3.up, spinSpeed * dt, Space.World);
+        }
+
+        if (groundRingTransform != null)
+        {
+            groundRingTransform.Rotate(Vector3.up, -45f * dt, Space.World);
+        }
+
+        if (glowLight != null)
+        {
+            glowLight.intensity = baseLightIntensity * (0.85f + 0.25f * Mathf.Sin(age * 4.5f));
         }
 
         if (!landed)
         {
-            velocity.y -= 17.5f * Time.deltaTime;
-            transform.position += velocity * Time.deltaTime;
+            velocity.y -= 17.5f * dt;
+            transform.position += velocity * dt;
 
-            float groundAtPos = SampleGroundHeight(transform.position) + 0.35f;
+            float groundAtPos = SampleGroundHeight(transform.position) + groundHoverHeight;
             if (transform.position.y <= groundAtPos && velocity.y < 0f)
             {
                 Vector3 p = transform.position;
@@ -142,7 +362,6 @@ public class GoldPickup : MonoBehaviour
 
                 if (bounceCount < 1)
                 {
-                    // Nảy thêm 1 nhịp nhỏ trước khi dừng hẳn
                     bounceCount++;
                     velocity.x *= 0.45f;
                     velocity.z *= 0.45f;
@@ -159,7 +378,7 @@ public class GoldPickup : MonoBehaviour
         else
         {
             Vector3 p = transform.position;
-            p.y = settledGroundY + Mathf.Sin((Time.time - spawnTime) * 3.4f) * 0.10f;
+            p.y = settledGroundY + Mathf.Sin(age * 3.4f) * 0.09f;
             transform.position = p;
         }
 
@@ -169,21 +388,20 @@ public class GoldPickup : MonoBehaviour
             if (playerTransform == null) return;
         }
 
-        // Chỉ cho phép nhặt sau khi vàng đã bay ra xa/chạm đất (0.75s) để Player thực sự chạy tới nhặt
-        if (!landed && (Time.time - spawnTime) < 0.75f) return;
+        if (!landed && age < 0.72f) return;
 
         Vector3 targetPos = playerTransform.position + Vector3.up * 0.9f;
         Vector3 diff = targetPos - transform.position;
-        float dist = diff.magnitude;
+        float sqrDist = diff.sqrMagnitude;
 
-        if (dist <= magnetRadius)
+        if (sqrDist <= magnetRadius * magnetRadius)
         {
             landed = true;
-            transform.position = Vector3.MoveTowards(transform.position, targetPos, magnetSpeed * Time.deltaTime);
-            dist = Vector3.Distance(transform.position, targetPos);
+            transform.position = Vector3.MoveTowards(transform.position, targetPos, magnetSpeed * dt);
+            sqrDist = (targetPos - transform.position).sqrMagnitude;
         }
 
-        if (dist <= pickupRadius)
+        if (sqrDist <= pickupRadius * pickupRadius)
         {
             Collect();
         }
@@ -203,15 +421,17 @@ public class GoldPickup : MonoBehaviour
             TelemetryManager.Instance.TrackGoldCollected(goldAmount);
         }
 
+        CombatVfxManager.SpawnGoldCollectEffect(transform.position + Vector3.up * 0.2f, goldAmount);
         GameAudioManager.PlayPickup();
         Destroy(gameObject);
     }
 
     private float SampleGroundHeight(Vector3 pos)
     {
-        if (Terrain.activeTerrain != null)
+        if (cachedTerrain == null) cachedTerrain = Terrain.activeTerrain;
+        if (cachedTerrain != null)
         {
-            return Terrain.activeTerrain.SampleHeight(pos) + Terrain.activeTerrain.transform.position.y;
+            return cachedTerrain.SampleHeight(pos) + cachedTerrain.transform.position.y;
         }
 
         if (Physics.Raycast(new Vector3(pos.x, pos.y + 40f, pos.z), Vector3.down, out RaycastHit hit, 120f, ~0, QueryTriggerInteraction.Ignore))
@@ -219,11 +439,17 @@ public class GoldPickup : MonoBehaviour
             return hit.point.y;
         }
 
-        return pos.y - 0.35f;
+        return pos.y - groundHoverHeight;
     }
 
     private void ResolvePlayer()
     {
+        if (PlayerController.Instance != null)
+        {
+            playerTransform = PlayerController.Instance.transform;
+            return;
+        }
+
         GameObject playerObj = GameObject.FindWithTag("Player");
         if (playerObj != null) playerTransform = playerObj.transform;
     }

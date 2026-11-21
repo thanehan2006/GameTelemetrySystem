@@ -9,8 +9,8 @@ using UnityEditor;
 
 /// <summary>
 /// Cửa Hàng Rèn Vũ Khí & Bình Hồi Máu phong cách Action RPG AAA:
-/// - Tự động chụp ảnh chân dung 3D sắc nét (Studio RenderTexture) cho từng model vũ khí thật trong WeaponUpgradeConfig.
-/// - Hiển thị icon vẽ tay chuẩn RPG cho Bình Hồi Máu (icon_potion) & Vàng (icon_gold).
+/// - Tự động chụp ảnh chân dung 3D sắc nét (1 Studio Camera + 1 RenderTexture dùng chung) cho từng model vũ khí trong WeaponUpgradeConfig.
+/// - Hiển thị icon cho Bình Hồi Máu (icon_potion) & Vàng (icon_gold).
 /// - Phân bậc phẩm chất vũ khí (Hiếm / Sử Thi / Huyền Thoại / Thần Thoại) với viền màu riêng và hiệu ứng mở mượt.
 /// - Mở nhanh bằng phím [B] mọi lúc hoặc [E] gần Trại Lửa, gửi đủ Telemetry Đề 9.
 /// </summary>
@@ -55,12 +55,17 @@ public class WeaponShopManager : MonoBehaviour
         public Outline cardOutline;
     }
 
-    private readonly List<ShopWeaponItem> shopItems = new List<ShopWeaponItem>();
-    private readonly Dictionary<GameObject, Texture2D> thumbnailCache = new Dictionary<GameObject, Texture2D>();
+    private readonly List<ShopWeaponItem> shopItems = new List<ShopWeaponItem>(8);
+    private readonly Dictionary<GameObject, Texture2D> thumbnailCache = new Dictionary<GameObject, Texture2D>(8);
 
     private int equippedItemIndex = -1;
     private int basePlayerDamage = -1;
     private bool isOpen;
+
+    // Cached player components
+    private Transform playerTransform;
+    private PlayerHealth playerHealth;
+    private PlayerAttack playerAttack;
 
     // Runtime Shop UI
     private GameObject shopOverlayRoot;
@@ -71,7 +76,6 @@ public class WeaponShopManager : MonoBehaviour
     private TMP_Text feedbackText;
     private Button potionButton;
     private TMP_Text potionButtonText;
-    private Transform playerTransform;
     private Coroutine openAnimRoutine;
 
     private void Awake()
@@ -120,6 +124,11 @@ public class WeaponShopManager : MonoBehaviour
             if (kv.Value != null) Destroy(kv.Value);
         }
         thumbnailCache.Clear();
+
+        if (Instance == this)
+        {
+            Instance = null;
+        }
     }
 
     public void ToggleShop()
@@ -206,6 +215,55 @@ public class WeaponShopManager : MonoBehaviour
         openAnimRoutine = null;
     }
 
+    // ==================== SHARED PLAYER HAND HELPER ====================
+
+    public static Transform FindPlayerHandBone(GameObject player, out GameObject equippedWeapon)
+    {
+        equippedWeapon = null;
+        if (player == null) return null;
+        Animator anim = player.GetComponentInChildren<Animator>();
+        if (anim == null) return null;
+
+        Transform rightHand = anim.GetBoneTransform(HumanBodyBones.RightHand);
+        Transform leftHand = anim.GetBoneTransform(HumanBodyBones.LeftHand);
+
+        if (rightHand == null || leftHand == null)
+        {
+            foreach (Transform t in anim.GetComponentsInChildren<Transform>(true))
+            {
+                if (rightHand == null && t.name == "mixamorig:RightHand") rightHand = t;
+                if (leftHand == null && t.name == "mixamorig:LeftHand") leftHand = t;
+            }
+        }
+
+        if (rightHand != null)
+        {
+            equippedWeapon = FindWeaponChild(rightHand);
+            if (equippedWeapon != null) return rightHand;
+        }
+
+        if (leftHand != null)
+        {
+            equippedWeapon = FindWeaponChild(leftHand);
+            if (equippedWeapon != null) return leftHand;
+        }
+
+        return rightHand != null ? rightHand : leftHand;
+    }
+
+    private static GameObject FindWeaponChild(Transform hand)
+    {
+        for (int i = 0; i < hand.childCount; i++)
+        {
+            Transform child = hand.GetChild(i);
+            if (!child.name.StartsWith("mixamorig:") && child.GetComponentInChildren<Renderer>() != null)
+            {
+                return child.gameObject;
+            }
+        }
+        return null;
+    }
+
     // ==================== CATALOG & 3D THUMBNAIL STUDIO ====================
 
     private void LoadWeaponCatalog()
@@ -252,59 +310,39 @@ public class WeaponShopManager : MonoBehaviour
     }
 
     /// <summary>
-    /// Chụp ảnh chân dung 3D sắc nét cho từng Prefab vũ khí thật bằng Studio Camera ngoài màn hình.
+    /// Chụp ảnh chân dung 3D cho tất cả vũ khí chưa có cache bằng DUY NHẤT 1 Studio Camera & RenderTexture 128x128.
     /// </summary>
-    private Texture2D GetOrRenderWeaponThumbnail(GameObject weaponPrefab, Color accentColor)
+    private void RenderAllWeaponThumbnails()
     {
-        if (weaponPrefab == null) return null;
-        if (thumbnailCache.TryGetValue(weaponPrefab, out Texture2D cached) && cached != null)
+        bool needsRender = false;
+        for (int i = 0; i < shopItems.Count; i++)
         {
-            return cached;
+            ShopWeaponItem item = shopItems[i];
+            if (item.prefab == null) continue;
+            if (thumbnailCache.TryGetValue(item.prefab, out Texture2D cached) && cached != null)
+            {
+                item.thumbnail = cached;
+            }
+            else
+            {
+                needsRender = true;
+            }
         }
 
-        const int res = 256;
+        if (!needsRender) return;
+
+        const int res = 128;
         Vector3 studioOrigin = new Vector3(0f, -650f, 0f);
 
         GameObject studioRoot = new GameObject("TempWeaponThumbnailStudio");
         studioRoot.transform.position = studioOrigin;
 
-        // 1. Tạo bản sao vũ khí & đặt vào góc nghiêng chéo 42° chuẩn icon RPG
         GameObject pivot = new GameObject("Pivot");
         pivot.transform.SetParent(studioRoot.transform, false);
-
-        GameObject clone = Instantiate(weaponPrefab, pivot.transform);
-        clone.transform.localPosition = Vector3.zero;
-        clone.transform.localRotation = Quaternion.identity;
-
-        // Tắt collider / script phụ nếu có trên bản sao preview
-        foreach (Collider c in clone.GetComponentsInChildren<Collider>(true)) c.enabled = false;
-        foreach (MonoBehaviour mb in clone.GetComponentsInChildren<MonoBehaviour>(true)) mb.enabled = false;
-
-        // Đặt góc nghiêng đẹp để lộ toàn bộ lưỡi kiếm/búa/thương/lưỡi hái
         pivot.transform.localRotation = Quaternion.Euler(14f, 22f, -42f);
 
-        Renderer[] rends = clone.GetComponentsInChildren<Renderer>(true);
-        Bounds bounds = new Bounds(studioOrigin, Vector3.one * 0.5f);
-        bool hasBounds = false;
-        for (int i = 0; i < rends.Length; i++)
-        {
-            if (rends[i] == null) continue;
-            if (!hasBounds)
-            {
-                bounds = rends[i].bounds;
-                hasBounds = true;
-            }
-            else
-            {
-                bounds.Encapsulate(rends[i].bounds);
-            }
-        }
-
-        // 2. Đèn Studio (Key Light ấm + Rim Light theo màu phẩm chất)
         GameObject keyLightObj = new GameObject("KeyLight");
         keyLightObj.transform.SetParent(studioRoot.transform, false);
-        keyLightObj.transform.position = bounds.center + new Vector3(1.8f, 2.2f, -2.5f);
-        keyLightObj.transform.LookAt(bounds.center);
         Light keyLight = keyLightObj.AddComponent<Light>();
         keyLight.type = LightType.Point;
         keyLight.range = 16f;
@@ -313,14 +351,11 @@ public class WeaponShopManager : MonoBehaviour
 
         GameObject rimLightObj = new GameObject("RimLight");
         rimLightObj.transform.SetParent(studioRoot.transform, false);
-        rimLightObj.transform.position = bounds.center + new Vector3(-2.0f, -0.8f, 1.8f);
         Light rimLight = rimLightObj.AddComponent<Light>();
         rimLight.type = LightType.Point;
         rimLight.range = 14f;
         rimLight.intensity = 7f;
-        rimLight.color = accentColor;
 
-        // 3. Camera chụp cận cảnh tự căn vừa khít Bounds
         GameObject camObj = new GameObject("ThumbCam");
         camObj.transform.SetParent(studioRoot.transform, false);
         Camera cam = camObj.AddComponent<Camera>();
@@ -331,41 +366,90 @@ public class WeaponShopManager : MonoBehaviour
         cam.farClipPlane = 30f;
         cam.allowHDR = false;
 
-        float maxExtent = Mathf.Max(bounds.extents.x, bounds.extents.y, bounds.extents.z, 0.25f);
-        float dist = (maxExtent / Mathf.Sin(cam.fieldOfView * 0.5f * Mathf.Deg2Rad)) * 1.18f;
-        camObj.transform.position = bounds.center + new Vector3(0f, 0f, -dist);
-        camObj.transform.LookAt(bounds.center);
-
         RenderTexture rt = new RenderTexture(res, res, 24, RenderTextureFormat.ARGB32);
         RenderTexture prevActive = RenderTexture.active;
-
         cam.targetTexture = rt;
-        cam.Render();
 
-        RenderTexture.active = rt;
-        Texture2D tex = new Texture2D(res, res, TextureFormat.RGBA32, false);
-        tex.ReadPixels(new Rect(0, 0, res, res), 0, 0);
-        tex.Apply();
+        try
+        {
+            for (int i = 0; i < shopItems.Count; i++)
+            {
+                ShopWeaponItem item = shopItems[i];
+                if (item.prefab == null) continue;
+                if (thumbnailCache.TryGetValue(item.prefab, out Texture2D cached) && cached != null)
+                {
+                    item.thumbnail = cached;
+                    continue;
+                }
 
-        cam.targetTexture = null;
-        RenderTexture.active = prevActive;
-        rt.Release();
-        Destroy(rt);
-        Destroy(studioRoot);
+                GameObject clone = Instantiate(item.prefab, pivot.transform);
+                clone.transform.localPosition = Vector3.zero;
+                clone.transform.localRotation = Quaternion.identity;
 
-        thumbnailCache[weaponPrefab] = tex;
-        return tex;
+                foreach (Collider c in clone.GetComponentsInChildren<Collider>(true)) c.enabled = false;
+                foreach (MonoBehaviour mb in clone.GetComponentsInChildren<MonoBehaviour>(true)) mb.enabled = false;
+
+                Renderer[] rends = clone.GetComponentsInChildren<Renderer>(true);
+                Bounds bounds = new Bounds(studioOrigin, Vector3.one * 0.5f);
+                bool hasBounds = false;
+                for (int r = 0; r < rends.Length; r++)
+                {
+                    if (rends[r] == null) continue;
+                    if (!hasBounds)
+                    {
+                        bounds = rends[r].bounds;
+                        hasBounds = true;
+                    }
+                    else
+                    {
+                        bounds.Encapsulate(rends[r].bounds);
+                    }
+                }
+
+                keyLightObj.transform.position = bounds.center + new Vector3(1.8f, 2.2f, -2.5f);
+                keyLightObj.transform.LookAt(bounds.center);
+                rimLightObj.transform.position = bounds.center + new Vector3(-2.0f, -0.8f, 1.8f);
+                rimLight.color = RarityColors[item.rarityTier];
+
+                float maxExtent = Mathf.Max(bounds.extents.x, bounds.extents.y, bounds.extents.z, 0.25f);
+                float dist = (maxExtent / Mathf.Sin(cam.fieldOfView * 0.5f * Mathf.Deg2Rad)) * 1.18f;
+                camObj.transform.position = bounds.center + new Vector3(0f, 0f, -dist);
+                camObj.transform.LookAt(bounds.center);
+
+                cam.Render();
+
+                RenderTexture.active = rt;
+                Texture2D tex = new Texture2D(res, res, TextureFormat.RGBA32, false);
+                tex.ReadPixels(new Rect(0, 0, res, res), 0, 0);
+                tex.Apply(false, true);
+
+                thumbnailCache[item.prefab] = tex;
+                item.thumbnail = tex;
+
+                // Tách khỏi pivot và ẩn ngay để không ảnh hưởng bounds của vũ khí kế tiếp trong cùng frame
+                clone.transform.SetParent(null, false);
+                clone.SetActive(false);
+                Destroy(clone);
+            }
+        }
+        finally
+        {
+            cam.targetTexture = null;
+            RenderTexture.active = prevActive;
+            rt.Release();
+            Destroy(rt);
+            Destroy(studioRoot);
+        }
     }
 
     // ==================== PURCHASE & EQUIP LOGIC ====================
 
     private void OnBuyPotionClicked()
     {
-        GameObject player = GameObject.FindWithTag("Player");
-        PlayerHealth hp = player != null ? player.GetComponent<PlayerHealth>() : null;
-        if (hp == null) return;
+        ResolvePlayer();
+        if (playerHealth == null) return;
 
-        if (hp.currentHealth >= hp.maxHealth)
+        if (playerHealth.currentHealth >= playerHealth.maxHealth)
         {
             SetFeedback("Máu của bạn đã đầy 100%!", new Color(1f, 0.85f, 0.35f));
             return;
@@ -377,7 +461,10 @@ public class WeaponShopManager : MonoBehaviour
             return;
         }
 
-        hp.Heal(potionHealAmount);
+        int healthBefore = playerHealth.currentHealth;
+        playerHealth.Heal(potionHealAmount);
+        int actualHealed = playerHealth.currentHealth - healthBefore;
+        CombatVfxManager.SpawnHealEffect(playerTransform, actualHealed > 0 ? actualHealed : potionHealAmount, false);
         GameAudioManager.PlayPickup();
 
         if (TelemetryManager.Instance != null)
@@ -421,10 +508,10 @@ public class WeaponShopManager : MonoBehaviour
 
     private void EquipWeaponItem(ShopWeaponItem item)
     {
-        GameObject player = GameObject.FindWithTag("Player");
-        if (player == null || item.prefab == null) return;
+        ResolvePlayer();
+        if (playerTransform == null || item.prefab == null) return;
 
-        Transform hand = LevelUpChoiceManager.FindPlayerHandBone(player, out GameObject oldWeapon);
+        Transform hand = FindPlayerHandBone(playerTransform.gameObject, out GameObject oldWeapon);
         if (hand == null)
         {
             Debug.LogWarning("[WeaponShopManager] Không tìm thấy xương tay phải của Player!");
@@ -455,15 +542,16 @@ public class WeaponShopManager : MonoBehaviour
             newWeapon.transform.localScale = fallbackLocalScale;
         }
 
-        PlayerAttack pa = player.GetComponent<PlayerAttack>();
-        if (pa != null)
+        if (playerAttack != null)
         {
-            if (basePlayerDamage < 0) basePlayerDamage = pa.attackDamage;
-            pa.attackDamage = basePlayerDamage + item.bonusDamage;
-            pa.RefreshWeapon(0);
+            if (basePlayerDamage < 0) basePlayerDamage = playerAttack.attackDamage;
+            playerAttack.attackDamage = basePlayerDamage + item.bonusDamage;
+            playerAttack.RefreshWeapon(0);
         }
 
         equippedItemIndex = item.index;
+        Color rarityCol = RarityColors[Mathf.Clamp(item.rarityTier, 0, RarityColors.Length - 1)];
+        CombatVfxManager.SpawnWeaponEquipEffect(playerTransform, rarityCol);
         GameAudioManager.PlayWeaponEquip();
     }
 
@@ -520,7 +608,7 @@ public class WeaponShopManager : MonoBehaviour
             14f, FontStyles.Normal, FantasyUiThemeHelper.TextMuted, TextAlignmentOptions.Left, font);
         SetTopRect(subtitle.rectTransform, 32f, -52f, 540f, 22f, 0f);
 
-        // Ví vàng có icon đồng vàng thật
+        // Ví vàng có icon đồng vàng
         GameObject walletPill = new GameObject("GoldWalletPill", typeof(RectTransform), typeof(Image));
         walletPill.transform.SetParent(card.transform, false);
         SetTopRect(walletPill.GetComponent<RectTransform>(), -88f, -20f, 210f, 48f, 1f);
@@ -557,7 +645,7 @@ public class WeaponShopManager : MonoBehaviour
         FantasyUiThemeHelper.CreateAccentLine(card.transform, "HeaderDivider",
             new Vector2(0f, 1f), new Vector2(1f, 1f), new Vector2(0.5f, 1f), new Vector2(0f, -84f), new Vector2(-64f, 2f), FantasyUiThemeHelper.GoldBorder);
 
-        // 4. Thẻ Bình Hồi Máu nổi bật (có hình ảnh icon_potion.jpg tuyệt đẹp)
+        // 4. Thẻ Bình Hồi Máu nổi bật
         GameObject potionRow = new GameObject("PotionBanner", typeof(RectTransform), typeof(Image));
         potionRow.transform.SetParent(card.transform, false);
         SetTopCenteredRect(potionRow.GetComponent<RectTransform>(), 0f, -98f, 896f, 88f);
@@ -566,7 +654,6 @@ public class WeaponShopManager : MonoBehaviour
         po.effectColor = new Color(0.95f, 0.32f, 0.38f, 0.65f);
         po.effectDistance = new Vector2(1.4f, -1.4f);
 
-        // Khung ảnh Bình Hồi Máu
         GameObject potionFrame = new GameObject("PotionIconFrame", typeof(RectTransform), typeof(Image));
         potionFrame.transform.SetParent(potionRow.transform, false);
         RectTransform pfRt = potionFrame.GetComponent<RectTransform>();
@@ -611,7 +698,9 @@ public class WeaponShopManager : MonoBehaviour
         potionButtonText = potionButton.GetComponentInChildren<TMP_Text>(true);
         potionButton.onClick.AddListener(OnBuyPotionClicked);
 
-        // 5. Lưới 4x2 Thẻ Vũ Khí kèm Hình Ảnh 3D Thật
+        // 5. Chụp toàn bộ thumbnail 3D bằng 1 Studio dùng chung rồi dựng lưới 4x2
+        RenderAllWeaponThumbnails();
+
         GameObject gridObj = new GameObject("WeaponsGrid", typeof(RectTransform), typeof(GridLayoutGroup));
         gridObj.transform.SetParent(card.transform, false);
         SetTopCenteredRect(gridObj.GetComponent<RectTransform>(), 0f, -202f, 896f, 396f);
@@ -628,8 +717,6 @@ public class WeaponShopManager : MonoBehaviour
             Color rarityCol = RarityColors[item.rarityTier];
             string rarityLabel = RarityLabels[item.rarityTier];
 
-            item.thumbnail = GetOrRenderWeaponThumbnail(item.prefab, rarityCol);
-
             GameObject tile = new GameObject($"WeaponCard_{i}", typeof(RectTransform), typeof(Image));
             tile.transform.SetParent(gridObj.transform, false);
             tile.GetComponent<Image>().color = new Color(0.075f, 0.10f, 0.165f, 0.95f);
@@ -639,11 +726,9 @@ public class WeaponShopManager : MonoBehaviour
             to.effectDistance = new Vector2(1.4f, -1.4f);
             item.cardOutline = to;
 
-            // Thanh màu phẩm chất ở đỉnh thẻ
             FantasyUiThemeHelper.CreateAccentLine(tile.transform, "RarityTopStrip",
                 new Vector2(0f, 1f), new Vector2(1f, 1f), new Vector2(0.5f, 1f), Vector2.zero, new Vector2(0f, 3f), rarityCol);
 
-            // Khung hiển thị Hình Ảnh 3D của chính vũ khí đó
             GameObject thumbFrame = new GameObject("ThumbFrame", typeof(RectTransform), typeof(Image));
             thumbFrame.transform.SetParent(tile.transform, false);
             SetTopCenteredRect(thumbFrame.GetComponent<RectTransform>(), 0f, -10f, 192f, 82f);
@@ -665,13 +750,11 @@ public class WeaponShopManager : MonoBehaviour
                 rawGo.GetComponent<RawImage>().texture = item.thumbnail;
             }
 
-            // Nhãn phẩm chất nhỏ góc trên-trái ảnh
             TMP_Text rTag = FantasyUiThemeHelper.CreateText(thumbFrame.transform, "RarityTag", rarityLabel,
                 10f, FontStyles.Bold, rarityCol, TextAlignmentOptions.Left, font);
             SetTopRect(rTag.rectTransform, 6f, -4f, 100f, 16f, 0f);
             rTag.characterSpacing = 1.5f;
 
-            // Tên vũ khí & Sát thương
             TMP_Text wName = FantasyUiThemeHelper.CreateText(tile.transform, "Name", item.displayName,
                 16f, FontStyles.Bold, Color.white, TextAlignmentOptions.Center, font);
             SetTopCenteredRect(wName.rectTransform, 0f, -97f, 196f, 22f);
@@ -680,7 +763,6 @@ public class WeaponShopManager : MonoBehaviour
                 12f, FontStyles.Bold, rarityCol, TextAlignmentOptions.Center, font);
             SetTopCenteredRect(wDmg.rectTransform, 0f, -120f, 196f, 18f);
 
-            // Nút Mua / Trang bị
             Button btn = CreateSimpleButton(tile.transform, "ActionBtn", $"MUA • {item.price} G", true, 186f, 36f, font);
             SetTopCenteredRect(btn.GetComponent<RectTransform>(), 0f, -144f, 186f, 36f);
 
@@ -708,8 +790,8 @@ public class WeaponShopManager : MonoBehaviour
             goldBalanceText.text = $"{currentGold:N0} G";
         }
 
-        GameObject player = GameObject.FindWithTag("Player");
-        PlayerHealth hp = player != null ? player.GetComponent<PlayerHealth>() : null;
+        ResolvePlayer();
+        PlayerHealth hp = playerHealth;
         if (playerHpSummaryText != null && hp != null)
         {
             playerHpSummaryText.text = $"Hồi phục tức thì trong giao tranh  •  HP hiện tại: {hp.currentHealth} / {hp.maxHealth}";
@@ -802,13 +884,15 @@ public class WeaponShopManager : MonoBehaviour
 
     private bool IsNearAnyCampfire()
     {
-        if (playerTransform == null) ResolvePlayer();
+        ResolvePlayer();
         if (playerTransform == null) return false;
 
-        CampfireCheckpoint[] camps = FindObjectsByType<CampfireCheckpoint>(FindObjectsSortMode.None);
-        for (int i = 0; i < camps.Length; i++)
+        List<CampfireCheckpoint> camps = CampfireCheckpoint.ActiveCampfires;
+        for (int i = 0; i < camps.Count; i++)
         {
-            Vector3 diff = playerTransform.position - camps[i].transform.position;
+            CampfireCheckpoint camp = camps[i];
+            if (camp == null) continue;
+            Vector3 diff = playerTransform.position - camp.transform.position;
             diff.y = 0f;
             if (diff.sqrMagnitude <= 49f) return true;
         }
@@ -817,14 +901,35 @@ public class WeaponShopManager : MonoBehaviour
 
     private void CacheBasePlayerDamage()
     {
-        GameObject player = GameObject.FindWithTag("Player");
-        PlayerAttack pa = player != null ? player.GetComponent<PlayerAttack>() : null;
-        if (pa != null) basePlayerDamage = pa.attackDamage;
+        ResolvePlayer();
+        if (playerAttack != null) basePlayerDamage = playerAttack.attackDamage;
     }
 
     private void ResolvePlayer()
     {
-        GameObject p = GameObject.FindWithTag("Player");
-        if (p != null) playerTransform = p.transform;
+        if (playerTransform == null)
+        {
+            if (PlayerController.Instance != null)
+            {
+                playerTransform = PlayerController.Instance.transform;
+            }
+            else
+            {
+                GameObject p = GameObject.FindWithTag("Player");
+                if (p != null) playerTransform = p.transform;
+            }
+        }
+
+        if (playerTransform != null)
+        {
+            if (playerHealth == null)
+            {
+                playerHealth = PlayerHealth.Instance != null ? PlayerHealth.Instance : playerTransform.GetComponent<PlayerHealth>();
+            }
+            if (playerAttack == null)
+            {
+                playerAttack = playerTransform.GetComponent<PlayerAttack>();
+            }
+        }
     }
 }

@@ -12,6 +12,11 @@ using UnityEngine.AI;
 [DefaultExecutionOrder(-20)]
 public class PlayerController : MonoBehaviour
 {
+    public static PlayerController Instance { get; private set; }
+
+    private static readonly int BaseColorId = Shader.PropertyToID("_BaseColor");
+    private static readonly int ColorId = Shader.PropertyToID("_Color");
+
     [Header("Movement Settings (AAA Snappy Locomotion)")]
     public float moveSpeed = 6.5f;
     public float rotationSpeed = 14f;
@@ -19,8 +24,10 @@ public class PlayerController : MonoBehaviour
 
     [Header("Block / Parry Settings (Giữ Chuột Phải)")]
     [Range(0f, 1f)] public float blockDamageReduction = 0.8f;
-    [Tooltip("Cửa sổ thời gian (giây) từ lúc bấm Chuột Phải để kích hoạt Đỡ Đòn Hoàn Hảo (0 sát thương + đẩy choáng quái).")]
+    [Tooltip("Cửa sổ thời gian (giây) từ lúc bấm Chuột Phải để kích hoạt Đỡ Đòn Hoàn Hảo (0 sát thương + đẩy choáng quái + hồi HP).")]
     public float perfectParryWindow = 0.28f;
+    [Tooltip("Tỷ lệ HP tối đa được hồi khi Parry hoàn hảo trúng đòn địch (0.05 = 5% Max HP).")]
+    [Range(0f, 1f)] public float perfectParryHealPercent = 0.05f;
 
     [Header("Knockback & Collision")]
     public float knockbackDamping = 36f;
@@ -45,9 +52,15 @@ public class PlayerController : MonoBehaviour
     private float footstepTimer;
     private int lastHorizontalDir;
     private int lastVerticalDir;
+    private GameObject blockAuraObj;
+    private Material blockAuraMat;
+    private Light blockAuraLight;
 
     void Awake()
     {
+        Instance = this;
+        PlayerCharacterLoader.ApplySelectedCharacter(gameObject);
+
         controller = GetComponent<CharacterController>();
         controller.minMoveDistance = 0f;
         playerAttack = GetComponent<PlayerAttack>();
@@ -90,22 +103,30 @@ public class PlayerController : MonoBehaviour
         Cursor.visible = false;
     }
 
+    void OnDestroy()
+    {
+        if (blockAuraMat != null) Destroy(blockAuraMat);
+        if (Instance == this) Instance = null;
+    }
+
     void Update()
     {
-        if (GameOverManager.IsGameOver || LevelUpChoiceManager.IsPaused)
+        if (GameOverManager.IsGameOver || WeaponShopManager.IsShopOpen)
         {
             CurrentInputDirection = Vector3.zero;
             HasMovementInput = false;
             IsBlocking = false;
+            UpdateBlockAuraVisual();
             knockbackVelocity = Vector3.zero;
             lungeVelocity = Vector3.zero;
-            Cursor.lockState = CursorLockMode.None;
-            Cursor.visible = true;
+            if (Cursor.lockState != CursorLockMode.None) Cursor.lockState = CursorLockMode.None;
+            if (!Cursor.visible) Cursor.visible = true;
             return;
         }
 
         HandleCursorLock();
         HandleMovement();
+        UpdateBlockAuraVisual();
     }
 
     void LateUpdate()
@@ -214,30 +235,33 @@ public class PlayerController : MonoBehaviour
             RotateVisualTowards(CurrentInputDirection, rotationSpeed);
         }
 
+        float dt = Time.deltaTime;
+
         if (controller.isGrounded && verticalVelocity < 0f)
         {
             verticalVelocity = -2f;
         }
         else
         {
-            verticalVelocity += gravity * Time.deltaTime;
+            verticalVelocity += gravity * dt;
         }
 
         // Tổng hợp vận tốc: khi nhả phím và không có lunge/knockback thì vận tốc ngang = 0 tuyệt đối
         Vector3 horizontalVelocity = moveDir * moveSpeed + lungeVelocity + knockbackVelocity;
-        Vector3 finalDisplacement = horizontalVelocity * Time.deltaTime;
-        finalDisplacement.y = verticalVelocity * Time.deltaTime;
+        Vector3 finalDisplacement = horizontalVelocity * dt;
+        finalDisplacement.y = verticalVelocity * dt;
 
         controller.Move(finalDisplacement);
 
-        // Tiếng bước chân nhịp nhàng khi chạy trên mặt đất
+        // Tiếng bước chân + bụi chân nhẹ khi chạy trên mặt đất
         if (controller.isGrounded && !isAttacking && !IsBlocking && HasMovementInput)
         {
-            footstepTimer -= Time.deltaTime;
+            footstepTimer -= dt;
             if (footstepTimer <= 0f)
             {
                 footstepTimer = 0.36f;
                 GameAudioManager.PlayFootstep();
+                CombatVfxManager.SpawnFootstepDust(transform.position);
             }
         }
         else
@@ -248,7 +272,7 @@ public class PlayerController : MonoBehaviour
         // Giảm tốc nhanh để không bao giờ có cảm giác trượt băng
         if (lungeVelocity.sqrMagnitude > 0.001f)
         {
-            lungeVelocity = Vector3.MoveTowards(lungeVelocity, Vector3.zero, 45f * Time.deltaTime);
+            lungeVelocity = Vector3.MoveTowards(lungeVelocity, Vector3.zero, 45f * dt);
         }
         else
         {
@@ -257,7 +281,7 @@ public class PlayerController : MonoBehaviour
 
         if (knockbackVelocity.sqrMagnitude > 0.001f)
         {
-            knockbackVelocity = Vector3.MoveTowards(knockbackVelocity, Vector3.zero, knockbackDamping * Time.deltaTime);
+            knockbackVelocity = Vector3.MoveTowards(knockbackVelocity, Vector3.zero, knockbackDamping * dt);
         }
         else
         {
@@ -363,11 +387,12 @@ public class PlayerController : MonoBehaviour
     private void SnapToGround()
     {
         Vector3 rayOrigin = transform.position + Vector3.up * 20f;
-        RaycastHit[] hits = Physics.RaycastAll(rayOrigin, Vector3.down, 100f, ~0, QueryTriggerInteraction.Ignore);
+        RaycastHit[] hits = new RaycastHit[16];
+        int hitCount = Physics.RaycastNonAlloc(rayOrigin, Vector3.down, hits, 100f, ~0, QueryTriggerInteraction.Ignore);
 
         float highestGroundY = float.MinValue;
         bool foundGround = false;
-        for (int i = 0; i < hits.Length; i++)
+        for (int i = 0; i < hitCount; i++)
         {
             Collider col = hits[i].collider;
             if (col == null || col.transform.IsChildOf(transform)) continue;
@@ -400,6 +425,76 @@ public class PlayerController : MonoBehaviour
         {
             Cursor.lockState = CursorLockMode.Locked;
             Cursor.visible = false;
+        }
+    }
+
+    /// <summary>
+    /// Vòng khiên năng lượng trước mặt khi giữ Chuột Phải:
+    /// - Rực vàng hoàng kim trong cửa sổ Perfect Parry (0.28s đầu) giúp người chơi cảm nhận nhịp Parry.
+    /// - Dịu sang xanh băng khi giữ Block thường.
+    /// </summary>
+    private void UpdateBlockAuraVisual()
+    {
+        if (!IsBlocking)
+        {
+            if (blockAuraObj != null && blockAuraObj.activeSelf)
+            {
+                blockAuraObj.SetActive(false);
+            }
+            return;
+        }
+
+        if (blockAuraObj == null)
+        {
+            blockAuraObj = new GameObject("PlayerBlockAuraFX");
+            blockAuraObj.transform.SetParent(transform, false);
+
+            GameObject ring = new GameObject("ShieldRing");
+            ring.transform.SetParent(blockAuraObj.transform, false);
+            ring.transform.localRotation = Quaternion.Euler(90f, 0f, 0f);
+            MeshFilter mf = ring.AddComponent<MeshFilter>();
+            mf.sharedMesh = CombatVfxManager.GetHorizontalQuadMesh();
+            MeshRenderer mr = ring.AddComponent<MeshRenderer>();
+            blockAuraMat = new Material(CombatVfxManager.GetAdditiveRingMaterial());
+            mr.material = blockAuraMat;
+            mr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            mr.receiveShadows = false;
+
+            GameObject lightObj = new GameObject("ShieldLight");
+            lightObj.transform.SetParent(blockAuraObj.transform, false);
+            blockAuraLight = lightObj.AddComponent<Light>();
+            blockAuraLight.type = LightType.Point;
+            blockAuraLight.range = 4.2f;
+        }
+
+        if (!blockAuraObj.activeSelf)
+        {
+            blockAuraObj.SetActive(true);
+        }
+
+        Vector3 fwd = GetVisualForward();
+        blockAuraObj.transform.position = transform.position + Vector3.up * 1.15f + fwd * 0.62f;
+        blockAuraObj.transform.rotation = Quaternion.LookRotation(fwd);
+
+        bool inParry = IsPerfectParryWindow;
+        float pulse = 0.94f + 0.08f * Mathf.Sin(Time.time * 12f);
+        float size = (inParry ? 1.55f : 1.25f) * pulse;
+        blockAuraObj.transform.localScale = Vector3.one * size;
+
+        Color auraColor = inParry
+            ? new Color(2.2f, 1.85f, 0.45f, 0.85f)
+            : new Color(0.65f, 1.55f, 2.15f, 0.58f);
+
+        if (blockAuraMat != null)
+        {
+            if (blockAuraMat.HasProperty(BaseColorId)) blockAuraMat.SetColor(BaseColorId, auraColor);
+            if (blockAuraMat.HasProperty(ColorId)) blockAuraMat.SetColor(ColorId, auraColor);
+        }
+
+        if (blockAuraLight != null)
+        {
+            blockAuraLight.color = inParry ? new Color(1f, 0.85f, 0.28f) : new Color(0.45f, 0.85f, 1f);
+            blockAuraLight.intensity = inParry ? 3.8f : 1.8f;
         }
     }
 }
