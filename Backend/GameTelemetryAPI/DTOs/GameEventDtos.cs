@@ -2,6 +2,7 @@ using System.ComponentModel.DataAnnotations;
 
 namespace GameTelemetryAPI.DTOs
 {
+    // DTO nhận dữ liệu tạo một sự kiện telemetry đơn lẻ từ client
     public class CreateGameEventDto
     {
         [Required(ErrorMessage = "SessionId là bắt buộc")]
@@ -16,6 +17,7 @@ namespace GameTelemetryAPI.DTOs
         public int? Value { get; set; }
     }
 
+    // DTO nhận danh sách nhiều sự kiện gửi theo lô cho cùng một phiên chơi
     public class CreateBatchGameEventsDto
     {
         [Required(ErrorMessage = "SessionId là bắt buộc")]
@@ -26,6 +28,7 @@ namespace GameTelemetryAPI.DTOs
         public List<SingleEventItemDto> Events { get; set; } = new List<SingleEventItemDto>();
     }
 
+    // DTO mô tả từng phần tử sự kiện trong gói gửi hàng loạt
     public class SingleEventItemDto
     {
         [Required(ErrorMessage = "EventType là bắt buộc")]
@@ -37,6 +40,7 @@ namespace GameTelemetryAPI.DTOs
         public int? Value { get; set; }
     }
 
+    // DTO trả về thông tin sự kiện đã lưu
     public class GameEventResponseDto
     {
         public long EventId { get; set; }

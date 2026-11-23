@@ -1,21 +1,23 @@
 using UnityEngine;
 
-/// <summary>
-/// Tự động nạp nhân vật & chỉ số mà người chơi đã chọn từ CharacterSelectScene khi vào màn chơi Lv1:
-/// - Áp dụng Max HP, Attack Damage, Move Speed, Knockback, Block/Parry cho Player.
-/// - Nếu chọn nhân vật 2/3/4 (Maria, Vampire, Maw), tự động thay PlayerBody sang đúng model FBX,
-///   gắn lại Player_AC.controller + Avatar Humanoid tương ứng và gắn vũ khí khởi đầu vào tay phải.
-/// </summary>
+// Thay thế model và gắn vũ khí khởi đầu cho nhân vật người chơi theo lựa chọn ở PickCharacter
 public static class PlayerCharacterLoader
 {
+    private const string DefaultStartingSwordPath = "Assets/DucThanh/Assets/Weapons/Kiếm.prefab";
+
+    // Khởi tạo model nhân vật đã chọn lên Player gốc và kết nối lại Animator/vũ khí
     public static void ApplySelectedCharacter(GameObject playerRoot)
     {
         if (playerRoot == null) return;
 
+        PlayerAttack pa = playerRoot.GetComponent<PlayerAttack>();
         CharacterProfile profile = SelectedCharacterStore.GetSelectedProfile();
-        if (profile == null) return;
+        if (profile == null)
+        {
+            AlignDefaultCharacterWeapon(playerRoot, null, pa);
+            return;
+        }
 
-        // 1. Áp dụng chỉ số chiến đấu của nhân vật đã chọn
         PlayerHealth hp = playerRoot.GetComponent<PlayerHealth>();
         if (hp != null)
         {
@@ -31,21 +33,19 @@ public static class PlayerCharacterLoader
             pc.perfectParryHealPercent = profile.perfectParryHealPercent;
         }
 
-        PlayerAttack pa = playerRoot.GetComponent<PlayerAttack>();
         if (pa != null)
         {
             pa.attackDamage = profile.attackDamage;
             pa.knockbackForce = profile.knockbackForce;
         }
 
-        // 2. Nếu là nhân vật mặc định (index 0 = Vanguard đang có sẵn trong Lv1) thì giữ nguyên model gốc
         int selectedIdx = SelectedCharacterStore.SelectedIndex;
         if (selectedIdx == 0 || profile.modelPrefab == null)
         {
+            AlignDefaultCharacterWeapon(playerRoot, profile, pa);
             return;
         }
 
-        // 3. Thay PlayerBody sang model nhân vật đã chọn (Maria / Vampire / Maw)
         Transform oldBody = playerRoot.transform.Find("PlayerBody");
         RuntimeAnimatorController sharedController = null;
         Vector3 savedWeaponPos = Vector3.zero;
@@ -70,7 +70,6 @@ public static class PlayerCharacterLoader
                 oldWeaponRef.transform.SetParent(null, false);
             }
 
-            // Tách oldBody khỏi Player trước khi tạo newBody để các Awake() chạy sau lấy đúng Animator mới
             oldBody.SetParent(null, false);
             oldBody.name = "PlayerBody_Old";
             oldBody.gameObject.SetActive(false);
@@ -91,38 +90,35 @@ public static class PlayerCharacterLoader
         }
         newAnim.applyRootMotion = false;
 
-        // Gắn vũ khí vào tay phải của model mới
-        Transform rightHand = newAnim.GetBoneTransform(HumanBodyBones.RightHand);
-        if (rightHand == null)
-        {
-            foreach (Transform t in newBody.GetComponentsInChildren<Transform>(true))
-            {
-                if (t.name == "mixamorig:RightHand")
-                {
-                    rightHand = t;
-                    break;
-                }
-            }
-        }
+        Transform rightHand = FindRightHandBone(newBody.transform, newAnim);
+        GameObject startWeaponPrefab = ResolveStartingWeaponPrefab(profile);
 
         if (rightHand != null)
         {
-            if (profile.startingWeaponPrefab != null)
+            if (startWeaponPrefab != null)
             {
-                GameObject weaponObj = Object.Instantiate(profile.startingWeaponPrefab, rightHand);
-                weaponObj.name = profile.startingWeaponPrefab.name;
-                weaponObj.transform.localPosition = savedWeaponPos;
-                weaponObj.transform.localRotation = savedWeaponRot;
-                weaponObj.transform.localScale = savedWeaponScale;
+                GameObject weaponObj = Object.Instantiate(startWeaponPrefab, rightHand);
+                weaponObj.name = startWeaponPrefab.name;
+                if (!WeaponGripAligner.AlignWeaponToHand(rightHand, weaponObj.transform, newAnim))
+                {
+                    weaponObj.transform.localPosition = savedWeaponPos;
+                    weaponObj.transform.localRotation = savedWeaponRot;
+                    weaponObj.transform.localScale = savedWeaponScale;
+                }
+                WeaponElementalVfx.ApplyToWeapon(weaponObj);
 
                 if (oldWeaponRef != null) Object.Destroy(oldWeaponRef);
             }
             else if (oldWeaponRef != null)
             {
                 oldWeaponRef.transform.SetParent(rightHand, false);
-                oldWeaponRef.transform.localPosition = savedWeaponPos;
-                oldWeaponRef.transform.localRotation = savedWeaponRot;
-                oldWeaponRef.transform.localScale = savedWeaponScale;
+                if (!WeaponGripAligner.AlignWeaponToHand(rightHand, oldWeaponRef.transform, newAnim))
+                {
+                    oldWeaponRef.transform.localPosition = savedWeaponPos;
+                    oldWeaponRef.transform.localRotation = savedWeaponRot;
+                    oldWeaponRef.transform.localScale = savedWeaponScale;
+                }
+                WeaponElementalVfx.ApplyToWeapon(oldWeaponRef);
             }
         }
         else if (oldWeaponRef != null)
@@ -136,5 +132,86 @@ public static class PlayerCharacterLoader
             pa.visualModel = newBody.transform;
             pa.RefreshWeapon(0);
         }
+    }
+
+    // Gắn đúng vũ khí khởi đầu và căn chỉnh vừa khít lòng bàn tay cho nhân vật mặc định
+    private static void AlignDefaultCharacterWeapon(GameObject playerRoot, CharacterProfile profile, PlayerAttack pa)
+    {
+        Animator anim = playerRoot.GetComponentInChildren<Animator>(true);
+        Transform hand = WeaponShopManager.FindPlayerHandBone(playerRoot, out GameObject existingWeapon);
+        if (hand == null)
+        {
+            hand = FindRightHandBone(playerRoot.transform, anim);
+        }
+        if (hand == null) return;
+
+        GameObject startWeaponPrefab = ResolveStartingWeaponPrefab(profile);
+        GameObject activeWeapon = existingWeapon;
+        if (startWeaponPrefab != null)
+        {
+            string desiredName = WeaponUpgradeConfigSO.CleanWeaponName(startWeaponPrefab.name);
+            string currentName = existingWeapon != null ? WeaponUpgradeConfigSO.CleanWeaponName(existingWeapon.name) : string.Empty;
+            if (activeWeapon == null || !string.Equals(currentName, desiredName, System.StringComparison.OrdinalIgnoreCase))
+            {
+                if (existingWeapon != null)
+                {
+                    existingWeapon.transform.SetParent(null, false);
+                    existingWeapon.SetActive(false);
+                    Object.Destroy(existingWeapon);
+                }
+
+                activeWeapon = Object.Instantiate(startWeaponPrefab, hand);
+                activeWeapon.name = startWeaponPrefab.name;
+            }
+        }
+
+        if (activeWeapon != null)
+        {
+            WeaponGripAligner.AlignWeaponToHand(hand, activeWeapon.transform, anim);
+            WeaponElementalVfx.ApplyToWeapon(activeWeapon);
+        }
+
+        if (pa != null)
+        {
+            pa.RefreshWeapon(0);
+        }
+    }
+
+    // Ưu tiên lấy đúng prefab kiếm khởi đầu mặc định dùng chung cho toàn bộ nhân vật
+    private static GameObject ResolveStartingWeaponPrefab(CharacterProfile profile)
+    {
+        CharacterRosterConfig roster = SelectedCharacterStore.GetRoster();
+        CharacterProfile defaultHero = roster != null ? roster.GetProfile(0) : null;
+        if (defaultHero != null && defaultHero.startingWeaponPrefab != null)
+        {
+            return defaultHero.startingWeaponPrefab;
+        }
+
+        if (profile != null && profile.startingWeaponPrefab != null)
+        {
+            return profile.startingWeaponPrefab;
+        }
+
+#if UNITY_EDITOR
+        return UnityEditor.AssetDatabase.LoadAssetAtPath<GameObject>(DefaultStartingSwordPath);
+#else
+        return null;
+#endif
+    }
+
+    // Tìm xương bàn tay phải của nhân vật theo Animator Humanoid hoặc tên xương Mixamo
+    private static Transform FindRightHandBone(Transform root, Animator anim)
+    {
+        Transform rightHand = anim != null ? anim.GetBoneTransform(HumanBodyBones.RightHand) : null;
+        if (rightHand != null) return rightHand;
+
+        foreach (Transform t in root.GetComponentsInChildren<Transform>(true))
+        {
+            if (t.name == "mixamorig:RightHand")
+            {
+                return t;
+            }
+        }
+        return null;
     }
 }

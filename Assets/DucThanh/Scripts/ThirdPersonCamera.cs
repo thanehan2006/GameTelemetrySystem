@@ -1,21 +1,19 @@
 using UnityEngine;
 
-/// <summary>
-/// Camera góc nhìn thứ ba phong cách Action AAA (Over-the-Shoulder, Collision Avoidance, Smooth Damping, Dynamic FOV).
-/// </summary>
 [DefaultExecutionOrder(50)]
+// Điều khiển camera góc nhìn thứ ba xoay quanh nhân vật, tránh xuyên vật cản và rung khi trúng đòn
 public class ThirdPersonCamera : MonoBehaviour
 {
     public static ThirdPersonCamera Instance { get; private set; }
 
-    [Header("Target & Framing (AAA Over-the-Shoulder)")]
+    [Header("Target & Framing")]
     public Transform target;
     public float distance = 4.2f;
     public float minDistance = 2.6f;
     public float maxDistance = 6.5f;
     public float scrollZoomSpeed = 2.0f;
     public float height = 1.6f;
-    [Tooltip("Lệch vai phải giúp nhân vật nằm gọn ở 1/3 trái màn hình, thoáng tầm nhìn chiến đấu.")]
+
     public float shoulderOffset = 0.55f;
 
     [Header("Orbit & Damping")]
@@ -54,6 +52,7 @@ public class ThirdPersonCamera : MonoBehaviour
     private float fovPunch;
     private readonly RaycastHit[] collisionHitBuffer = new RaycastHit[16];
 
+    // Tìm mục tiêu Player trong scene
     void Awake()
     {
         Instance = this;
@@ -67,6 +66,7 @@ public class ThirdPersonCamera : MonoBehaviour
         if (Instance == this) Instance = null;
     }
 
+    // Thiết lập góc nhìn ban đầu phía sau nhân vật
     void Start()
     {
         ResolveTarget();
@@ -90,6 +90,7 @@ public class ThirdPersonCamera : MonoBehaviour
         }
     }
 
+    // Cập nhật vị trí, xoay theo chuột và né va chạm tường sau bước di chuyển
     void LateUpdate()
     {
         if (target == null)
@@ -106,9 +107,7 @@ public class ThirdPersonCamera : MonoBehaviour
         UpdateDynamicFov();
     }
 
-    /// <summary>
-    /// Kích hoạt rung camera nhẹ khi va chạm hoặc tung đòn đánh mạnh.
-    /// </summary>
+    // Tạo hiệu ứng rung camera khi chém trúng, đỡ đòn hoặc nổ
     public void AddCameraShake(float intensity, float duration)
     {
         shakeIntensity = Mathf.Max(shakeIntensity, intensity);
@@ -116,9 +115,7 @@ public class ThirdPersonCamera : MonoBehaviour
         shakeTimer = shakeDuration;
     }
 
-    /// <summary>
-    /// Tạo cú giật FOV tức thì (Parry hoàn hảo, chém nặng, Boss cuồng nộ) rồi hồi mượt về FOV gốc.
-    /// </summary>
+    // Thay đổi nhẹ FOV tức thời để tăng lực va chạm
     public void AddFovPunch(float deltaFov)
     {
         fovPunch = Mathf.Clamp(fovPunch + deltaFov, -8f, 12f);
@@ -146,12 +143,18 @@ public class ThirdPersonCamera : MonoBehaviour
         }
     }
 
+    // Đọc chuyển động chuột để xoay góc nhìn ngang và dọc có giới hạn
     private void HandleInput()
     {
+        float mouseX = 0f;
+        float mouseY = 0f;
+
         if (Cursor.lockState == CursorLockMode.Locked)
         {
-            targetYaw += Input.GetAxisRaw("Mouse X") * mouseSensitivity;
-            targetPitch = Mathf.Clamp(targetPitch - Input.GetAxisRaw("Mouse Y") * mouseSensitivity, minPitch, maxPitch);
+            mouseX = Input.GetAxisRaw("Mouse X");
+            mouseY = Input.GetAxisRaw("Mouse Y");
+            targetYaw += mouseX * mouseSensitivity;
+            targetPitch = Mathf.Clamp(targetPitch - mouseY * mouseSensitivity, minPitch, maxPitch);
 
             float scroll = Input.GetAxis("Mouse ScrollWheel");
             if (Mathf.Abs(scroll) > 0.001f)
@@ -159,8 +162,29 @@ public class ThirdPersonCamera : MonoBehaviour
                 desiredDistance = Mathf.Clamp(desiredDistance - scroll * scrollZoomSpeed, minDistance, maxDistance);
             }
         }
+
+        EnemyHealth lockedEnemy = PlayerAttack.CurrentLockedTarget;
+        if (lockedEnemy != null && !lockedEnemy.IsDead && target != null)
+        {
+            Vector3 toEnemy = lockedEnemy.transform.position - target.position;
+            toEnemy.y = 0f;
+            if (toEnemy.sqrMagnitude > 0.36f)
+            {
+                float dt = Time.deltaTime;
+                if (Mathf.Abs(mouseX) < 0.35f)
+                {
+                    float desiredLockYaw = Mathf.Atan2(toEnemy.x, toEnemy.z) * Mathf.Rad2Deg;
+                    targetYaw = Mathf.LerpAngle(targetYaw, desiredLockYaw, 1f - Mathf.Exp(-6.8f * dt));
+                }
+                if (Mathf.Abs(mouseY) < 0.35f)
+                {
+                    targetPitch = Mathf.Lerp(targetPitch, 18f, 1f - Mathf.Exp(-3.5f * dt));
+                }
+            }
+        }
     }
 
+    // Nội suy vị trí và góc quay camera theo điểm tựa nhân vật
     private void UpdateCameraTransform()
     {
         float dt = Time.deltaTime;
@@ -207,6 +231,7 @@ public class ThirdPersonCamera : MonoBehaviour
         cam.fieldOfView = Mathf.Lerp(cam.fieldOfView, targetFov, t);
     }
 
+    // Thu gần camera khi tia kiểm tra va chạm với địa hình hoặc vật thể
     private float ResolveCollisionDistance(Vector3 origin, Quaternion rot, float maxDist)
     {
         Vector3 dir = -(rot * Vector3.forward);

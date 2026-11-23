@@ -1,14 +1,9 @@
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.Rendering;
 
-/// <summary>
-/// Hệ thống tấn công cận chiến của Player:
-/// - Khi nhấn Chuột Trái: thực hiện trọn vẹn animation Atk1 mượt mà từ đầu đến cuối (không bị ngắt sớm ở 0.1s khi đang giữ WASD).
-/// - Tự động hướng mặt mượt mà (tốc độ vừa phải, không giật cục) về phía quái gần nhất hoặc hướng di chuyển.
-/// - Gây sát thương + đẩy lùi (Knockback) khi collider vũ khí trên tay chạm vào Enemy trong lúc vung đòn.
-/// - Nếu giữ hoặc nhấp tiếp Chuột Trái, sẽ nối đòn tiếp theo ngay sau khi hết animation hiện tại.
-/// </summary>
 [DefaultExecutionOrder(-10)]
+// Xử lý combo tấn công cận chiến, tự xoay nhắm mục tiêu, khóa mục tiêu và phát hiện trúng đòn
 public class PlayerAttack : MonoBehaviour
 {
     private static readonly int AttackHash = Animator.StringToHash("Attack");
@@ -25,19 +20,23 @@ public class PlayerAttack : MonoBehaviour
     private static Gradient[] cachedTrailGradients;
 
     [Header("Attack Settings")]
-    public int attackDamage = 35;
+    public int attackDamage = 30;
     public float knockbackForce = 7.5f;
-    [Tooltip("Tốc độ phát animation tấn công (1.2 = nhanh gọn vừa phải, thực hiện đủ toàn bộ động tác)")]
-    public float attackAnimSpeed = 1.2f;
-    public float attackCooldown = 0.15f;
 
-    [Header("Auto-Target & Turn Speed (Quay mặt mượt khi đánh)")]
+    public float attackAnimSpeed = 1.3f;
+    public float attackCooldown = 0.18f;
+
+    [Header("Auto-Target & Turn Speed")]
     public float autoTargetRadius = 4.0f;
-    [Tooltip("Tốc độ quay mặt của Player về phía quái khi ấn đánh (càng nhỏ quay càng đầm và mượt)")]
+
     public float attackTurnSpeed = 7.0f;
     public float lungeSpeed = 2.5f;
     public float lungeDuration = 0.12f;
     public float lungeStopDistance = 1.3f;
+
+    [Header("Target Lock-On Settings")]
+    public float lockOnRadius = 18.0f;
+    public float maxLockKeepDistance = 22.0f;
 
     [Header("Hitbox Settings")]
     public float hitboxStartDelay = 0.08f;
@@ -48,6 +47,10 @@ public class PlayerAttack : MonoBehaviour
     public BoxCollider weaponCollider;
 
     public bool IsAttacking { get; private set; }
+    public static EnemyHealth CurrentLockedTarget { get; private set; }
+
+    private static readonly int BaseColorId = Shader.PropertyToID("_BaseColor");
+    private static readonly int ColorId = Shader.PropertyToID("_Color");
 
     private Animator animator;
     private PlayerController playerController;
@@ -56,11 +59,20 @@ public class PlayerAttack : MonoBehaviour
     private EnemyHealth currentTargetHealth;
     private Vector3 attackFacingDir = Vector3.forward;
 
+    private readonly List<EnemyHealth> lockCandidates = new List<EnemyHealth>(16);
+    private GameObject lockIndicatorRoot;
+    private Transform lockGroundRingT;
+    private Transform lockReticleRootT;
+    private Transform lockOuterDiamondT;
+    private Transform lockInnerDiamondT;
+    private MaterialPropertyBlock lockPropBlock;
+
     private readonly List<int> availableAttackIndices = new List<int>(3);
     private int currentAttackStateHash = AttackStateHashes[0];
     private int currentAttackVariant = 0;
     private int lastAttackVariant = -1;
     private TrailRenderer weaponTrail;
+    private WeaponElementalVfx activeWeaponVfx;
 
     private float nextAttackTime;
     private float attackStartTime;
@@ -69,6 +81,7 @@ public class PlayerAttack : MonoBehaviour
     private readonly HashSet<EnemyHealth> hitEnemiesInSwing = new HashSet<EnemyHealth>();
     private readonly Collider[] hitBuffer = new Collider[32];
 
+    // Lấy tham chiếu điều khiển nhân vật và lưu trữ hitbox vũ khí
     void Awake()
     {
         animator = GetComponentInChildren<Animator>();
@@ -85,6 +98,7 @@ public class PlayerAttack : MonoBehaviour
         EnsureWeaponTrail();
     }
 
+    // Nạp danh sách animation đánh, khởi tạo vệt chém và vòng ngắm khóa mục tiêu
     void Start()
     {
         attackAnimSpeed = Mathf.Clamp(attackAnimSpeed, 1.0f, 1.5f);
@@ -97,6 +111,7 @@ public class PlayerAttack : MonoBehaviour
         EnsureWeaponTrail();
     }
 
+    // Xử lý input chuột trái đánh, hủy đòn để đỡ đòn và điều khiển khóa mục tiêu
     void Update()
     {
         if (GameOverManager.IsGameOver || WeaponShopManager.IsShopOpen)
@@ -116,6 +131,8 @@ public class PlayerAttack : MonoBehaviour
         bool attackDown = isCursorLocked && wasCursorLocked && Input.GetMouseButtonDown(0);
         bool attackHeld = isCursorLocked && wasCursorLocked && Input.GetMouseButton(0);
 
+        HandleLockOnInput();
+
         bool isBlocking = playerController != null && playerController.IsBlocking;
         if (isBlocking)
         {
@@ -129,10 +146,8 @@ public class PlayerAttack : MonoBehaviour
             float elapsed = Time.time - attackStartTime;
             animator.speed = attackAnimSpeed;
 
-            // Quay mặt từ từ, mượt mà về phía mục tiêu hoặc hướng điều hướng trong suốt đòn đánh
             UpdateSmoothAttackRotation(elapsed);
 
-            // Bước tiến nhẹ có kiểm soát ở đầu đòn đánh
             if (elapsed <= lungeDuration)
             {
                 UpdateCombatLunge(elapsed);
@@ -142,13 +157,11 @@ public class PlayerAttack : MonoBehaviour
                 playerController.StopCombatLunge();
             }
 
-            // Ghi nhận lệnh đánh tiếp theo (Input Buffer), nhưng ĐỢI hết animation hiện tại mới phát đòn mới
             if (attackDown && elapsed > 0.20f)
             {
                 queuedNextAttack = true;
             }
 
-            // Đợi thực hiện HẾT animation Atk1 rồi mới chuyển trạng thái
             if (IsAttackAnimationFinished(elapsed))
             {
                 if (queuedNextAttack || attackHeld)
@@ -169,8 +182,11 @@ public class PlayerAttack : MonoBehaviour
         wasCursorLocked = isCursorLocked;
     }
 
+    // Cập nhật vị trí và hiệu ứng xoay vòng ngắm trên quái đang khóa
     void LateUpdate()
     {
+        UpdateLockOnVisualIndicator();
+
         if (!IsAttacking || GameOverManager.IsGameOver || WeaponShopManager.IsShopOpen) return;
 
         float elapsed = Time.time - attackStartTime;
@@ -182,6 +198,21 @@ public class PlayerAttack : MonoBehaviour
         CheckWeaponHit();
     }
 
+    private void OnDisable()
+    {
+        ClearLockedTarget();
+    }
+
+    private void OnDestroy()
+    {
+        ClearLockedTarget();
+        if (lockIndicatorRoot != null)
+        {
+            Destroy(lockIndicatorRoot);
+        }
+    }
+
+    // Kích hoạt đòn đánh tiếp theo trong chuỗi combo và phát VFX vệt chém
     private void PerformAttack()
     {
         if (availableAttackIndices.Count == 0)
@@ -197,18 +228,32 @@ public class PlayerAttack : MonoBehaviour
         attackStartTime = Time.time;
         hitEnemiesInSwing.Clear();
 
-        // Tìm hướng quái gần nhất (hoặc hướng phím di chuyển), KHÔNG xoay tức thì mà để Update xoay mượt
         ResolveAttackDirectionAndTarget();
 
         animator.speed = attackAnimSpeed;
         animator.ResetTrigger(CancelAttackHash);
         animator.ResetTrigger(AttackHash);
 
-        // Phát ngẫu nhiên 1 trong 3 chiêu thức (Atk1 chém chéo, Atk2 chém ngang, Atk3 xoay 360° tầm thấp)
         animator.CrossFadeInFixedTime(currentAttackStateHash, 0.06f, 0, 0f);
         UpdateWeaponTrailTheme(currentAttackVariant);
         SetWeaponTrailEmitting(true);
-        CombatVfxManager.SpawnSlashArc(transform.position, attackFacingDir, currentAttackVariant);
+        if (activeWeaponVfx != null)
+        {
+            activeWeaponVfx.SetAttackSurge(true);
+            WeaponVfxProfile p = activeWeaponVfx.Profile;
+            CombatVfxManager.SpawnSlashArc(
+                transform.position,
+                attackFacingDir,
+                currentAttackVariant,
+                p.primaryColor,
+                p.coreColor,
+                p.secondaryColor,
+                p.arcScaleMult);
+        }
+        else
+        {
+            CombatVfxManager.SpawnSlashArc(transform.position, attackFacingDir, currentAttackVariant);
+        }
         GameAudioManager.PlaySwordSwing();
     }
 
@@ -250,6 +295,7 @@ public class PlayerAttack : MonoBehaviour
         return pick;
     }
 
+    // Xoay mượt nhân vật về phía quái ở pha đầu của đòn chém
     private void UpdateSmoothAttackRotation(float elapsed)
     {
         if (playerController == null) return;
@@ -274,12 +320,25 @@ public class PlayerAttack : MonoBehaviour
             }
         }
 
-        // Xoay mượt (instant = false) với tốc độ vừa phải attackTurnSpeed
         playerController.RotateVisualTowards(attackFacingDir, attackTurnSpeed, false);
     }
 
+    // Xác định mục tiêu ưu tiên gần nhất theo hướng nhìn hoặc đang khóa
     private void ResolveAttackDirectionAndTarget()
     {
+        if (CurrentLockedTarget != null && !CurrentLockedTarget.IsDead)
+        {
+            Vector3 toLocked = CurrentLockedTarget.transform.position - transform.position;
+            toLocked.y = 0f;
+            if (toLocked.sqrMagnitude <= lockOnRadius * lockOnRadius && toLocked.sqrMagnitude > 0.001f)
+            {
+                currentTargetHealth = CurrentLockedTarget;
+                currentTargetEnemy = CurrentLockedTarget.transform;
+                attackFacingDir = toLocked.normalized;
+                return;
+            }
+        }
+
         currentTargetHealth = FindBestTargetEnemy();
         currentTargetEnemy = currentTargetHealth != null ? currentTargetHealth.transform : null;
         if (currentTargetEnemy != null)
@@ -345,6 +404,7 @@ public class PlayerAttack : MonoBehaviour
         return bestTarget;
     }
 
+    // Tạo bước đệm tiến tới ngắn giúp cảm giác đánh chắc tay
     private void UpdateCombatLunge(float elapsed)
     {
         if (playerController == null || elapsed > lungeDuration)
@@ -375,7 +435,7 @@ public class PlayerAttack : MonoBehaviour
 
     private bool IsAttackAnimationFinished(float elapsed)
     {
-        // Đảm bảo đã qua giai đoạn blend vào đòn đánh hiện tại (tối thiểu 0.25s)
+
         if (elapsed <= 0.25f) return false;
 
         AnimatorStateInfo state = animator.GetCurrentAnimatorStateInfo(0);
@@ -410,6 +470,7 @@ public class PlayerAttack : MonoBehaviour
         }
     }
 
+    // Ngắt ngay đòn đánh dở để ưu tiên thao tác đỡ đòn của người chơi
     public void CancelAttackForBlock()
     {
         if (!IsAttacking) return;
@@ -435,6 +496,7 @@ public class PlayerAttack : MonoBehaviour
         queuedNextAttack = false;
         hitEnemiesInSwing.Clear();
         SetWeaponTrailEmitting(false);
+        if (activeWeaponVfx != null) activeWeaponVfx.SetAttackSurge(false);
 
         if (animator != null)
         {
@@ -447,6 +509,7 @@ public class PlayerAttack : MonoBehaviour
         }
     }
 
+    // Quét collider kẻ địch trong vùng chém để tính sát thương và đẩy lùi
     private void CheckWeaponHit()
     {
         if (weaponCollider == null)
@@ -466,7 +529,6 @@ public class PlayerAttack : MonoBehaviour
         int hitCount = Physics.OverlapBoxNonAlloc(worldCenter, halfExtents, hitBuffer, wt.rotation, enemyLayers, QueryTriggerInteraction.Collide);
         ProcessHitColliders(hitBuffer, hitCount, worldCenter);
 
-        // Chiêu Atk3 (Xoay 360° tầm thấp) quét thêm vòng AoE xung quanh Player
         if (currentAttackVariant == 2 && (Time.time - attackStartTime) >= 0.14f)
         {
             Vector3 spinCenter = transform.position + Vector3.up * 0.85f;
@@ -508,10 +570,27 @@ public class PlayerAttack : MonoBehaviour
                 Vector3 hitDir = enemy.transform.position - transform.position;
                 bool heavyHit = enemy.isBoss || dealtDamage >= 55 || currentAttackVariant == 2;
                 CombatVfxManager.SpawnBloodHit(hitPoint, hitDir, heavyHit);
+                Color dmgColor = heavyHit ? new Color(1f, 0.80f, 0.22f) : Color.white;
+                if (activeWeaponVfx != null)
+                {
+                    WeaponVfxProfile wp = activeWeaponVfx.Profile;
+                    CombatVfxManager.SpawnElementalHitBurst(
+                        hitPoint,
+                        hitDir,
+                        wp.primaryColor,
+                        wp.coreColor,
+                        wp.secondaryColor,
+                        wp.tier,
+                        heavyHit);
+                    if (wp.tier >= 3 && heavyHit)
+                    {
+                        dmgColor = Color.Lerp(wp.primaryColor, wp.coreColor, 0.42f);
+                    }
+                }
                 CombatVfxManager.SpawnFloatingText(
                     hitPoint + Vector3.up * 0.55f,
                     heavyHit ? $"{dealtDamage}!" : $"{dealtDamage}",
-                    heavyHit ? new Color(1f, 0.80f, 0.22f) : Color.white,
+                    dmgColor,
                     heavyHit ? 1.12f : 0.90f,
                     0.82f);
                 CombatVfxManager.TriggerHitStop(heavyHit ? 0.036f : 0.016f, heavyHit ? 0.10f : 0.18f);
@@ -526,6 +605,7 @@ public class PlayerAttack : MonoBehaviour
         }
     }
 
+    // Cập nhật sát thương cộng thêm và vệt vũ khí khi đổi vũ khí mới
     public void RefreshWeapon(int bonusDamage = 0)
     {
         if (bonusDamage != 0)
@@ -535,6 +615,7 @@ public class PlayerAttack : MonoBehaviour
 
         weaponCollider = null;
         weaponTrail = null;
+        activeWeaponVfx = null;
         hitEnemiesInSwing.Clear();
         ResolveWeaponCollider();
         EnsureWeaponTrail();
@@ -544,29 +625,42 @@ public class PlayerAttack : MonoBehaviour
     {
         if (weaponCollider == null) return;
 
+        float topY = weaponCollider.center.y + weaponCollider.size.y * 0.5f;
+        float botY = weaponCollider.center.y - weaponCollider.size.y * 0.5f;
+        float tipOffsetY = Mathf.Abs(botY) > Mathf.Abs(topY) * 1.4f
+            ? weaponCollider.center.y - weaponCollider.size.y * 0.42f
+            : weaponCollider.center.y + weaponCollider.size.y * 0.42f;
+        Vector3 tipLocalPos = new Vector3(weaponCollider.center.x, tipOffsetY, weaponCollider.center.z);
+        float desiredTrailWidth = activeWeaponVfx != null ? activeWeaponVfx.Profile.trailWidth : 0.30f;
+
         Transform existing = weaponCollider.transform.Find("WeaponSlashTrail");
         if (existing != null)
         {
+            existing.localPosition = tipLocalPos;
             weaponTrail = existing.GetComponent<TrailRenderer>();
-            if (weaponTrail != null) weaponTrail.emitting = false;
+            if (weaponTrail != null)
+            {
+                weaponTrail.startWidth = desiredTrailWidth;
+                weaponTrail.emitting = false;
+                UpdateWeaponTrailTheme(currentAttackVariant);
+            }
             return;
         }
 
         GameObject trailObj = new GameObject("WeaponSlashTrail");
         trailObj.transform.SetParent(weaponCollider.transform, false);
-        // Đặt gần đầu lưỡi vũ khí theo bounds của BoxCollider
-        trailObj.transform.localPosition = weaponCollider.center + new Vector3(0f, weaponCollider.size.y * 0.42f, 0f);
+        trailObj.transform.localPosition = tipLocalPos;
 
         weaponTrail = trailObj.AddComponent<TrailRenderer>();
         weaponTrail.time = 0.19f;
         weaponTrail.minVertexDistance = 0.04f;
-        weaponTrail.startWidth = 0.30f;
+        weaponTrail.startWidth = desiredTrailWidth;
         weaponTrail.endWidth = 0.02f;
         weaponTrail.material = CombatVfxManager.GetWeaponTrailMaterial();
         weaponTrail.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
         weaponTrail.receiveShadows = false;
 
-        UpdateWeaponTrailTheme(0);
+        UpdateWeaponTrailTheme(currentAttackVariant);
         weaponTrail.emitting = false;
     }
 
@@ -574,6 +668,12 @@ public class PlayerAttack : MonoBehaviour
     {
         if (weaponTrail == null) EnsureWeaponTrail();
         if (weaponTrail == null) return;
+
+        if (activeWeaponVfx != null)
+        {
+            weaponTrail.colorGradient = activeWeaponVfx.BuildTrailGradient(attackVariant);
+            return;
+        }
 
         EnsureTrailGradients();
         int idx = Mathf.Clamp(attackVariant, 0, cachedTrailGradients.Length - 1);
@@ -657,6 +757,11 @@ public class PlayerAttack : MonoBehaviour
             Transform child = hand.GetChild(i);
             if (child.name.StartsWith("mixamorig:")) continue;
 
+            if (child.localPosition.sqrMagnitude < 0.0001f && Quaternion.Angle(child.localRotation, Quaternion.identity) < 1f)
+            {
+                WeaponGripAligner.AlignWeaponToHand(hand, child, animator);
+            }
+
             MeshFilter mf = child.GetComponentInChildren<MeshFilter>();
             if (mf != null && mf.sharedMesh != null)
             {
@@ -668,8 +773,7 @@ public class PlayerAttack : MonoBehaviour
                     box.center = b.center;
                     box.size = b.size;
                 }
-                box.isTrigger = true;
-                weaponCollider = box;
+                BindResolvedWeapon(box, child.gameObject);
                 return;
             }
 
@@ -682,10 +786,20 @@ public class PlayerAttack : MonoBehaviour
                     box = rend.gameObject.AddComponent<BoxCollider>();
                     box.size = Vector3.one * 0.3f;
                 }
-                box.isTrigger = true;
-                weaponCollider = box;
+                BindResolvedWeapon(box, child.gameObject);
                 return;
             }
+        }
+    }
+
+    private void BindResolvedWeapon(BoxCollider box, GameObject weaponRoot)
+    {
+        box.isTrigger = true;
+        weaponCollider = box;
+        activeWeaponVfx = weaponRoot.GetComponent<WeaponElementalVfx>();
+        if (activeWeaponVfx == null)
+        {
+            activeWeaponVfx = WeaponElementalVfx.ApplyToWeapon(weaponRoot);
         }
     }
 
@@ -730,6 +844,242 @@ public class PlayerAttack : MonoBehaviour
             || Input.GetKey(KeyCode.S) || Input.GetKey(KeyCode.D)
             || Input.GetKey(KeyCode.UpArrow) || Input.GetKey(KeyCode.DownArrow)
             || Input.GetKey(KeyCode.LeftArrow) || Input.GetKey(KeyCode.RightArrow);
+    }
+
+    private void HandleLockOnInput()
+    {
+
+        if (CurrentLockedTarget != null)
+        {
+            if (CurrentLockedTarget.IsDead)
+            {
+                AcquireLockOnTarget(cycleNext: false);
+            }
+            else
+            {
+                Vector3 diff = CurrentLockedTarget.transform.position - transform.position;
+                diff.y = 0f;
+                if (diff.sqrMagnitude > maxLockKeepDistance * maxLockKeepDistance)
+                {
+                    ClearLockedTarget();
+                }
+            }
+        }
+
+        if (Input.GetMouseButtonDown(2) || Input.GetKeyDown(KeyCode.Q))
+        {
+            if (CurrentLockedTarget != null)
+            {
+                ClearLockedTarget();
+            }
+            else
+            {
+                AcquireLockOnTarget(cycleNext: false);
+            }
+            return;
+        }
+
+        if (Input.GetKeyDown(KeyCode.Tab))
+        {
+            if (CurrentLockedTarget == null)
+            {
+                AcquireLockOnTarget(cycleNext: false);
+            }
+            else
+            {
+                AcquireLockOnTarget(cycleNext: true);
+            }
+        }
+    }
+
+    // Tìm, khóa hoặc chuyển đổi sang kẻ địch tiếp theo trong tầm nhìn
+    public void AcquireLockOnTarget(bool cycleNext)
+    {
+        lockCandidates.Clear();
+        int count = Physics.OverlapSphereNonAlloc(transform.position, lockOnRadius, hitBuffer, enemyLayers, QueryTriggerInteraction.Collide);
+
+        for (int i = 0; i < count; i++)
+        {
+            Collider c = hitBuffer[i];
+            if (c == null || c.transform == transform || c.transform.IsChildOf(transform)) continue;
+
+            EnemyHealth eh = c.GetComponentInParent<EnemyHealth>();
+            if (eh == null || eh.IsDead) continue;
+
+            Vector3 toEnemy = eh.transform.position - transform.position;
+            toEnemy.y = 0f;
+            if (toEnemy.sqrMagnitude > lockOnRadius * lockOnRadius) continue;
+
+            if (!lockCandidates.Contains(eh))
+            {
+                lockCandidates.Add(eh);
+            }
+        }
+
+        if (lockCandidates.Count == 0)
+        {
+            ClearLockedTarget();
+            return;
+        }
+
+        Vector3 lookDir = Camera.main != null ? Camera.main.transform.forward : (playerController != null ? playerController.GetVisualForward() : transform.forward);
+        lookDir.y = 0f;
+        if (lookDir.sqrMagnitude < 0.001f) lookDir = transform.forward;
+        lookDir.Normalize();
+
+        lockCandidates.Sort((a, b) =>
+        {
+            float scoreA = ComputeLockScore(a, lookDir);
+            float scoreB = ComputeLockScore(b, lookDir);
+            return scoreA.CompareTo(scoreB);
+        });
+
+        if (!cycleNext || CurrentLockedTarget == null)
+        {
+            CurrentLockedTarget = lockCandidates[0];
+        }
+        else
+        {
+            int curIdx = lockCandidates.IndexOf(CurrentLockedTarget);
+            if (curIdx >= 0 && lockCandidates.Count > 1)
+            {
+                CurrentLockedTarget = lockCandidates[(curIdx + 1) % lockCandidates.Count];
+            }
+            else
+            {
+                CurrentLockedTarget = lockCandidates[0];
+            }
+        }
+    }
+
+    private float ComputeLockScore(EnemyHealth eh, Vector3 lookDir)
+    {
+        if (eh == null) return float.MaxValue;
+        Vector3 toEnemy = eh.transform.position - transform.position;
+        toEnemy.y = 0f;
+        float dist = toEnemy.magnitude;
+        if (dist < 0.01f) return 0f;
+        float anglePenalty = 1f - Vector3.Dot(lookDir, toEnemy / dist);
+        float bossBonus = eh.isBoss ? -1.5f : 0f;
+        return dist + anglePenalty * 4.5f + bossBonus;
+    }
+
+    // Hủy trạng thái khóa mục tiêu hiện tại
+    public static void ClearLockedTarget()
+    {
+        CurrentLockedTarget = null;
+    }
+
+    private void EnsureLockOnIndicator()
+    {
+        if (lockIndicatorRoot != null) return;
+
+        lockPropBlock = new MaterialPropertyBlock();
+        lockIndicatorRoot = new GameObject("TargetLockOnIndicator");
+        DontDestroyOnLoad(lockIndicatorRoot);
+
+        GameObject ringGo = new GameObject("LockGroundRing");
+        ringGo.transform.SetParent(lockIndicatorRoot.transform, false);
+        MeshFilter rmf = ringGo.AddComponent<MeshFilter>();
+        rmf.sharedMesh = CombatVfxManager.GetHorizontalQuadMesh();
+        MeshRenderer rmr = ringGo.AddComponent<MeshRenderer>();
+        rmr.sharedMaterial = CombatVfxManager.GetAdditiveRingMaterial();
+        rmr.shadowCastingMode = ShadowCastingMode.Off;
+        rmr.receiveShadows = false;
+        SetIndicatorColor(rmr, new Color(2.3f, 0.72f, 0.18f, 0.92f));
+        lockGroundRingT = ringGo.transform;
+
+        GameObject reticleRoot = new GameObject("LockBodyReticle");
+        reticleRoot.transform.SetParent(lockIndicatorRoot.transform, false);
+        lockReticleRootT = reticleRoot.transform;
+
+        lockOuterDiamondT = CreateReticleDiamond("OuterDiamond", lockReticleRootT, 0.56f, new Color(2.4f, 0.65f, 0.18f, 0.95f));
+        lockInnerDiamondT = CreateReticleDiamond("InnerDiamond", lockReticleRootT, 0.34f, new Color(2.4f, 2.05f, 0.55f, 0.95f));
+
+        lockIndicatorRoot.SetActive(false);
+    }
+
+    private Transform CreateReticleDiamond(string name, Transform parent, float size, Color hdrColor)
+    {
+        GameObject go = new GameObject(name);
+        go.transform.SetParent(parent, false);
+        go.transform.localScale = new Vector3(size, 1f, size);
+        MeshFilter mf = go.AddComponent<MeshFilter>();
+        mf.sharedMesh = CombatVfxManager.GetHorizontalQuadMesh();
+        MeshRenderer mr = go.AddComponent<MeshRenderer>();
+        mr.sharedMaterial = CombatVfxManager.GetAdditiveRingMaterial();
+        mr.shadowCastingMode = ShadowCastingMode.Off;
+        mr.receiveShadows = false;
+        SetIndicatorColor(mr, hdrColor);
+        return go.transform;
+    }
+
+    private void SetIndicatorColor(MeshRenderer mr, Color c)
+    {
+        if (mr == null || lockPropBlock == null) return;
+        lockPropBlock.SetColor(BaseColorId, c);
+        lockPropBlock.SetColor(ColorId, c);
+        mr.SetPropertyBlock(lockPropBlock);
+    }
+
+    private void UpdateLockOnVisualIndicator()
+    {
+        if (CurrentLockedTarget == null || CurrentLockedTarget.IsDead || GameOverManager.IsGameOver)
+        {
+            if (lockIndicatorRoot != null && lockIndicatorRoot.activeSelf)
+            {
+                lockIndicatorRoot.SetActive(false);
+            }
+            return;
+        }
+
+        EnsureLockOnIndicator();
+        if (!lockIndicatorRoot.activeSelf)
+        {
+            lockIndicatorRoot.SetActive(true);
+        }
+
+        Transform targetT = CurrentLockedTarget.transform;
+        CapsuleCollider col = CurrentLockedTarget.GetComponent<CapsuleCollider>();
+        float scaleY = Mathf.Max(0.5f, targetT.localScale.y);
+        float radius = col != null ? col.radius * scaleY : (CurrentLockedTarget.isBoss ? 1.1f : 0.55f);
+        float height = col != null ? col.height * scaleY : (CurrentLockedTarget.isBoss ? 2.6f : 1.85f);
+
+        Vector3 targetPos = targetT.position;
+        lockIndicatorRoot.transform.position = targetPos;
+
+        float t = Time.time;
+        float dt = Time.deltaTime;
+
+        if (lockGroundRingT != null)
+        {
+            float ringBase = Mathf.Clamp(radius * 3.8f, 1.8f, 4.4f);
+            float pulse = ringBase * (1f + Mathf.Sin(t * 5.5f) * 0.08f);
+            lockGroundRingT.localPosition = new Vector3(0f, 0.14f, 0f);
+            lockGroundRingT.localScale = new Vector3(pulse, 1f, pulse);
+            lockGroundRingT.Rotate(Vector3.up, 95f * dt, Space.Self);
+        }
+
+        if (lockReticleRootT != null && Camera.main != null)
+        {
+            Transform camT = Camera.main.transform;
+            Vector3 toCam = (camT.position - (targetPos + Vector3.up * (height * 0.56f))).normalized;
+            lockReticleRootT.localPosition = new Vector3(0f, height * 0.56f, 0f) + toCam * (radius * 0.65f + 0.25f);
+
+            lockReticleRootT.rotation = Quaternion.LookRotation(camT.up, -camT.forward);
+
+            float reticlePulse = 1f + Mathf.Sin(t * 6.5f) * 0.10f;
+            if (lockOuterDiamondT != null)
+            {
+                lockOuterDiamondT.localRotation = Quaternion.Euler(0f, t * 110f, 0f);
+                lockOuterDiamondT.localScale = new Vector3(0.56f * reticlePulse, 1f, 0.56f * reticlePulse);
+            }
+            if (lockInnerDiamondT != null)
+            {
+                lockInnerDiamondT.localRotation = Quaternion.Euler(0f, -t * 140f + 45f, 0f);
+                lockInnerDiamondT.localScale = new Vector3(0.34f, 1f, 0.34f);
+            }
+        }
     }
 
     private void OnDrawGizmosSelected()

@@ -2,9 +2,8 @@ using System.Security.Cryptography;
 
 namespace GameTelemetryAPI.Services
 {
-    /// <summary>
-    /// Mã hóa và kiểm tra mật khẩu an toàn bằng PBKDF2-HMAC-SHA256 kèm salt ngẫu nhiên.
-    /// </summary>
+
+    // Lớp tiện ích băm mật khẩu kèm salt ngẫu nhiên bằng PBKDF2-SHA256
     public static class PasswordHasherHelper
     {
         private const int SaltSize = 16;
@@ -12,6 +11,7 @@ namespace GameTelemetryAPI.Services
         private const int Iterations = 100_000;
         private const string Prefix = "$pbkdf2";
 
+        // Tạo chuỗi hash bảo mật từ mật khẩu gốc để lưu xuống cơ sở dữ liệu
         public static string Hash(string password)
         {
             byte[] salt = RandomNumberGenerator.GetBytes(SaltSize);
@@ -19,6 +19,7 @@ namespace GameTelemetryAPI.Services
             return $"{Prefix}${Iterations}${Convert.ToBase64String(salt)}${Convert.ToBase64String(hash)}";
         }
 
+        // Kiểm tra mật khẩu người dùng nhập có khớp với chuỗi hash đã lưu hay không
         public static bool Verify(string password, string storedHash)
         {
             if (string.IsNullOrWhiteSpace(password) || string.IsNullOrWhiteSpace(storedHash))

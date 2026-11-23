@@ -4,12 +4,7 @@ using UnityEngine.SceneManagement;
 using UnityEngine.UI;
 using TMPro;
 
-/// <summary>
-/// Điều khiển giao diện Đăng nhập / Đăng ký có mật khẩu với giao diện Dark Fantasy AAA:
-/// - Hình nền nghệ thuật Hiệp Sĩ Vanguard & Lửa Trại kèm hạt tàn lửa bay lên.
-/// - Thẻ đăng nhập/đăng ký kính tối Obsidian viền Vàng Kim sắc nét bên phải màn hình.
-/// - Hỗ trợ kiểm tra hợp lệ phía client, khóa nút khi đang gọi API, và phím tắt Tab / Enter.
-/// </summary>
+// Quản lý giao diện đăng nhập, đăng ký tài khoản người chơi và xác thực hợp lệ trước khi gọi API
 public class AuthUIController : MonoBehaviour
 {
     private const int MinUsernameLength = 3;
@@ -43,11 +38,12 @@ public class AuthUIController : MonoBehaviour
     private static readonly Color SuccessColor = new Color(0.28f, 0.95f, 0.52f, 1f);
     private static readonly Color InfoColor = new Color(1f, 0.86f, 0.42f, 1f);
 
-    [Header("Optional Pre-Baked UI References")]
+    [Header("UI References")]
     [SerializeField] private RectTransform keyArtRect;
 
     private Coroutine panelFadeRoutine;
 
+    // Tìm tham chiếu bổ sung và ẩn thông báo lỗi cũ
     private void Awake()
     {
         if (authApiClient == null)
@@ -61,6 +57,7 @@ public class AuthUIController : MonoBehaviour
         ConfigurePasswordField(registerConfirmPasswordInput);
     }
 
+    // Áp dụng giao diện nền tối và mở mặc định bảng đăng nhập
     private void Start()
     {
         Cursor.lockState = CursorLockMode.None;
@@ -80,6 +77,12 @@ public class AuthUIController : MonoBehaviour
         {
             if (keyArtRect == null) keyArtRect = bakedArt.GetComponent<RectTransform>();
 
+            TMP_Text bakedBadge = canvas.transform.Find("HeroBrandGroup/BrandBadge")?.GetComponent<TMP_Text>();
+            if (bakedBadge != null) bakedBadge.text = "ACTION ROGUELITE  •  DARK FANTASY";
+
+            TMP_Text bakedFooter = canvas.transform.Find("LoginFooterTag")?.GetComponent<TMP_Text>();
+            if (bakedFooter != null) bakedFooter.text = "3 CỨ ĐIỂM CHIẾN DỊCH   •   ĐẤU TRƯỜNG BOSS   •   VANGUARD";
+
             if (canvas.transform.Find("CampfireEmbersUI") == null)
             {
                 GameObject emberLayer = new GameObject("CampfireEmbersUI", typeof(RectTransform));
@@ -92,12 +95,13 @@ public class AuthUIController : MonoBehaviour
             return;
         }
 
-        ApplyAaaLoginTheme();
+        ApplyLoginTheme();
     }
 
+    // Hỗ trợ nhấn Tab chuyển ô nhập và Enter để gửi biểu mẫu nhanh
     private void Update()
     {
-        // Chuyển động zoom nhẹ tạo chiều sâu sống động cho hình nền
+
         if (keyArtRect != null)
         {
             float scale = 1.0f + Mathf.PingPong(Time.unscaledTime * 0.008f, 0.045f);
@@ -117,9 +121,8 @@ public class AuthUIController : MonoBehaviour
         }
     }
 
-    // ==================== AAA DARK FANTASY THEME ====================
-
-    private void ApplyAaaLoginTheme()
+    // Dựng ảnh nền, bố cục thẻ đăng nhập/đăng ký và hiệu ứng tàn lửa bay
+    private void ApplyLoginTheme()
     {
         Canvas canvas = FindFirstObjectByType<Canvas>();
         if (canvas == null) return;
@@ -129,15 +132,12 @@ public class AuthUIController : MonoBehaviour
             ? loginMessageText.font
             : (loginUsernameInput != null && loginUsernameInput.textComponent != null ? loginUsernameInput.textComponent.font : null);
 
-        // 1. Hình nền nghệ thuật Hiệp sĩ & Trại lửa (Assets/Resources/UI/LoginBg.jpg)
         RawImage keyArt = FantasyUiThemeHelper.CreateFullscreenKeyArt(canvas.transform, "UI/LoginBg", "LoginKeyArt");
         keyArtRect = keyArt.rectTransform;
 
-        // 2. Lớp chuyển tối mượt phía bên phải để thẻ Login nổi bật, bên trái giữ sáng rõ hiệp sĩ & lửa trại
         Image rightVeil = FantasyUiThemeHelper.CreateGradientOverlay(canvas.transform, "LoginRightGradient", true, new Color(0.03f, 0.045f, 0.08f, 1f));
         rightVeil.transform.SetSiblingIndex(1);
 
-        // 3. Tàn lửa ấm bay lên từ khu vực lửa trại bên trái
         GameObject emberLayer = new GameObject("CampfireEmbersUI", typeof(RectTransform));
         emberLayer.transform.SetParent(canvas.transform, false);
         emberLayer.transform.SetSiblingIndex(2);
@@ -145,7 +145,6 @@ public class AuthUIController : MonoBehaviour
         FloatingEmbersUI embers = emberLayer.AddComponent<FloatingEmbersUI>();
         embers.Initialize(28, 0.04f, 0.44f, new Color(1f, 0.62f, 0.16f, 1f), new Color(1f, 0.88f, 0.45f, 1f));
 
-        // 4. Logo Game & Thông tin bên trái màn hình (không che hiệp sĩ)
         GameObject brandGroup = new GameObject("HeroBrandGroup", typeof(RectTransform));
         brandGroup.transform.SetParent(canvas.transform, false);
         brandGroup.transform.SetSiblingIndex(3);
@@ -156,7 +155,7 @@ public class AuthUIController : MonoBehaviour
         brandRt.anchoredPosition = new Vector2(82f, -56f);
         brandRt.sizeDelta = new Vector2(720f, 165f);
 
-        TMP_Text badge = FantasyUiThemeHelper.CreateText(brandGroup.transform, "BrandBadge", "AEGIS TELEMETRY  •  ACTION ROGUELITE",
+        TMP_Text badge = FantasyUiThemeHelper.CreateText(brandGroup.transform, "BrandBadge", "ACTION ROGUELITE  •  DARK FANTASY",
             15f, FontStyles.Bold, FantasyUiThemeHelper.GoldBright, TextAlignmentOptions.Left, sharedFont);
         SetTopLeftRect(badge.rectTransform, 0f, 0f, 680f, 24f);
         badge.characterSpacing = 6f;
@@ -178,9 +177,8 @@ public class AuthUIController : MonoBehaviour
         SetTopLeftRect(heroSub.rectTransform, 0f, -118f, 680f, 34f);
         heroSub.characterSpacing = 5f;
 
-        // Thanh thông tin chân trang góc dưới-trái
         TMP_Text footerTag = FantasyUiThemeHelper.CreateText(canvas.transform, "LoginFooterTag",
-            "3 CỨ ĐIỂM RỪNG ORC   •   ĐẤU TRƯỜNG BOSS MỎ VÀNG   •   GAME TELEMETRY v1.0",
+            "3 CỨ ĐIỂM CHIẾN DỊCH   •   ĐẤU TRƯỜNG BOSS   •   VANGUARD",
             15f, FontStyles.Bold, new Color(0.76f, 0.80f, 0.88f, 0.72f), TextAlignmentOptions.Left, sharedFont);
         footerTag.transform.SetSiblingIndex(4);
         RectTransform ftRt = footerTag.rectTransform;
@@ -191,10 +189,8 @@ public class AuthUIController : MonoBehaviour
         ftRt.sizeDelta = new Vector2(900f, 28f);
         footerTag.characterSpacing = 2f;
 
-        // 5. Căn chỉnh & Style Thẻ Đăng Nhập (bên phải màn hình)
         StyleLoginCard(sharedFont);
 
-        // 6. Căn chỉnh & Style Thẻ Đăng Ký (bên phải màn hình)
         StyleRegisterCard(sharedFont);
     }
 
@@ -381,8 +377,7 @@ public class AuthUIController : MonoBehaviour
         panelFadeRoutine = null;
     }
 
-    // ==================== AUTH LOGIC (GIỮ NGUYÊN 100%) ====================
-
+    // Chuyển giao diện sang chế độ Đăng nhập
     public void ShowLoginPanel()
     {
         if (loginPanel != null) loginPanel.SetActive(true);
@@ -397,6 +392,7 @@ public class AuthUIController : MonoBehaviour
         }
     }
 
+    // Chuyển giao diện sang chế độ Đăng ký tài khoản
     public void ShowRegisterPanel()
     {
         GameAudioManager.PlayUiClick();
@@ -412,6 +408,7 @@ public class AuthUIController : MonoBehaviour
         }
     }
 
+    // Kiểm tra thông tin nhập và gửi yêu cầu đăng nhập tới AuthApiClient
     public void Login()
     {
         GameAudioManager.PlayUiClick();
@@ -462,6 +459,7 @@ public class AuthUIController : MonoBehaviour
         });
     }
 
+    // Kiểm tra tên tài khoản/mật khẩu hợp lệ và gửi yêu cầu đăng ký lên Backend
     public void Register()
     {
         GameAudioManager.PlayUiClick();

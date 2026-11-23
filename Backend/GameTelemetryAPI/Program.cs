@@ -1,14 +1,15 @@
 using Microsoft.EntityFrameworkCore;
 using GameTelemetryAPI.Data;
 
+// Khởi tạo ứng dụng web API và nạp cấu hình hệ thống
 var builder = WebApplication.CreateBuilder(args);
 
-// Add services to the container.
+// Đăng ký Controller, API Explorer và tài liệu Swagger
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
-// Kết nối Database SQL Server
+// Kết nối DbContext với cơ sở dữ liệu SQL Server
 builder.Services.AddDbContext<GameTelemetryContext>(options =>
     options.UseSqlServer(
         builder.Configuration.GetConnectionString("DefaultConnection")
@@ -17,7 +18,7 @@ builder.Services.AddDbContext<GameTelemetryContext>(options =>
 
 var app = builder.Build();
 
-// Tự động đảm bảo cột PasswordHash tồn tại trong bảng Players khi khởi động Backend
+// Kiểm tra và bổ sung cột PasswordHash trong bảng Players khi khởi động nếu chưa có
 using (var scope = app.Services.CreateScope())
 {
     try
@@ -36,10 +37,10 @@ using (var scope = app.Services.CreateScope())
     }
 }
 
-// Configure the HTTP request pipeline.
+// Bật giao diện Swagger trong môi trường phát triển
 if (app.Environment.IsDevelopment())
 {
-    // Bật Swagger UI truyền thống
+
     app.UseSwagger();
     app.UseSwaggerUI(c =>
     {
@@ -48,10 +49,11 @@ if (app.Environment.IsDevelopment())
     });
 }
 
-// Cho phép phục vụ file tĩnh và file mặc định từ wwwroot
+// Phục vụ các file giao diện tĩnh từ thư mục wwwroot
 app.UseDefaultFiles();
 app.UseStaticFiles();
 
+// Chuyển hướng sang HTTPS khi chạy ở môi trường triển khai
 if (!app.Environment.IsDevelopment())
 {
     app.UseHttpsRedirection();
@@ -59,6 +61,8 @@ if (!app.Environment.IsDevelopment())
 
 app.UseAuthorization();
 
+// Ánh xạ route đến các API Controller
 app.MapControllers();
 
+// Chạy máy chủ web API
 app.Run();

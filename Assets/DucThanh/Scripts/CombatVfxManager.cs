@@ -6,17 +6,7 @@ using UnityEngine.Rendering;
 using UnityEngine.Rendering.Universal;
 using UnityEngine.UI;
 
-/// <summary>
-/// Hệ thống hiệu ứng hình ảnh (AAA Combat & World VFX) chuẩn URP HDR:
-/// - Tự động thiết lập URP Global Volume (Bloom + ACES Tonemapping + Vignette tinh tế) khi scene chưa có.
-/// - Tách biệt shader Additive HDR (phát sáng rực rỡ cho tia lửa, chém kiếm, Parry, hồi máu, vàng, trụ sáng)
-///   và Alpha-Blend (máu bắn, sương máu, khói linh hồn, bụi đất).
-/// - Micro Hit-Stop (khựng đòn chuẩn Action RPG) + Screen Edge Flash đa màu (Đỏ sát thương / Vàng Parry / Xanh hồi máu).
-/// - World-Space Floating Combat Numbers (+HP, +Gold, Damage, PARRY!).
-/// - Đầy đủ hiệu ứng: Chém 2 lớp theo 3 chiêu, Máu + Star Flare va chạm, Parry hoàn hảo,
-///   Hồi máu xoắn ốc, Nhặt vàng lấp lánh, Vòng triệu hồi quái, Boss Cuồng Nộ, Trại Lửa Checkpoint,
-///   Rèn/Trang bị vũ khí, Bẫy gai, Bụi bước chân, Pháo hoa chiến thắng.
-/// </summary>
+// Quản lý toàn bộ hiệu ứng chiến đấu, hạt particle, ánh sáng chớp và chữ sát thương nổi (Object Pooling)
 public class CombatVfxManager : MonoBehaviour
 {
     private static readonly int BaseColorId = Shader.PropertyToID("_BaseColor");
@@ -34,9 +24,13 @@ public class CombatVfxManager : MonoBehaviour
 
     private static readonly WaitForSeconds WaitSlashNormal = new WaitForSeconds(0.09f);
     private static readonly WaitForSeconds WaitSlashSpin = new WaitForSeconds(0.12f);
+    private static readonly WaitForSeconds WaitBloodReturn = new WaitForSeconds(0.95f);
 
     private const float FloatingTextBaseFontSize = 2.35f;
     private const int MaxConcurrentFlashLights = 3;
+    private const int MaxActivePooledBloodHits = 12;
+    private const int MaxActivePooledElementalHits = 10;
+    private const int MaxActivePooledSlashArcs = 6;
 
     private static CombatVfxManager instance;
 
@@ -60,9 +54,47 @@ public class CombatVfxManager : MonoBehaviour
     private VolumeProfile runtimeVolumeProfile;
     private Mesh horizontalQuadMesh;
 
+    private sealed class PooledBloodHit
+    {
+        public GameObject root;
+        public Transform rootTransform;
+        public ParticleSystem starFlare;
+        public ParticleSystem shockRing;
+        public ParticleSystem sparks;
+        public ParticleSystem droplets;
+        public ParticleSystem mist;
+    }
+
+    private sealed class PooledElementalHit
+    {
+        public GameObject root;
+        public Transform rootTransform;
+        public ParticleSystem starFlare;
+        public ParticleSystem shockRing;
+        public ParticleSystem sparks;
+    }
+
+    private sealed class PooledSlashArc
+    {
+        public GameObject root;
+        public Transform rootTransform;
+        public Transform outerTransform;
+        public MeshRenderer outerRenderer;
+        public Transform coreTransform;
+        public MeshRenderer coreRenderer;
+        public ParticleSystem sparksPs;
+        public MaterialPropertyBlock propBlock;
+    }
+
     private readonly Queue<FloatingTextAnim> floatingTextPool = new Queue<FloatingTextAnim>(24);
     private readonly Queue<Light> flashLightPool = new Queue<Light>(8);
+    private readonly Queue<PooledBloodHit> bloodHitPool = new Queue<PooledBloodHit>(12);
+    private readonly Queue<PooledElementalHit> elementalHitPool = new Queue<PooledElementalHit>(10);
+    private readonly Queue<PooledSlashArc> slashArcPool = new Queue<PooledSlashArc>(6);
     private int activeFlashLights;
+    private int activeBloodHits;
+    private int activeElementalHits;
+    private int activeSlashArcs;
     private ParticleSystem footstepDustPs;
     private Transform cachedMainCamTransform;
 
@@ -74,6 +106,7 @@ public class CombatVfxManager : MonoBehaviour
     private Coroutine hitStopRoutine;
     private bool postProcessingChecked;
 
+    // Lấy hoặc tạo instance CombatVfxManager duy nhất trong scene
     public static CombatVfxManager EnsureInstance()
     {
         if (instance != null) return instance;
@@ -149,6 +182,12 @@ public class CombatVfxManager : MonoBehaviour
 
         floatingTextPool.Clear();
         flashLightPool.Clear();
+        bloodHitPool.Clear();
+        elementalHitPool.Clear();
+        slashArcPool.Clear();
+        activeBloodHits = 0;
+        activeElementalHits = 0;
+        activeSlashArcs = 0;
 
         if (instance == this)
         {
@@ -171,21 +210,42 @@ public class CombatVfxManager : MonoBehaviour
         return cachedMainCamTransform;
     }
 
-    // ==================== SHARED MATERIAL & MESH GETTERS ====================
-
     public static Material GetWeaponTrailMaterial() => EnsureInstance().additiveSoftMat;
+    public static Material GetAdditiveSoftMaterial() => EnsureInstance().additiveSoftMat;
+    public static Material GetAdditiveSparkMaterial() => EnsureInstance().additiveSparkMat;
+    public static Material GetAlphaSoftMaterial() => EnsureInstance().alphaSoftMat;
     public static Material GetAdditiveRingMaterial() => EnsureInstance().additiveRingMat;
     public static Material GetAdditiveStarMaterial() => EnsureInstance().additiveStarMat;
     public static Material GetAdditiveBeamMaterial() => EnsureInstance().additiveBeamMat;
     public static Mesh GetHorizontalQuadMesh() => EnsureInstance().horizontalQuadMesh;
 
-    // ==================== PUBLIC COMBAT & WORLD VFX API ====================
-
+    // Hiển thị tia máu và chớp sáng khi đòn đánh trúng kẻ địch
     public static void SpawnBloodHit(Vector3 position, Vector3 hitDirection, bool heavy = false)
     {
         EnsureInstance().SpawnBloodHitInternal(position, hitDirection, heavy);
     }
 
+    // Tạo chùm tia sáng nguyên tố mang màu sắc riêng của vũ khí khi chém trúng địch
+    public static void SpawnElementalHitBurst(
+        Vector3 position,
+        Vector3 hitDirection,
+        Color primaryColor,
+        Color coreColor,
+        Color secondaryColor,
+        int weaponTier,
+        bool heavy = false)
+    {
+        EnsureInstance().SpawnElementalHitBurstInternal(
+            position,
+            hitDirection,
+            primaryColor,
+            coreColor,
+            secondaryColor,
+            weaponTier,
+            heavy);
+    }
+
+    // Tạo hiệu ứng tan rã và ánh sáng khi quái hoặc boss bị tiêu diệt
     public static void SpawnEnemyDeathEffect(Vector3 position, bool isBoss = false)
     {
         EnsureInstance().SpawnEnemyDeathInternal(position, isBoss);
@@ -206,33 +266,69 @@ public class CombatVfxManager : MonoBehaviour
         EnsureInstance().TriggerScreenFlashInternal(color, intensity, fadeSpeed);
     }
 
+    // Làm chậm thời gian trong tích tắc để tạo cảm giác va chạm mạnh
     public static void TriggerHitStop(float duration = 0.045f, float slowScale = 0.08f)
     {
         EnsureInstance().TriggerHitStopInternal(duration, slowScale);
     }
 
+    // Vẽ vệt kiếm hình vòng cung theo từng biến thể đòn chém
     public static void SpawnSlashArc(Vector3 playerPos, Vector3 forwardDir, int attackVariant)
     {
         CombatVfxManager mgr = EnsureInstance();
-        mgr.StartCoroutine(mgr.SpawnSlashArcCoroutine(playerPos, forwardDir, attackVariant));
+        mgr.StartCoroutine(mgr.SpawnSlashArcCoroutine(
+            playerPos,
+            forwardDir,
+            attackVariant,
+            false,
+            Color.white,
+            Color.white,
+            Color.white,
+            1f));
     }
 
+    // Vẽ vệt kiếm hình vòng cung mang màu nguyên tố và kích thước theo bậc vũ khí
+    public static void SpawnSlashArc(
+        Vector3 playerPos,
+        Vector3 forwardDir,
+        int attackVariant,
+        Color primaryColor,
+        Color coreColor,
+        Color secondaryColor,
+        float scaleMult = 1f)
+    {
+        CombatVfxManager mgr = EnsureInstance();
+        mgr.StartCoroutine(mgr.SpawnSlashArcCoroutine(
+            playerPos,
+            forwardDir,
+            attackVariant,
+            true,
+            primaryColor,
+            coreColor,
+            secondaryColor,
+            scaleMult));
+    }
+
+    // Tạo tia lửa khi đỡ đòn thường hoặc vòng sáng khi Perfect Parry
     public static void SpawnBlockSpark(Vector3 position, Vector3 normalDir, bool perfectParry = false)
     {
         EnsureInstance().SpawnBlockSparkInternal(position, normalDir, perfectParry);
     }
 
+    // Hiển thị vòng sao choáng trên đầu kẻ địch bị phản đòn
     public static void SpawnParryStunEffect(Transform enemyTransform, float duration)
     {
         EnsureInstance().SpawnParryStunEffectInternal(enemyTransform, duration);
     }
 
+    // Tạo hiệu ứng hào quang xanh và số máu hồi trên nhân vật
     public static void SpawnHealEffect(Transform target, int healAmount = 0, bool isParryHeal = false)
     {
         if (target == null) return;
         EnsureInstance().SpawnHealEffectInternal(target, healAmount, isParryHeal);
     }
 
+    // Tạo hiệu ứng lấp lánh và số vàng cộng thêm khi nhặt vàng
     public static void SpawnGoldCollectEffect(Vector3 position, int goldAmount)
     {
         EnsureInstance().SpawnGoldCollectInternal(position, goldAmount);
@@ -247,6 +343,12 @@ public class CombatVfxManager : MonoBehaviour
     {
         if (bossTransform == null) return;
         EnsureInstance().SpawnBossEnrageInternal(bossTransform);
+    }
+
+    public static void AttachEnemyBiomeAura(Transform enemyTransform, int mapIndex, bool isElite = false)
+    {
+        if (enemyTransform == null) return;
+        EnsureInstance().AttachEnemyBiomeAuraInternal(enemyTransform, mapIndex, isElite);
     }
 
     public static void SpawnCheckpointActivateEffect(Vector3 pos)
@@ -276,20 +378,18 @@ public class CombatVfxManager : MonoBehaviour
         mgr.StartCoroutine(mgr.VictoryCelebrationCoroutine(centerPos));
     }
 
+    // Hiển thị chữ nổi 3D hướng về camera cho sát thương, hồi máu hoặc cảnh báo
     public static void SpawnFloatingText(Vector3 worldPos, string text, Color color, float scale = 1f, float duration = 0.95f)
     {
         if (string.IsNullOrEmpty(text)) return;
         EnsureInstance().SpawnFloatingTextInternal(worldPos, text, color, scale, duration);
     }
 
-    // ==================== URP POST-PROCESSING (BLOOM + ACES) ====================
-
     private void EnsurePostProcessing()
     {
         if (postProcessingChecked) return;
         postProcessingChecked = true;
 
-        // Kích hoạt Post-Processing trên Main Camera nếu chưa bật
         if (Camera.main != null)
         {
             UniversalAdditionalCameraData camData = Camera.main.GetComponent<UniversalAdditionalCameraData>();
@@ -299,7 +399,6 @@ public class CombatVfxManager : MonoBehaviour
             }
         }
 
-        // Nếu scene đã có Volume với Bloom rồi thì tôn trọng cấu hình sẵn có
         Volume existingVol = FindFirstObjectByType<Volume>();
         if (existingVol != null && existingVol.sharedProfile != null && existingVol.sharedProfile.Has<Bloom>())
         {
@@ -335,8 +434,6 @@ public class CombatVfxManager : MonoBehaviour
 
         vol.profile = profile;
     }
-
-    // ==================== HIT-STOP & SCREEN FLASH ====================
 
     private void TriggerHitStopInternal(float duration, float slowScale)
     {
@@ -399,8 +496,6 @@ public class CombatVfxManager : MonoBehaviour
         screenFlashImage.enabled = false;
     }
 
-    // ==================== FLOATING WORLD COMBAT NUMBERS ====================
-
     private void SpawnFloatingTextInternal(Vector3 worldPos, string text, Color color, float scale, float duration)
     {
         FloatingTextAnim anim = RentFloatingText();
@@ -431,7 +526,6 @@ public class CombatVfxManager : MonoBehaviour
         tmp.textWrappingMode = TextWrappingModes.NoWrap;
         tmp.sortingOrder = 50;
 
-        // Dùng chung 1 Material có viền đen duy nhất cho tất cả Floating Text để tránh leak/clone Material mỗi lần đánh
         if (floatingTextSharedMat == null)
         {
             tmp.outlineWidth = 0.22f;
@@ -499,7 +593,6 @@ public class CombatVfxManager : MonoBehaviour
 
             transform.position += Vector3.up * (riseSpeed * (1f - t * 0.55f) * dt);
 
-            // Pop-in gọn sắc ở 16% đầu, giữ kích thước vừa mắt rồi mờ dần
             float pop = t < 0.16f
                 ? Mathf.Lerp(0.55f, 1.12f, t / 0.16f)
                 : t < 0.30f
@@ -528,8 +621,6 @@ public class CombatVfxManager : MonoBehaviour
         }
     }
 
-    // ==================== BLOOD & IMPACT HIT VFX ====================
-
     private void SpawnBloodHitInternal(Vector3 position, Vector3 hitDirection, bool heavy)
     {
         if (hitDirection.sqrMagnitude < 0.001f)
@@ -537,211 +628,398 @@ public class CombatVfxManager : MonoBehaviour
         else
             hitDirection = (hitDirection.normalized + Vector3.up * 0.32f).normalized;
 
-        GameObject root = new GameObject("VFX_BloodHit");
-        root.transform.position = position;
-        root.transform.rotation = Quaternion.LookRotation(hitDirection);
+        PooledBloodHit fx = RentBloodHit();
+        if (fx == null) return;
 
-        // 1. Chớp sao va chạm HDR (Impact Star Flare) — cảm giác lưỡi kiếm chạm mục tiêu cực sắc
+        activeBloodHits++;
+        fx.rootTransform.SetPositionAndRotation(position, Quaternion.LookRotation(hitDirection));
+        ConfigureBloodHitBurst(fx, heavy);
+        fx.root.SetActive(true);
+
+        fx.starFlare.Play();
+        fx.shockRing.Play();
+        fx.sparks.Play();
+        fx.droplets.Play();
+        fx.mist.Play();
+
+        StartCoroutine(FlashPointLight(position, heavy ? new Color(1f, 0.55f, 0.18f) : new Color(1f, 0.78f, 0.42f), heavy ? 5.2f : 3.2f, heavy ? 5.5f : 3.6f, heavy ? 0.18f : 0.12f));
+        StartCoroutine(ReturnBloodHitAfter(fx));
+    }
+
+    private PooledBloodHit RentBloodHit()
+    {
+        while (bloodHitPool.Count > 0)
         {
-            GameObject go = new GameObject("ImpactStarFlare");
-            go.transform.SetParent(root.transform, false);
-            ParticleSystem ps = go.AddComponent<ParticleSystem>();
-            ps.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
+            PooledBloodHit cached = bloodHitPool.Dequeue();
+            if (cached != null && cached.root != null) return cached;
+        }
+        if (activeBloodHits >= MaxActivePooledBloodHits) return null;
+        return CreatePooledBloodHit();
+    }
 
+    private PooledBloodHit CreatePooledBloodHit()
+    {
+        GameObject root = new GameObject("VFX_BloodHit_Pooled");
+        root.transform.SetParent(transform, false);
+        var fx = new PooledBloodHit
+        {
+            root = root,
+            rootTransform = root.transform
+        };
+
+        {
+            ParticleSystem ps = CreateChildPs(root.transform, "ImpactStarFlare", additiveStarMat);
             var main = ps.main;
             main.duration = 0.2f;
             main.loop = false;
-            main.startLifetime = heavy ? 0.19f : 0.13f;
             main.startSpeed = 0f;
-            main.startSize = heavy ? 1.55f : 1.0f;
             main.startRotation = new ParticleSystem.MinMaxCurve(0f, Mathf.PI * 2f);
-            main.startColor = heavy
-                ? new Color(2.2f, 1.45f, 0.45f, 1f)
-                : new Color(1.9f, 1.65f, 0.9f, 0.95f);
-
             var emission = ps.emission;
             emission.rateOverTime = 0f;
             emission.SetBursts(new[] { new ParticleSystem.Burst(0f, 1) });
-
             var sizeOver = ps.sizeOverLifetime;
             sizeOver.enabled = true;
             sizeOver.size = new ParticleSystem.MinMaxCurve(1f, AnimationCurve.EaseInOut(0f, 0.4f, 1f, 1.35f));
-
             var colOver = ps.colorOverLifetime;
             colOver.enabled = true;
             colOver.color = CreateFadeOutGradient(Color.white, new Color(1f, 0.52f, 0.15f), 1f);
-
-            var rend = ps.GetComponent<ParticleSystemRenderer>();
-            rend.material = additiveStarMat;
-
-            ps.Play();
+            fx.starFlare = ps;
         }
 
-        // 2. Vòng xung kích va chạm sắc gọn (Impact Shock Ring)
         {
-            GameObject go = new GameObject("ImpactShockRing");
-            go.transform.SetParent(root.transform, false);
-            ParticleSystem ps = go.AddComponent<ParticleSystem>();
-            ps.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
-
+            ParticleSystem ps = CreateChildPs(root.transform, "ImpactShockRing", additiveRingMat);
             var main = ps.main;
             main.duration = 0.22f;
             main.loop = false;
-            main.startLifetime = heavy ? 0.24f : 0.17f;
             main.startSpeed = 0f;
-            main.startSize = heavy ? 1.9f : 1.2f;
-            main.startColor = heavy
-                ? new Color(1.8f, 0.72f, 0.22f, 0.95f)
-                : new Color(1.6f, 1.15f, 0.45f, 0.85f);
-
             var emission = ps.emission;
             emission.rateOverTime = 0f;
             emission.SetBursts(new[] { new ParticleSystem.Burst(0f, 1) });
-
             var sizeOver = ps.sizeOverLifetime;
             sizeOver.enabled = true;
             sizeOver.size = new ParticleSystem.MinMaxCurve(1f, AnimationCurve.EaseInOut(0f, 0.15f, 1f, 1f));
-
             var colOver = ps.colorOverLifetime;
             colOver.enabled = true;
             colOver.color = CreateFadeOutGradient(Color.white, new Color(1f, 0.35f, 0.12f), 0.9f);
-
-            var rend = ps.GetComponent<ParticleSystemRenderer>();
-            rend.material = additiveRingMat;
-
-            ps.Play();
+            fx.shockRing = ps;
         }
 
-        // 3. Tia lửa kim loại HDR bắn tóe cực nhanh (Additive Sparks)
         {
-            GameObject go = new GameObject("ImpactSparks");
-            go.transform.SetParent(root.transform, false);
-            ParticleSystem ps = go.AddComponent<ParticleSystem>();
-            ps.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
-
+            ParticleSystem ps = CreateChildPs(root.transform, "ImpactSparks", additiveSparkMat);
             var main = ps.main;
             main.duration = 0.3f;
             main.loop = false;
-            main.startLifetime = new ParticleSystem.MinMaxCurve(0.12f, heavy ? 0.32f : 0.22f);
-            main.startSpeed = new ParticleSystem.MinMaxCurve(heavy ? 6.5f : 5.0f, heavy ? 13.5f : 10.0f);
-            main.startSize = new ParticleSystem.MinMaxCurve(0.05f, heavy ? 0.13f : 0.095f);
             main.gravityModifier = 0.75f;
             main.simulationSpace = ParticleSystemSimulationSpace.World;
             main.startColor = new ParticleSystem.MinMaxGradient(
                 new Color(2.0f, 1.8f, 0.95f, 1f),
                 new Color(1.9f, 0.75f, 0.22f, 1f));
-
             var emission = ps.emission;
             emission.rateOverTime = 0f;
-            emission.SetBursts(new[] { new ParticleSystem.Burst(0f, heavy ? 22 : 12) });
-
             var shape = ps.shape;
             shape.shapeType = ParticleSystemShapeType.Cone;
-            shape.angle = heavy ? 52f : 42f;
             shape.radius = 0.09f;
-
             var colOver = ps.colorOverLifetime;
             colOver.enabled = true;
             colOver.color = CreateFadeOutGradient(Color.white, new Color(1f, 0.42f, 0.1f), 1f);
-
             var rend = ps.GetComponent<ParticleSystemRenderer>();
-            rend.material = additiveSparkMat;
             rend.renderMode = ParticleSystemRenderMode.Stretch;
             rend.velocityScale = 0.09f;
             rend.lengthScale = 2.4f;
-
-            ps.Play();
+            fx.sparks = ps;
         }
 
-        // 4. Giọt máu đậm bắn theo quán tính lưỡi chém (Alpha-Blend)
         {
-            GameObject go = new GameObject("BloodDroplets");
-            go.transform.SetParent(root.transform, false);
-            ParticleSystem ps = go.AddComponent<ParticleSystem>();
-            ps.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
-
+            ParticleSystem ps = CreateChildPs(root.transform, "BloodDroplets", alphaDropletMat);
             var main = ps.main;
             main.duration = 0.65f;
             main.loop = false;
-            main.startLifetime = new ParticleSystem.MinMaxCurve(0.28f, heavy ? 0.68f : 0.5f);
-            main.startSpeed = new ParticleSystem.MinMaxCurve(heavy ? 4.4f : 3.2f, heavy ? 9.0f : 6.4f);
-            main.startSize = new ParticleSystem.MinMaxCurve(0.08f, heavy ? 0.24f : 0.17f);
             main.gravityModifier = 1.75f;
             main.simulationSpace = ParticleSystemSimulationSpace.World;
             main.startColor = new ParticleSystem.MinMaxGradient(
                 new Color(0.55f, 0.02f, 0.03f, 1f),
                 new Color(0.95f, 0.06f, 0.06f, 1f));
-
             var emission = ps.emission;
             emission.rateOverTime = 0f;
-            emission.SetBursts(new[] { new ParticleSystem.Burst(0f, heavy ? 32 : 20) });
-
             var shape = ps.shape;
             shape.shapeType = ParticleSystemShapeType.Cone;
-            shape.angle = heavy ? 44f : 34f;
             shape.radius = 0.1f;
-
             var sizeOver = ps.sizeOverLifetime;
             sizeOver.enabled = true;
             sizeOver.size = new ParticleSystem.MinMaxCurve(1f, AnimationCurve.EaseInOut(0f, 1f, 1f, 0.18f));
-
             var colOver = ps.colorOverLifetime;
             colOver.enabled = true;
             colOver.color = CreateFadeOutGradient(new Color(0.88f, 0.05f, 0.05f), new Color(0.28f, 0.01f, 0.02f), 1f);
-
             var rend = ps.GetComponent<ParticleSystemRenderer>();
-            rend.material = alphaDropletMat;
             rend.renderMode = ParticleSystemRenderMode.Stretch;
             rend.velocityScale = 0.065f;
             rend.lengthScale = 1.75f;
-
-            ps.Play();
+            fx.droplets = ps;
         }
 
-        // 5. Sương máu đậm bùng tại điểm trúng đòn
         {
-            GameObject go = new GameObject("BloodMist");
-            go.transform.SetParent(root.transform, false);
-            ParticleSystem ps = go.AddComponent<ParticleSystem>();
-            ps.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
-
+            ParticleSystem ps = CreateChildPs(root.transform, "BloodMist", alphaSoftMat);
             var main = ps.main;
             main.duration = 0.45f;
             main.loop = false;
             main.startLifetime = new ParticleSystem.MinMaxCurve(0.22f, 0.4f);
             main.startSpeed = new ParticleSystem.MinMaxCurve(0.6f, 2.3f);
-            main.startSize = new ParticleSystem.MinMaxCurve(0.35f, heavy ? 0.85f : 0.6f);
             main.gravityModifier = 0.2f;
             main.simulationSpace = ParticleSystemSimulationSpace.World;
             main.startColor = new Color(0.62f, 0.02f, 0.04f, 0.72f);
-
             var emission = ps.emission;
             emission.rateOverTime = 0f;
-            emission.SetBursts(new[] { new ParticleSystem.Burst(0f, heavy ? 10 : 6) });
-
             var shape = ps.shape;
             shape.shapeType = ParticleSystemShapeType.Sphere;
             shape.radius = 0.18f;
-
             var sizeOver = ps.sizeOverLifetime;
             sizeOver.enabled = true;
             sizeOver.size = new ParticleSystem.MinMaxCurve(1f, AnimationCurve.Linear(0f, 0.5f, 1f, 1.5f));
-
             var colOver = ps.colorOverLifetime;
             colOver.enabled = true;
             colOver.color = CreateFadeOutGradient(new Color(0.68f, 0.03f, 0.04f), new Color(0.22f, 0.01f, 0.02f), 0.75f);
-
-            var rend = ps.GetComponent<ParticleSystemRenderer>();
-            rend.material = alphaSoftMat;
-
-            ps.Play();
+            fx.mist = ps;
         }
 
-        StartCoroutine(FlashPointLight(position, heavy ? new Color(1f, 0.55f, 0.18f) : new Color(1f, 0.78f, 0.42f), heavy ? 5.2f : 3.2f, heavy ? 5.5f : 3.6f, heavy ? 0.18f : 0.12f));
-        Destroy(root, 1.25f);
+        root.SetActive(false);
+        return fx;
     }
 
-    // ==================== ENEMY / BOSS DEATH VFX ====================
+    private static ParticleSystem CreateChildPs(Transform parent, string objName, Material mat)
+    {
+        GameObject go = new GameObject(objName);
+        go.transform.SetParent(parent, false);
+        ParticleSystem ps = go.AddComponent<ParticleSystem>();
+        ps.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
+        var rend = ps.GetComponent<ParticleSystemRenderer>();
+        rend.sharedMaterial = mat;
+        rend.shadowCastingMode = ShadowCastingMode.Off;
+        rend.receiveShadows = false;
+        return ps;
+    }
+
+    private static void ConfigureBloodHitBurst(PooledBloodHit fx, bool heavy)
+    {
+        fx.starFlare.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
+        var mStar = fx.starFlare.main;
+        mStar.startLifetime = heavy ? 0.19f : 0.13f;
+        mStar.startSize = heavy ? 1.55f : 1.0f;
+        mStar.startColor = heavy ? new Color(2.2f, 1.45f, 0.45f, 1f) : new Color(1.9f, 1.65f, 0.9f, 0.95f);
+
+        fx.shockRing.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
+        var mRing = fx.shockRing.main;
+        mRing.startLifetime = heavy ? 0.24f : 0.17f;
+        mRing.startSize = heavy ? 1.9f : 1.2f;
+        mRing.startColor = heavy ? new Color(1.8f, 0.72f, 0.22f, 0.95f) : new Color(1.6f, 1.15f, 0.45f, 0.85f);
+
+        fx.sparks.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
+        var mSparks = fx.sparks.main;
+        mSparks.startLifetime = new ParticleSystem.MinMaxCurve(0.12f, heavy ? 0.32f : 0.22f);
+        mSparks.startSpeed = new ParticleSystem.MinMaxCurve(heavy ? 6.5f : 5.0f, heavy ? 13.5f : 10.0f);
+        mSparks.startSize = new ParticleSystem.MinMaxCurve(0.05f, heavy ? 0.13f : 0.095f);
+        fx.sparks.emission.SetBursts(new[] { new ParticleSystem.Burst(0f, heavy ? 22 : 12) });
+        var sSparks = fx.sparks.shape;
+        sSparks.angle = heavy ? 52f : 42f;
+
+        fx.droplets.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
+        var mDrop = fx.droplets.main;
+        mDrop.startLifetime = new ParticleSystem.MinMaxCurve(0.28f, heavy ? 0.68f : 0.5f);
+        mDrop.startSpeed = new ParticleSystem.MinMaxCurve(heavy ? 4.4f : 3.2f, heavy ? 9.0f : 6.4f);
+        mDrop.startSize = new ParticleSystem.MinMaxCurve(0.08f, heavy ? 0.24f : 0.17f);
+        fx.droplets.emission.SetBursts(new[] { new ParticleSystem.Burst(0f, heavy ? 32 : 20) });
+        var sDrop = fx.droplets.shape;
+        sDrop.angle = heavy ? 44f : 34f;
+
+        fx.mist.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
+        var mMist = fx.mist.main;
+        mMist.startSize = new ParticleSystem.MinMaxCurve(0.35f, heavy ? 0.85f : 0.6f);
+        fx.mist.emission.SetBursts(new[] { new ParticleSystem.Burst(0f, heavy ? 10 : 6) });
+    }
+
+    private IEnumerator ReturnBloodHitAfter(PooledBloodHit fx)
+    {
+        yield return WaitBloodReturn;
+        if (fx != null && fx.root != null)
+        {
+            fx.root.SetActive(false);
+            bloodHitPool.Enqueue(fx);
+        }
+        activeBloodHits = Mathf.Max(0, activeBloodHits - 1);
+    }
+
+    private void SpawnElementalHitBurstInternal(
+        Vector3 position,
+        Vector3 hitDirection,
+        Color primaryColor,
+        Color coreColor,
+        Color secondaryColor,
+        int weaponTier,
+        bool heavy)
+    {
+        if (hitDirection.sqrMagnitude < 0.001f)
+            hitDirection = Vector3.up;
+        else
+            hitDirection = (hitDirection.normalized + Vector3.up * 0.28f).normalized;
+
+        PooledElementalHit fx = RentElementalHit();
+        if (fx == null) return;
+
+        int tier = Mathf.Clamp(weaponTier, 1, 4);
+        activeElementalHits++;
+        fx.rootTransform.SetPositionAndRotation(position, Quaternion.LookRotation(hitDirection));
+        ConfigureElementalHitBurst(fx, primaryColor, coreColor, secondaryColor, tier, heavy);
+        fx.root.SetActive(true);
+
+        fx.starFlare.Play();
+        fx.sparks.Play();
+        if (tier >= 2 || heavy)
+        {
+            fx.shockRing.Play();
+            StartCoroutine(FlashPointLight(
+                position,
+                Color.Lerp(primaryColor, coreColor, 0.22f),
+                3.0f + tier * 0.85f,
+                heavy ? 5.6f : 3.1f + tier * 0.55f,
+                heavy ? 0.20f : 0.14f));
+        }
+
+        StartCoroutine(ReturnElementalHitAfter(fx));
+    }
+
+    private PooledElementalHit RentElementalHit()
+    {
+        while (elementalHitPool.Count > 0)
+        {
+            PooledElementalHit cached = elementalHitPool.Dequeue();
+            if (cached != null && cached.root != null) return cached;
+        }
+        if (activeElementalHits >= MaxActivePooledElementalHits) return null;
+        return CreatePooledElementalHit();
+    }
+
+    private PooledElementalHit CreatePooledElementalHit()
+    {
+        GameObject root = new GameObject("VFX_ElementalHit_Pooled");
+        root.transform.SetParent(transform, false);
+        var fx = new PooledElementalHit
+        {
+            root = root,
+            rootTransform = root.transform
+        };
+
+        {
+            ParticleSystem ps = CreateChildPs(root.transform, "ElemHitStarFlare", additiveStarMat);
+            var main = ps.main;
+            main.duration = 0.22f;
+            main.loop = false;
+            main.startSpeed = 0f;
+            main.startRotation = new ParticleSystem.MinMaxCurve(0f, Mathf.PI * 2f);
+            var emission = ps.emission;
+            emission.rateOverTime = 0f;
+            emission.SetBursts(new[] { new ParticleSystem.Burst(0f, 1) });
+            var sizeOver = ps.sizeOverLifetime;
+            sizeOver.enabled = true;
+            sizeOver.size = new ParticleSystem.MinMaxCurve(1f, AnimationCurve.EaseInOut(0f, 0.35f, 1f, 1.38f));
+            var colOver = ps.colorOverLifetime;
+            colOver.enabled = true;
+            fx.starFlare = ps;
+        }
+
+        {
+            ParticleSystem ps = CreateChildPs(root.transform, "ElemHitShockRing", additiveRingMat);
+            var main = ps.main;
+            main.duration = 0.24f;
+            main.loop = false;
+            main.startSpeed = 0f;
+            var emission = ps.emission;
+            emission.rateOverTime = 0f;
+            emission.SetBursts(new[] { new ParticleSystem.Burst(0f, 1) });
+            var sizeOver = ps.sizeOverLifetime;
+            sizeOver.enabled = true;
+            sizeOver.size = new ParticleSystem.MinMaxCurve(1f, AnimationCurve.EaseInOut(0f, 0.14f, 1f, 1f));
+            var colOver = ps.colorOverLifetime;
+            colOver.enabled = true;
+            fx.shockRing = ps;
+        }
+
+        {
+            ParticleSystem ps = CreateChildPs(root.transform, "ElemHitSparks", additiveSparkMat);
+            var main = ps.main;
+            main.duration = 0.32f;
+            main.loop = false;
+            main.gravityModifier = 0.45f;
+            main.simulationSpace = ParticleSystemSimulationSpace.World;
+            var emission = ps.emission;
+            emission.rateOverTime = 0f;
+            var shape = ps.shape;
+            shape.shapeType = ParticleSystemShapeType.Cone;
+            shape.radius = 0.10f;
+            var colOver = ps.colorOverLifetime;
+            colOver.enabled = true;
+            var rend = ps.GetComponent<ParticleSystemRenderer>();
+            rend.renderMode = ParticleSystemRenderMode.Stretch;
+            rend.velocityScale = 0.09f;
+            rend.lengthScale = 2.6f;
+            fx.sparks = ps;
+        }
+
+        return fx;
+    }
+
+    private static void ConfigureElementalHitBurst(
+        PooledElementalHit fx,
+        Color primaryColor,
+        Color coreColor,
+        Color secondaryColor,
+        int tier,
+        bool heavy)
+    {
+        float hdrMult = 1.65f + tier * 0.20f;
+        Color hdrCore = new Color(coreColor.r * hdrMult, coreColor.g * hdrMult, coreColor.b * hdrMult, 1f);
+        Color hdrPrimary = new Color(primaryColor.r * hdrMult, primaryColor.g * hdrMult, primaryColor.b * hdrMult, 1f);
+        Color hdrSecondary = new Color(secondaryColor.r * hdrMult, secondaryColor.g * hdrMult, secondaryColor.b * hdrMult, 1f);
+
+        fx.starFlare.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
+        var mStar = fx.starFlare.main;
+        mStar.startLifetime = heavy ? 0.20f : 0.15f;
+        mStar.startSize = (0.90f + tier * 0.24f) * (heavy ? 1.32f : 1f);
+        mStar.startColor = hdrCore;
+        var colStar = fx.starFlare.colorOverLifetime;
+        colStar.color = CreateFadeOutGradient(coreColor, primaryColor, 1f);
+
+        fx.shockRing.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
+        var mRing = fx.shockRing.main;
+        mRing.startLifetime = heavy ? 0.25f : 0.18f;
+        mRing.startSize = (1.10f + tier * 0.34f) * (heavy ? 1.30f : 1f);
+        mRing.startColor = hdrPrimary;
+        var eRing = fx.shockRing.emission;
+        eRing.enabled = tier >= 2 || heavy;
+        var colRing = fx.shockRing.colorOverLifetime;
+        colRing.color = CreateFadeOutGradient(coreColor, secondaryColor, 0.92f);
+
+        fx.sparks.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
+        var mSparks = fx.sparks.main;
+        mSparks.startLifetime = new ParticleSystem.MinMaxCurve(0.14f, (0.24f + tier * 0.03f) * (heavy ? 1.25f : 1f));
+        mSparks.startSpeed = new ParticleSystem.MinMaxCurve(5.2f + tier * 0.8f, 9.5f + tier * 1.4f);
+        mSparks.startSize = new ParticleSystem.MinMaxCurve(0.045f, 0.085f + tier * 0.015f);
+        mSparks.startColor = new ParticleSystem.MinMaxGradient(hdrPrimary, hdrSecondary);
+        fx.sparks.emission.SetBursts(new[] { new ParticleSystem.Burst(0f, 10 + tier * 5 + (heavy ? 8 : 0)) });
+        var sSparks = fx.sparks.shape;
+        sSparks.angle = heavy ? 56f : 46f;
+        var colSparks = fx.sparks.colorOverLifetime;
+        colSparks.color = CreateFadeOutGradient(coreColor, secondaryColor, 1f);
+    }
+
+    private IEnumerator ReturnElementalHitAfter(PooledElementalHit fx)
+    {
+        yield return WaitBloodReturn;
+        if (fx != null && fx.root != null)
+        {
+            fx.root.SetActive(false);
+            elementalHitPool.Enqueue(fx);
+        }
+        activeElementalHits = Mathf.Max(0, activeElementalHits - 1);
+    }
 
     private void SpawnEnemyDeathInternal(Vector3 position, bool isBoss)
     {
@@ -749,7 +1027,6 @@ public class CombatVfxManager : MonoBehaviour
         GameObject root = new GameObject(isBoss ? "VFX_BossDeath" : "VFX_EnemyDeath");
         root.transform.position = position;
 
-        // 1. Nổ máu đậm
         {
             GameObject go = new GameObject("DeathBloodBurst");
             go.transform.SetParent(root.transform, false);
@@ -789,7 +1066,6 @@ public class CombatVfxManager : MonoBehaviour
             ps.Play();
         }
 
-        // 2. Khói linh hồn tối tan rã
         {
             GameObject go = new GameObject("SoulSmoke");
             go.transform.SetParent(root.transform, false);
@@ -830,7 +1106,6 @@ public class CombatVfxManager : MonoBehaviour
             ps.Play();
         }
 
-        // 3. Hạt linh hồn vàng HDR bay xoáy lên trời (Additive Glow)
         {
             GameObject go = new GameObject("SoulEmbers");
             go.transform.SetParent(root.transform, false);
@@ -878,7 +1153,6 @@ public class CombatVfxManager : MonoBehaviour
             ps.Play();
         }
 
-        // 4. Vòng sóng xung kích kép trên mặt đất (HDR Additive)
         SpawnGroundShockwave(root.transform, new Vector3(0f, -0.7f, 0f),
             isBoss ? 9.5f : 3.8f, isBoss ? 0.8f : 0.48f,
             isBoss ? new Color(2.1f, 0.65f, 0.2f, 0.95f) : new Color(1.8f, 0.55f, 0.22f, 0.85f));
@@ -888,7 +1162,6 @@ public class CombatVfxManager : MonoBehaviour
             SpawnGroundShockwave(root.transform, new Vector3(0f, -0.65f, 0f),
                 13.5f, 1.05f, new Color(2.2f, 1.55f, 0.35f, 0.9f), 0.14f);
 
-            // Chớp sao khổng lồ cho Boss + Micro Hit-Stop điện ảnh
             StartCoroutine(SpawnVerticalEnergyPillar(position - Vector3.up * 0.7f, new Color(2.0f, 1.3f, 0.3f, 0.85f), 2.2f, 16f, 0.95f));
             TriggerHitStop(0.085f, 0.12f);
             TriggerScreenFlash(new Color(1f, 0.78f, 0.28f, 1f), 0.28f, 1.2f);
@@ -920,7 +1193,6 @@ public class CombatVfxManager : MonoBehaviour
         GameObject root = new GameObject("VFX_DissolvePuff");
         root.transform.position = position;
 
-        // Khói tan biến
         {
             GameObject go = new GameObject("DissolveSmoke");
             go.transform.SetParent(root.transform, false);
@@ -954,7 +1226,6 @@ public class CombatVfxManager : MonoBehaviour
             ps.Play();
         }
 
-        // Hạt tàn tro vàng lấp lánh (Additive)
         {
             GameObject go = new GameObject("DissolveGlints");
             go.transform.SetParent(root.transform, false);
@@ -991,9 +1262,15 @@ public class CombatVfxManager : MonoBehaviour
         Destroy(root, 1.6f);
     }
 
-    // ==================== DUAL-LAYER HDR SLASH ARC & DASH VFX ====================
-
-    private IEnumerator SpawnSlashArcCoroutine(Vector3 playerPos, Vector3 forwardDir, int attackVariant)
+    private IEnumerator SpawnSlashArcCoroutine(
+        Vector3 playerPos,
+        Vector3 forwardDir,
+        int attackVariant,
+        bool useCustomPalette,
+        Color customPrimary,
+        Color customCore,
+        Color customSecondary,
+        float scaleMult)
     {
         forwardDir.y = 0f;
         if (forwardDir.sqrMagnitude < 0.001f) forwardDir = Vector3.forward;
@@ -1002,23 +1279,24 @@ public class CombatVfxManager : MonoBehaviour
         Quaternion baseRot = Quaternion.LookRotation(forwardDir);
         yield return attackVariant == 2 ? WaitSlashSpin : WaitSlashNormal;
 
-        GameObject root = new GameObject($"VFX_SlashArc_{attackVariant}");
+        PooledSlashArc arc = RentSlashArc();
+        if (arc == null) yield break;
+
+        activeSlashArcs++;
         float heightY = attackVariant == 2 ? 0.58f : 1.16f;
         Vector3 centerPos = playerPos + Vector3.up * heightY + (attackVariant == 2 ? Vector3.zero : forwardDir * 0.48f);
-        root.transform.position = centerPos;
-        root.transform.rotation = baseRot;
+        arc.rootTransform.SetPositionAndRotation(centerPos, baseRot);
 
-        // Lớp ngoài (Outer Glow Aura) + Lớp lõi trắng sáng sắc nét (Hot Core)
-        GameObject outerQuad = CreateSlashQuad("SlashOuter", root.transform, attackVariant == 2 ? additiveRingMat : additiveSlashMat, out Material outerMat);
-        GameObject coreQuad = CreateSlashQuad("SlashCore", root.transform, attackVariant == 2 ? additiveRingMat : additiveSlashMat, out Material coreMat);
-        coreQuad.transform.localPosition = new Vector3(0f, 0.02f, 0f);
+        Material sharedArcMat = attackVariant == 2 ? additiveRingMat : additiveSlashMat;
+        arc.outerRenderer.sharedMaterial = sharedArcMat;
+        arc.coreRenderer.sharedMaterial = sharedArcMat;
+        arc.root.SetActive(true);
 
         Color outerStart, outerEnd, coreStart, coreEnd, lightColor;
         float startYaw, endYaw, tiltZ, startScale, endScale, duration;
 
         if (attackVariant == 2)
         {
-            // Atk3: Xoay 360° tầm thấp — vòng lửa hoàng kim-đỏ + sóng mặt đất + bụi & tàn lửa
             outerStart = new Color(2.2f, 0.72f, 0.18f, 0.95f);
             outerEnd = new Color(1.2f, 0.15f, 0.06f, 0f);
             coreStart = new Color(2.4f, 2.0f, 1.15f, 0.95f);
@@ -1030,13 +1308,9 @@ public class CombatVfxManager : MonoBehaviour
             startScale = 2.8f;
             endScale = 5.1f;
             duration = 0.34f;
-
-            SpawnLowSpinDust(playerPos + Vector3.up * 0.12f);
-            SpawnGroundShockwave(root.transform, new Vector3(0f, -0.45f, 0f), 5.6f, 0.36f, new Color(2.0f, 0.85f, 0.25f, 0.85f));
         }
         else if (attackVariant == 1)
         {
-            // Atk2: Chém ngang rộng lửa hoàng kim
             outerStart = new Color(2.1f, 1.25f, 0.32f, 0.95f);
             outerEnd = new Color(1.4f, 0.38f, 0.1f, 0f);
             coreStart = new Color(2.5f, 2.3f, 1.65f, 0.95f);
@@ -1051,7 +1325,6 @@ public class CombatVfxManager : MonoBehaviour
         }
         else
         {
-            // Atk1: Chém chéo ánh bạc-vàng kim sắc lẹm
             outerStart = new Color(1.55f, 1.85f, 2.15f, 0.92f);
             outerEnd = new Color(1.45f, 0.92f, 0.32f, 0f);
             coreStart = new Color(2.4f, 2.35f, 2.1f, 0.96f);
@@ -1065,7 +1338,33 @@ public class CombatVfxManager : MonoBehaviour
             duration = 0.22f;
         }
 
-        SpawnSlashWindSparks(centerPos, forwardDir, outerStart, attackVariant == 2);
+        if (useCustomPalette)
+        {
+            float outerGlow = attackVariant == 2 ? 2.25f : 2.10f;
+            float endGlow = attackVariant == 2 ? 1.35f : 1.50f;
+            float coreGlow = attackVariant == 2 ? 2.50f : 2.38f;
+
+            outerStart = new Color(customPrimary.r * outerGlow, customPrimary.g * outerGlow, customPrimary.b * outerGlow, 0.95f);
+            outerEnd = new Color(customSecondary.r * endGlow, customSecondary.g * endGlow, customSecondary.b * endGlow, 0f);
+            coreStart = new Color(customCore.r * coreGlow, customCore.g * coreGlow, customCore.b * coreGlow, 0.96f);
+            coreEnd = new Color(customPrimary.r * 1.85f, customPrimary.g * 1.85f, customPrimary.b * 1.85f, 0f);
+            lightColor = Color.Lerp(customPrimary, customCore, 0.25f);
+        }
+
+        startScale *= scaleMult;
+        endScale *= scaleMult;
+
+        if (attackVariant == 2)
+        {
+            SpawnLowSpinDust(playerPos + Vector3.up * 0.12f);
+            Color shockwaveCol = useCustomPalette
+                ? new Color(customPrimary.r * 2.0f, customPrimary.g * 2.0f, customPrimary.b * 2.0f, 0.88f)
+                : new Color(2.0f, 0.85f, 0.25f, 0.85f);
+            SpawnGroundShockwave(arc.rootTransform, new Vector3(0f, -0.45f, 0f), 5.6f * scaleMult, 0.36f, shockwaveCol);
+        }
+
+        Color coreSparkColor = useCustomPalette ? coreStart : new Color(2.2f, 2.1f, 1.7f, 1f);
+        TriggerPooledSlashSparks(arc.sparksPs, outerStart, coreSparkColor, attackVariant == 2);
         StartCoroutine(FlashPointLight(centerPos + forwardDir * 0.6f, lightColor, attackVariant == 2 ? 7.5f : 5.2f, attackVariant == 2 ? 5.2f : 3.4f, duration));
 
         float elapsed = 0f;
@@ -1078,76 +1377,128 @@ public class CombatVfxManager : MonoBehaviour
             float yaw = Mathf.Lerp(startYaw, endYaw, easeOut);
             float sc = Mathf.Lerp(startScale, endScale, easeOut);
 
-            outerQuad.transform.localRotation = Quaternion.Euler(0f, yaw, tiltZ);
-            outerQuad.transform.localScale = new Vector3(sc, 1f, sc);
-            SetMaterialColor(outerMat, Color.Lerp(outerStart, outerEnd, t));
+            arc.outerTransform.localRotation = Quaternion.Euler(0f, yaw, tiltZ);
+            arc.outerTransform.localScale = new Vector3(sc, 1f, sc);
+            SetRendererPropertyColor(arc.outerRenderer, arc.propBlock, Color.Lerp(outerStart, outerEnd, t));
 
-            coreQuad.transform.localRotation = Quaternion.Euler(0f, yaw + 6f, tiltZ);
-            coreQuad.transform.localScale = new Vector3(sc * 0.92f, 1f, sc * 0.92f);
-            SetMaterialColor(coreMat, Color.Lerp(coreStart, coreEnd, Mathf.Clamp01(t * 1.25f)));
+            arc.coreTransform.localRotation = Quaternion.Euler(0f, yaw + 6f, tiltZ);
+            arc.coreTransform.localScale = new Vector3(sc * 0.92f, 1f, sc * 0.92f);
+            SetRendererPropertyColor(arc.coreRenderer, arc.propBlock, Color.Lerp(coreStart, coreEnd, Mathf.Clamp01(t * 1.25f)));
 
             yield return null;
         }
 
-        Destroy(outerMat);
-        Destroy(coreMat);
-        Destroy(root);
+        arc.outerRenderer.enabled = false;
+        arc.coreRenderer.enabled = false;
+        if (attackVariant == 2)
+        {
+
+            yield return WaitSlashSpin;
+        }
+        else
+        {
+            yield return WaitSlashNormal;
+        }
+
+        arc.outerRenderer.enabled = true;
+        arc.coreRenderer.enabled = true;
+        arc.root.SetActive(false);
+        slashArcPool.Enqueue(arc);
+        activeSlashArcs = Mathf.Max(0, activeSlashArcs - 1);
     }
 
-    private GameObject CreateSlashQuad(string objName, Transform parent, Material templateMat, out Material instanceMat)
+    private PooledSlashArc RentSlashArc()
+    {
+        while (slashArcPool.Count > 0)
+        {
+            PooledSlashArc cached = slashArcPool.Dequeue();
+            if (cached != null && cached.root != null) return cached;
+        }
+        if (activeSlashArcs >= MaxActivePooledSlashArcs) return null;
+        return CreatePooledSlashArc();
+    }
+
+    private PooledSlashArc CreatePooledSlashArc()
+    {
+        GameObject root = new GameObject("VFX_SlashArc_Pooled");
+        root.transform.SetParent(transform, false);
+
+        GameObject outerQuad = CreateSlashQuad("SlashOuter", root.transform, out MeshRenderer outerMr);
+        GameObject coreQuad = CreateSlashQuad("SlashCore", root.transform, out MeshRenderer coreMr);
+        coreQuad.transform.localPosition = new Vector3(0f, 0.02f, 0f);
+
+        ParticleSystem ps = CreateChildPs(root.transform, "VFX_SlashSparks", additiveSparkMat);
+        var main = ps.main;
+        main.duration = 0.36f;
+        main.loop = false;
+        main.startLifetime = new ParticleSystem.MinMaxCurve(0.14f, 0.36f);
+        main.gravityModifier = 0.25f;
+        main.simulationSpace = ParticleSystemSimulationSpace.World;
+        var emission = ps.emission;
+        emission.rateOverTime = 0f;
+        var colOver = ps.colorOverLifetime;
+        colOver.enabled = true;
+        colOver.color = CreateFadeOutGradient(Color.white, new Color(1f, 0.72f, 0.28f), 1f);
+        var rend = ps.GetComponent<ParticleSystemRenderer>();
+        rend.renderMode = ParticleSystemRenderMode.Stretch;
+        rend.velocityScale = 0.08f;
+        rend.lengthScale = 2.2f;
+
+        root.SetActive(false);
+        return new PooledSlashArc
+        {
+            root = root,
+            rootTransform = root.transform,
+            outerTransform = outerQuad.transform,
+            outerRenderer = outerMr,
+            coreTransform = coreQuad.transform,
+            coreRenderer = coreMr,
+            sparksPs = ps,
+            propBlock = new MaterialPropertyBlock()
+        };
+    }
+
+    private GameObject CreateSlashQuad(string objName, Transform parent, out MeshRenderer meshRenderer)
     {
         GameObject quad = new GameObject(objName);
         quad.transform.SetParent(parent, false);
         MeshFilter mf = quad.AddComponent<MeshFilter>();
         mf.sharedMesh = horizontalQuadMesh;
-        MeshRenderer mr = quad.AddComponent<MeshRenderer>();
-        mr.shadowCastingMode = ShadowCastingMode.Off;
-        mr.receiveShadows = false;
-        instanceMat = new Material(templateMat);
-        mr.material = instanceMat;
+        meshRenderer = quad.AddComponent<MeshRenderer>();
+        meshRenderer.shadowCastingMode = ShadowCastingMode.Off;
+        meshRenderer.receiveShadows = false;
         return quad;
     }
 
-    private void SpawnSlashWindSparks(Vector3 pos, Vector3 forward, Color sparkColor, bool is360)
+    private static void SetRendererPropertyColor(MeshRenderer mr, MaterialPropertyBlock block, Color color)
     {
-        GameObject go = new GameObject("VFX_SlashSparks");
-        go.transform.position = pos;
-        go.transform.rotation = Quaternion.LookRotation(forward);
-        ParticleSystem ps = go.AddComponent<ParticleSystem>();
-        ps.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
+        block.SetColor(BaseColorId, color);
+        block.SetColor(ColorId, color);
+        mr.SetPropertyBlock(block);
+    }
 
+    private static void TriggerPooledSlashSparks(ParticleSystem ps, Color sparkColor, Color coreSparkColor, bool is360)
+    {
+        if (ps == null) return;
+        ps.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
         var main = ps.main;
-        main.duration = 0.36f;
-        main.loop = false;
-        main.startLifetime = new ParticleSystem.MinMaxCurve(0.14f, 0.36f);
         main.startSpeed = new ParticleSystem.MinMaxCurve(4.2f, is360 ? 10.5f : 7.8f);
         main.startSize = new ParticleSystem.MinMaxCurve(0.055f, is360 ? 0.14f : 0.11f);
-        main.gravityModifier = 0.25f;
-        main.simulationSpace = ParticleSystemSimulationSpace.World;
-        main.startColor = new ParticleSystem.MinMaxGradient(sparkColor, new Color(2.2f, 2.1f, 1.7f, 1f));
-
-        var emission = ps.emission;
-        emission.rateOverTime = 0f;
-        emission.SetBursts(new[] { new ParticleSystem.Burst(0f, is360 ? 32 : 14) });
-
+        main.startColor = new ParticleSystem.MinMaxGradient(sparkColor, coreSparkColor);
+        ps.emission.SetBursts(new[] { new ParticleSystem.Burst(0f, is360 ? 32 : 14) });
         var shape = ps.shape;
         shape.shapeType = is360 ? ParticleSystemShapeType.Circle : ParticleSystemShapeType.Cone;
         shape.radius = is360 ? 1.25f : 0.45f;
-        if (!is360) shape.angle = 58f;
-        else shape.rotation = new Vector3(90f, 0f, 0f);
-
-        var colOver = ps.colorOverLifetime;
-        colOver.enabled = true;
-        colOver.color = CreateFadeOutGradient(Color.white, sparkColor, 1f);
-
-        var rend = ps.GetComponent<ParticleSystemRenderer>();
-        rend.material = additiveSparkMat;
-        rend.renderMode = ParticleSystemRenderMode.Stretch;
-        rend.velocityScale = 0.08f;
-        rend.lengthScale = 2.2f;
-
+        if (!is360)
+        {
+            shape.angle = 58f;
+            shape.rotation = Vector3.zero;
+        }
+        else
+        {
+            shape.rotation = new Vector3(90f, 0f, 0f);
+        }
         ps.Play();
-        Destroy(go, 0.95f);
     }
 
     private void SpawnLowSpinDust(Vector3 groundPos)
@@ -1155,7 +1506,6 @@ public class CombatVfxManager : MonoBehaviour
         GameObject root = new GameObject("VFX_LowSpinDust");
         root.transform.position = groundPos;
 
-        // Bụi đất quét tròn
         {
             GameObject go = new GameObject("DustRing");
             go.transform.SetParent(root.transform, false);
@@ -1190,7 +1540,6 @@ public class CombatVfxManager : MonoBehaviour
             ps.Play();
         }
 
-        // Tàn lửa xoay theo mặt đất
         {
             GameObject go = new GameObject("SpinEmbers");
             go.transform.SetParent(root.transform, false);
@@ -1228,8 +1577,6 @@ public class CombatVfxManager : MonoBehaviour
         Destroy(root, 1.3f);
     }
 
-    // ==================== BLOCK & PERFECT PARRY VFX (SEKIRO-STYLE) ====================
-
     private void SpawnBlockSparkInternal(Vector3 position, Vector3 normalDir, bool perfectParry)
     {
         normalDir.y = 0f;
@@ -1240,7 +1587,6 @@ public class CombatVfxManager : MonoBehaviour
         root.transform.position = position;
         root.transform.rotation = Quaternion.LookRotation(normalDir);
 
-        // 1. Chớp sao trung tâm rực sáng HDR (Starburst Clash)
         {
             GameObject go = new GameObject("ClashStar");
             go.transform.SetParent(root.transform, false);
@@ -1274,7 +1620,6 @@ public class CombatVfxManager : MonoBehaviour
             ps.Play();
         }
 
-        // 2. Tia lửa kim loại HDR bắn tung tóe (48 tia cho Perfect Parry)
         {
             GameObject go = new GameObject("MetallicSparks");
             go.transform.SetParent(root.transform, false);
@@ -1315,7 +1660,6 @@ public class CombatVfxManager : MonoBehaviour
             ps.Play();
         }
 
-        // 3. Vòng khiên năng lượng bật ra trước mặt
         {
             GameObject go = new GameObject("GuardRing");
             go.transform.SetParent(root.transform, false);
@@ -1349,7 +1693,6 @@ public class CombatVfxManager : MonoBehaviour
             ps.Play();
         }
 
-        // 4. Riêng Perfect Parry: thêm sóng xung kích mặt đất + chớp viền vàng + Hit-Stop + FOV Punch!
         if (perfectParry)
         {
             SpawnGroundShockwave(root.transform, new Vector3(0f, -0.95f, 0f), 6.2f, 0.42f, new Color(2.2f, 1.8f, 0.45f, 0.95f));
@@ -1367,8 +1710,6 @@ public class CombatVfxManager : MonoBehaviour
             perfectParry ? 11f : 6f, perfectParry ? 8.5f : 4.2f, perfectParry ? 0.34f : 0.2f));
         Destroy(root, 1.15f);
     }
-
-    // ==================== PARRY STUN HALO VFX ====================
 
     private void SpawnParryStunEffectInternal(Transform enemyTransform, float duration)
     {
@@ -1469,15 +1810,12 @@ public class CombatVfxManager : MonoBehaviour
         }
     }
 
-    // ==================== HEAL, GOLD, SPAWN, BOSS, CHECKPOINT, EQUIP, TRAP VFX ====================
-
     private void SpawnHealEffectInternal(Transform target, int healAmount, bool isParryHeal)
     {
         GameObject root = new GameObject("VFX_HealAura");
         root.transform.SetParent(target, false);
         root.transform.localPosition = Vector3.zero;
 
-        // 1. Các đốm sáng xanh ngọc-vàng bay xoắn quanh nhân vật
         {
             GameObject go = new GameObject("HealWisps");
             go.transform.SetParent(root.transform, false);
@@ -1519,7 +1857,6 @@ public class CombatVfxManager : MonoBehaviour
             ps.Play();
         }
 
-        // 2. Vòng sáng hồi phục lan dưới chân Player
         SpawnGroundShockwave(root.transform, new Vector3(0f, 0.12f, 0f), isParryHeal ? 2.8f : 3.6f, 0.55f,
             new Color(0.55f, 2.1f, 1.05f, 0.9f));
 
@@ -1543,7 +1880,6 @@ public class CombatVfxManager : MonoBehaviour
         GameObject root = new GameObject("VFX_GoldCollect");
         root.transform.position = position;
 
-        // Tia sao vàng lấp lánh tung lên
         {
             GameObject go = new GameObject("GoldStars");
             go.transform.SetParent(root.transform, false);
@@ -1579,7 +1915,6 @@ public class CombatVfxManager : MonoBehaviour
             ps.Play();
         }
 
-        // Vòng sáng vàng nhỏ
         {
             GameObject go = new GameObject("GoldRing");
             go.transform.SetParent(root.transform, false);
@@ -1620,15 +1955,33 @@ public class CombatVfxManager : MonoBehaviour
         Destroy(root, 0.85f);
     }
 
+    private static int GetCurrentMapBiomeIndex()
+    {
+        return StageManager.Instance != null ? StageManager.Instance.mapIndex : 1;
+    }
+
     private void SpawnEnemySpawnInternal(Vector3 groundPos, bool isBoss)
     {
+        int mapIdx = GetCurrentMapBiomeIndex();
+        bool isFrost = mapIdx == 2;
+        bool isInferno = mapIdx == 3;
+
         GameObject root = new GameObject(isBoss ? "VFX_BossSpawn" : "VFX_EnemySpawn");
         root.transform.position = groundPos;
 
-        Color ringCol = isBoss ? new Color(2.2f, 0.28f, 0.16f, 0.95f) : new Color(1.75f, 0.38f, 0.18f, 0.85f);
-        SpawnGroundShockwave(root.transform, new Vector3(0f, 0.14f, 0f), isBoss ? 8.5f : 3.4f, isBoss ? 0.95f : 0.55f, ringCol);
+        Color ringCol = isFrost
+            ? (isBoss ? new Color(0.32f, 1.95f, 2.45f, 0.96f) : new Color(0.28f, 1.55f, 2.25f, 0.88f))
+            : isInferno
+                ? (isBoss ? new Color(2.45f, 0.35f, 0.12f, 0.98f) : new Color(2.15f, 0.52f, 0.14f, 0.88f))
+                : (isBoss ? new Color(2.2f, 0.28f, 0.16f, 0.95f) : new Color(1.75f, 0.38f, 0.18f, 0.85f));
 
-        // Khói & tàn lửa triệu hồi bốc lên từ mặt đất
+        SpawnGroundShockwave(root.transform, new Vector3(0f, 0.14f, 0f), isBoss ? 8.8f : 3.6f, isBoss ? 0.95f : 0.58f, ringCol);
+        if (isFrost || isInferno)
+        {
+            Color innerRing = isFrost ? new Color(0.45f, 2.2f, 1.85f, 0.85f) : new Color(2.4f, 1.25f, 0.22f, 0.88f);
+            SpawnGroundShockwave(root.transform, new Vector3(0f, 0.18f, 0f), isBoss ? 5.6f : 2.3f, isBoss ? 0.72f : 0.45f, innerRing, 0.08f);
+        }
+
         {
             GameObject go = new GameObject("SummonEmbers");
             go.transform.SetParent(root.transform, false);
@@ -1636,29 +1989,31 @@ public class CombatVfxManager : MonoBehaviour
             ps.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
 
             var main = ps.main;
-            main.duration = 0.9f;
+            main.duration = 0.95f;
             main.loop = false;
-            main.startLifetime = new ParticleSystem.MinMaxCurve(0.45f, isBoss ? 1.25f : 0.8f);
-            main.startSpeed = new ParticleSystem.MinMaxCurve(1.8f, isBoss ? 5.6f : 3.4f);
-            main.startSize = new ParticleSystem.MinMaxCurve(0.1f, isBoss ? 0.28f : 0.16f);
-            main.gravityModifier = -0.35f;
+            main.startLifetime = new ParticleSystem.MinMaxCurve(0.45f, isBoss ? 1.35f : 0.85f);
+            main.startSpeed = new ParticleSystem.MinMaxCurve(2.0f, isBoss ? 5.8f : 3.6f);
+            main.startSize = new ParticleSystem.MinMaxCurve(0.1f, isBoss ? 0.28f : 0.18f);
+            main.gravityModifier = isFrost ? -0.25f : -0.38f;
             main.simulationSpace = ParticleSystemSimulationSpace.World;
-            main.startColor = isBoss
-                ? new Color(2.2f, 0.42f, 0.18f, 1f)
-                : new Color(1.8f, 0.52f, 0.22f, 0.95f);
+            main.startColor = isFrost
+                ? (isBoss ? new Color(0.38f, 2.05f, 2.4f, 1f) : new Color(0.45f, 1.75f, 2.25f, 0.95f))
+                : (isBoss ? new Color(2.35f, 0.48f, 0.16f, 1f) : new Color(1.9f, 0.56f, 0.22f, 0.95f));
 
             var emission = ps.emission;
             emission.rateOverTime = 0f;
-            emission.SetBursts(new[] { new ParticleSystem.Burst(0f, isBoss ? 42 : 16) });
+            emission.SetBursts(new[] { new ParticleSystem.Burst(0f, isBoss ? 48 : 20) });
 
             var shape = ps.shape;
             shape.shapeType = ParticleSystemShapeType.Circle;
-            shape.radius = isBoss ? 1.6f : 0.75f;
+            shape.radius = isBoss ? 1.75f : 0.82f;
             shape.rotation = new Vector3(-90f, 0f, 0f);
 
             var colOver = ps.colorOverLifetime;
             colOver.enabled = true;
-            colOver.color = CreateFadeOutGradient(new Color(1f, 0.75f, 0.35f), new Color(1f, 0.15f, 0.08f), 1f);
+            colOver.color = isFrost
+                ? CreateFadeOutGradient(new Color(0.65f, 1f, 1f), new Color(0.28f, 0.55f, 1f), 1f)
+                : CreateFadeOutGradient(new Color(1f, 0.78f, 0.35f), new Color(1f, 0.15f, 0.08f), 1f);
 
             var rend = ps.GetComponent<ParticleSystemRenderer>();
             rend.material = additiveStarMat;
@@ -1667,7 +2022,8 @@ public class CombatVfxManager : MonoBehaviour
 
         if (isBoss)
         {
-            StartCoroutine(SpawnVerticalEnergyPillar(groundPos, new Color(2.0f, 0.28f, 0.15f, 0.8f), 2.0f, 14f, 0.95f));
+            Color pillarCol = isFrost ? new Color(0.32f, 1.85f, 2.35f, 0.85f) : new Color(2.15f, 0.34f, 0.14f, 0.85f);
+            StartCoroutine(SpawnVerticalEnergyPillar(groundPos, pillarCol, 2.2f, 15f, 1.0f));
             if (ThirdPersonCamera.Instance != null)
             {
                 ThirdPersonCamera.Instance.AddCameraShake(0.28f, 0.4f);
@@ -1675,21 +2031,31 @@ public class CombatVfxManager : MonoBehaviour
             }
         }
 
-        StartCoroutine(FlashPointLight(groundPos + Vector3.up * 1.1f, new Color(1f, 0.32f, 0.14f), isBoss ? 14f : 6f, isBoss ? 8f : 3.5f, isBoss ? 0.7f : 0.35f));
-        Destroy(root, 1.8f);
+        Color flashLightCol = isFrost ? new Color(0.35f, 0.90f, 1f) : new Color(1f, 0.32f, 0.14f);
+        StartCoroutine(FlashPointLight(groundPos + Vector3.up * 1.1f, flashLightCol, isBoss ? 14f : 6.5f, isBoss ? 8f : 3.6f, isBoss ? 0.75f : 0.38f));
+        Destroy(root, 1.9f);
     }
 
     private void SpawnBossEnrageInternal(Transform bossTransform)
     {
+        int mapIdx = GetCurrentMapBiomeIndex();
+        bool isFrost = mapIdx == 2;
+
         Vector3 pos = bossTransform.position;
         GameObject root = new GameObject("VFX_BossEnrageBurst");
         root.transform.position = pos;
 
-        SpawnGroundShockwave(root.transform, new Vector3(0f, 0.18f, 0f), 10.5f, 0.75f, new Color(2.3f, 0.28f, 0.14f, 0.98f));
-        SpawnGroundShockwave(root.transform, new Vector3(0f, 0.22f, 0f), 7.2f, 0.55f, new Color(2.3f, 1.15f, 0.25f, 0.92f), 0.1f);
-        StartCoroutine(SpawnVerticalEnergyPillar(pos, new Color(2.2f, 0.32f, 0.12f, 0.88f), 2.4f, 15f, 0.9f));
-        StartCoroutine(FlashPointLight(pos + Vector3.up * 1.8f, new Color(1f, 0.25f, 0.12f), 18f, 12f, 0.8f));
-        TriggerScreenFlash(new Color(0.95f, 0.14f, 0.1f, 1f), 0.32f, 1.3f);
+        Color outerRing = isFrost ? new Color(0.30f, 1.85f, 2.45f, 0.98f) : new Color(2.3f, 0.28f, 0.14f, 0.98f);
+        Color innerRing = isFrost ? new Color(0.75f, 0.45f, 2.35f, 0.92f) : new Color(2.3f, 1.15f, 0.25f, 0.92f);
+        Color pillarCol = isFrost ? new Color(0.35f, 1.75f, 2.4f, 0.88f) : new Color(2.2f, 0.32f, 0.12f, 0.88f);
+        Color lightCol = isFrost ? new Color(0.32f, 0.88f, 1f) : new Color(1f, 0.25f, 0.12f);
+        Color screenCol = isFrost ? new Color(0.18f, 0.72f, 1f, 1f) : new Color(0.95f, 0.14f, 0.1f, 1f);
+
+        SpawnGroundShockwave(root.transform, new Vector3(0f, 0.18f, 0f), 11.0f, 0.75f, outerRing);
+        SpawnGroundShockwave(root.transform, new Vector3(0f, 0.22f, 0f), 7.6f, 0.55f, innerRing, 0.1f);
+        StartCoroutine(SpawnVerticalEnergyPillar(pos, pillarCol, 2.5f, 16f, 0.95f));
+        StartCoroutine(FlashPointLight(pos + Vector3.up * 1.8f, lightCol, 18f, 12f, 0.85f));
+        TriggerScreenFlash(screenCol, 0.30f, 1.35f);
 
         if (ThirdPersonCamera.Instance != null)
         {
@@ -1697,7 +2063,6 @@ public class CombatVfxManager : MonoBehaviour
             ThirdPersonCamera.Instance.AddFovPunch(5.0f);
         }
 
-        // Gắn hào quang lửa cuồng nộ cháy liên tục lên Boss cho đến khi bị hạ
         if (bossTransform.Find("BossEnrageAuraFX") == null)
         {
             GameObject aura = new GameObject("BossEnrageAuraFX");
@@ -1715,12 +2080,12 @@ public class CombatVfxManager : MonoBehaviour
             main.startSize = new ParticleSystem.MinMaxCurve(0.14f, 0.34f);
             main.gravityModifier = -0.45f;
             main.simulationSpace = ParticleSystemSimulationSpace.World;
-            main.startColor = new ParticleSystem.MinMaxGradient(
-                new Color(2.2f, 0.35f, 0.12f, 0.95f),
-                new Color(2.3f, 1.25f, 0.25f, 0.95f));
+            main.startColor = isFrost
+                ? new ParticleSystem.MinMaxGradient(new Color(0.28f, 1.85f, 2.35f, 0.95f), new Color(0.68f, 0.55f, 2.35f, 0.95f))
+                : new ParticleSystem.MinMaxGradient(new Color(2.2f, 0.35f, 0.12f, 0.95f), new Color(2.3f, 1.25f, 0.25f, 0.95f));
 
             var emission = ps.emission;
-            emission.rateOverTime = 24f;
+            emission.rateOverTime = 26f;
 
             var shape = ps.shape;
             shape.shapeType = ParticleSystemShapeType.Circle;
@@ -1734,14 +2099,61 @@ public class CombatVfxManager : MonoBehaviour
 
             var colOver = ps.colorOverLifetime;
             colOver.enabled = true;
-            colOver.color = CreateFadeOutGradient(new Color(1f, 0.72f, 0.22f), new Color(1f, 0.12f, 0.05f), 0.95f);
+            colOver.color = isFrost
+                ? CreateFadeOutGradient(new Color(0.45f, 0.95f, 1f), new Color(0.45f, 0.35f, 1f), 0.95f)
+                : CreateFadeOutGradient(new Color(1f, 0.72f, 0.22f), new Color(1f, 0.12f, 0.05f), 0.95f);
 
             var rend = ps.GetComponent<ParticleSystemRenderer>();
             rend.material = additiveSoftMat;
             ps.Play();
         }
 
-        Destroy(root, 2.0f);
+        Destroy(root, 2.1f);
+    }
+
+    private void AttachEnemyBiomeAuraInternal(Transform enemyTransform, int mapIndex, bool isElite)
+    {
+        if (enemyTransform.Find("UnitBiomeAuraFX") != null) return;
+        bool isFrost = mapIndex == 2;
+        if (!isFrost && mapIndex != 3) return;
+
+        GameObject aura = new GameObject("UnitBiomeAuraFX");
+        aura.transform.SetParent(enemyTransform, false);
+        aura.transform.localPosition = Vector3.up * 0.28f;
+
+        ParticleSystem ps = aura.AddComponent<ParticleSystem>();
+        ps.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
+
+        var main = ps.main;
+        main.duration = 2f;
+        main.loop = true;
+        main.maxParticles = isElite ? 28 : 16;
+        main.startLifetime = new ParticleSystem.MinMaxCurve(0.55f, 1.05f);
+        main.startSpeed = new ParticleSystem.MinMaxCurve(0.65f, 1.55f);
+        main.startSize = new ParticleSystem.MinMaxCurve(isElite ? 0.12f : 0.08f, isElite ? 0.24f : 0.16f);
+        main.gravityModifier = -0.25f;
+        main.simulationSpace = ParticleSystemSimulationSpace.World;
+        main.startColor = isFrost
+            ? new ParticleSystem.MinMaxGradient(new Color(0.32f, 1.85f, 2.3f, 0.85f), new Color(0.45f, 2.2f, 1.6f, 0.85f))
+            : new ParticleSystem.MinMaxGradient(new Color(2.4f, 0.55f, 0.12f, 0.85f), new Color(2.2f, 1.15f, 0.18f, 0.85f));
+
+        var emission = ps.emission;
+        emission.rateOverTime = isElite ? 14f : 8f;
+
+        var shape = ps.shape;
+        shape.shapeType = ParticleSystemShapeType.Circle;
+        shape.radius = isElite ? 0.65f : 0.45f;
+        shape.rotation = new Vector3(-90f, 0f, 0f);
+
+        var colOver = ps.colorOverLifetime;
+        colOver.enabled = true;
+        colOver.color = isFrost
+            ? CreateFadeOutGradient(new Color(0.5f, 0.96f, 1f), new Color(0.25f, 0.6f, 1f), 0.85f)
+            : CreateFadeOutGradient(new Color(1f, 0.72f, 0.2f), new Color(1f, 0.18f, 0.05f), 0.85f);
+
+        var rend = ps.GetComponent<ParticleSystemRenderer>();
+        rend.material = isElite ? additiveStarMat : additiveSoftMat;
+        ps.Play();
     }
 
     private void SpawnCheckpointActivateInternal(Vector3 pos)
@@ -1753,7 +2165,6 @@ public class CombatVfxManager : MonoBehaviour
         SpawnGroundShockwave(root.transform, new Vector3(0f, 0.18f, 0f), 5.0f, 0.6f, new Color(1.0f, 2.1f, 1.15f, 0.85f), 0.12f);
         StartCoroutine(SpawnVerticalEnergyPillar(pos, new Color(2.1f, 1.65f, 0.45f, 0.78f), 1.65f, 13f, 1.1f));
 
-        // Hạt lửa thánh vàng óng bay lên
         {
             GameObject go = new GameObject("SanctuarySparks");
             go.transform.SetParent(root.transform, false);
@@ -1895,7 +2306,7 @@ public class CombatVfxManager : MonoBehaviour
 
     private void SpawnFootstepDustInternal(Vector3 groundPos)
     {
-        // Tái sử dụng 1 ParticleSystem duy nhất cho bụi bước chân (0 Instantiate/Destroy khi chạy)
+
         if (footstepDustPs == null)
         {
             GameObject go = new GameObject("VFX_FootDust_Pooled");
@@ -1990,8 +2401,6 @@ public class CombatVfxManager : MonoBehaviour
             yield return new WaitForSecondsRealtime(0.28f);
         }
     }
-
-    // ==================== HELPER SUB-EFFECTS ====================
 
     private void SpawnGroundShockwave(Transform parent, Vector3 localOffset, float maxSize, float lifetime, Color hdrColor, float delay = 0f)
     {
@@ -2094,7 +2503,7 @@ public class CombatVfxManager : MonoBehaviour
 
     private IEnumerator FlashPointLight(Vector3 pos, Color color, float range, float startIntensity, float duration)
     {
-        // Giới hạn số Point Light động cùng lúc để tránh tụt FPS khi chém AoE nhiều quái
+
         if (activeFlashLights >= MaxConcurrentFlashLights) yield break;
 
         activeFlashLights++;
@@ -2136,8 +2545,7 @@ public class CombatVfxManager : MonoBehaviour
         if (mat.HasProperty(ColorId)) mat.SetColor(ColorId, color);
     }
 
-    // ==================== PROCEDURAL HDR TEXTURES & URP MATERIALS ====================
-
+    // Khởi tạo các material và texture thủ tục dùng chung cho hệ thống VFX
     private void EnsureMaterials()
     {
         if (additiveSoftMat != null && additiveSparkMat != null && additiveRingMat != null
@@ -2221,7 +2629,6 @@ public class CombatVfxManager : MonoBehaviour
                 if (arcAngle > Mathf.PI) arcAngle = 2f * Mathf.PI - arcAngle;
                 float arcFade = Mathf.Clamp01(1f - arcAngle / 1.55f);
 
-                // Mép ngoài sắc nét + đuôi mờ mịn vào bên trong kiểu vệt kiếm Anime/AAA
                 float outerEdge = 0.86f;
                 float bandWidth = 0.14f + 0.24f * arcFade;
                 float innerDist = outerEdge - dist;
@@ -2240,7 +2647,6 @@ public class CombatVfxManager : MonoBehaviour
                     }
                 }
 
-                // Thêm vệt gợn năng lượng tinh tế bên trong vệt chém
                 float streak = 0.85f + 0.15f * Mathf.Sin(dist * 34f + angle * 5f);
                 alpha = Mathf.Clamp01(alpha * Mathf.Pow(arcFade, 0.78f) * streak * 1.35f);
 
@@ -2297,7 +2703,6 @@ public class CombatVfxManager : MonoBehaviour
                 float dist = Mathf.Sqrt(dx * dx + dy * dy);
                 float absDx = Mathf.Abs(dx);
 
-                // Nhân tròn sáng ở tâm + 4 tia sao chữ thập sắc nét
                 float core = Mathf.Pow(Mathf.Clamp01(1f - dist * 1.35f), 2.2f);
                 float spikeH = Mathf.Pow(Mathf.Clamp01(1f - absDy * 7.5f), 2.0f) * Mathf.Clamp01(1f - absDx);
                 float spikeV = Mathf.Pow(Mathf.Clamp01(1f - absDx * 7.5f), 2.0f) * Mathf.Clamp01(1f - absDy);
@@ -2321,13 +2726,13 @@ public class CombatVfxManager : MonoBehaviour
         for (int y = 0; y < height; y++)
         {
             int row = y * width;
-            float v = (float)y / (height - 1); // 0 = đáy, 1 = đỉnh
+            float v = (float)y / (height - 1);
             float verticalFade = Mathf.SmoothStep(0f, 0.14f, v) * Mathf.Pow(1f - v, 1.55f);
 
             for (int x = 0; x < width; x++)
             {
                 float u = (float)x / width;
-                // Sọc ánh sáng dọc liền mạch vòng quanh trụ (tuần hoàn 2*PI để không bao giờ có vết nối)
+
                 float streaks = 0.72f + 0.28f * Mathf.Sin(u * Mathf.PI * 6f);
                 float alpha = Mathf.Clamp01(verticalFade * streaks * 1.15f);
                 pixels[row + x] = new Color32(255, 255, 255, (byte)(alpha * 255f));
@@ -2380,7 +2785,7 @@ public class CombatVfxManager : MonoBehaviour
             {
                 float dx = (x - half + 0.5f) * invHalf;
                 float dist = Mathf.Sqrt(dx * dx + dy * dy);
-                // Vòng chính sáng rõ + vòng phụ mảnh bên trong tạo chiều sâu ma pháp
+
                 float outerRing = Mathf.Clamp01(1f - Mathf.Abs(dist - 0.84f) / 0.13f);
                 float innerRing = Mathf.Clamp01(1f - Mathf.Abs(dist - 0.64f) / 0.055f) * 0.48f;
                 float alpha = Mathf.Clamp01(outerRing * outerRing + innerRing * innerRing);

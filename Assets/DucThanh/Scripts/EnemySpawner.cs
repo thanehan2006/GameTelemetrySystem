@@ -1,9 +1,6 @@
 using UnityEngine;
 
-/// <summary>
-/// Quản lý việc spawn Enemy quanh Player.
-/// Tối ưu hóa: tự động tìm Player nếu null, không spawn khi GameOver, spawn ngẫu nhiên theo bán kính cấu hình.
-/// </summary>
+// Bộ sinh quái đơn giản theo chu kỳ thời gian xung quanh vị trí người chơi
 public class EnemySpawner : MonoBehaviour
 {
     [Header("Enemy Prefab")]
@@ -19,6 +16,7 @@ public class EnemySpawner : MonoBehaviour
 
     private float timer;
 
+    // Khởi tạo đồng hồ đếm và tìm mục tiêu Player
     void Start()
     {
         FindPlayerTarget();
@@ -36,6 +34,7 @@ public class EnemySpawner : MonoBehaviour
         }
     }
 
+    // Đếm thời gian hồi để gọi sinh quái khi chưa đạt giới hạn tối đa
     void Update()
     {
         if (GameOverManager.IsGameOver) return;
@@ -56,6 +55,7 @@ public class EnemySpawner : MonoBehaviour
         }
     }
 
+    // Chọn vị trí ngẫu nhiên trên vòng tròn quanh người chơi và tạo quái
     void SpawnEnemy()
     {
         Vector2 randomCircle = Random.insideUnitCircle.normalized;

@@ -1,9 +1,6 @@
 using UnityEngine;
 
-/// <summary>
-/// Xử lý bắn súng của Player.
-/// Tối ưu hóa: kiểm tra GameOverManager, fallback tự động lấy main camera nếu chưa gán trong Inspector.
-/// </summary>
+// Hỗ trợ bắn tia raycast theo hướng tâm màn hình khi nhấn chuột trái
 public class PlayerShooter : MonoBehaviour
 {
     [Header("Shooting Settings")]
@@ -13,10 +10,11 @@ public class PlayerShooter : MonoBehaviour
     public float fireRate = 0.25f;
 
     [Header("Layer Mask")]
-    [SerializeField] private LayerMask hitLayers = ~0; // Mặc định bắn trúng mọi layer
+    [SerializeField] private LayerMask hitLayers = ~0;
 
     private float nextFireTime;
 
+    // Gán camera chính làm gốc phóng tia nếu chưa thiết lập sẵn
     void Start()
     {
         if (playerCamera == null)
@@ -29,9 +27,10 @@ public class PlayerShooter : MonoBehaviour
         }
     }
 
+    // Kiểm tra thao tác chuột trái để gọi hàm bắn
     void Update()
     {
-        // Không thể bắn khi Game Over hoặc chuột chưa khóa
+
         if (GameOverManager.IsGameOver) return;
 
         if (Input.GetMouseButton(0) && Time.time >= nextFireTime && Cursor.lockState == CursorLockMode.Locked)
@@ -41,6 +40,7 @@ public class PlayerShooter : MonoBehaviour
         }
     }
 
+    // Phát tia raycast từ giữa màn hình và gây sát thương lên EnemyHealth nếu trúng
     void Shoot()
     {
         if (playerCamera == null)

@@ -1,5 +1,6 @@
 using UnityEngine;
 
+// Quản lý sinh quái Orc theo đợt và tăng dần độ khó theo cấp độ màn
 public class OrcEnemySpawner : MonoBehaviour
 {
     [Header("Enemy Prefabs to Spawn")]
@@ -22,9 +23,10 @@ public class OrcEnemySpawner : MonoBehaviour
     private int currentLevel = 1;
     private float timer;
 
+    // Tự động tìm Player nếu chưa được gán sẵn trong Inspector
     void Start()
     {
-        // Nhường quyền sinh quái cho StageManager khi đang dùng kịch bản 3 Màn
+
         if (StageManager.Instance != null)
         {
             enabled = false;
@@ -42,6 +44,7 @@ public class OrcEnemySpawner : MonoBehaviour
         }
     }
 
+    // Kiểm tra số lượng quái còn sống và sinh bổ sung theo chu kỳ
     void Update()
     {
         if (GameOverManager.IsGameOver || WeaponShopManager.IsShopOpen) return;
@@ -78,6 +81,7 @@ public class OrcEnemySpawner : MonoBehaviour
         }
     }
 
+    // Chọn prefab quái ngẫu nhiên, đặt lên NavMesh quanh người chơi và nhân chỉ số
     void SpawnEnemy()
     {
         Vector2 randomDirection = Random.insideUnitCircle.normalized;
@@ -89,7 +93,6 @@ public class OrcEnemySpawner : MonoBehaviour
         float distance = Random.Range(minimumDistance, spawnRadius);
         Vector3 spawnPosition = player.position + new Vector3(randomDirection.x, 0f, randomDirection.y) * distance;
 
-        // Đặt độ cao mặc định ngang Player rồi Raycast từ trên xuống để chạm đúng mặt đất
         spawnPosition.y = player.position.y;
 
         if (Physics.Raycast(new Vector3(spawnPosition.x, player.position.y + 50f, spawnPosition.z), Vector3.down, out RaycastHit hit, 100f, ~0, QueryTriggerInteraction.Ignore))
@@ -97,7 +100,6 @@ public class OrcEnemySpawner : MonoBehaviour
             spawnPosition.y = hit.point.y;
         }
 
-        // Chọn ngẫu nhiên một prefab trong danh sách enemyPrefabs
         int randomIndex = Random.Range(0, enemyPrefabs.Length);
         GameObject selectedPrefab = enemyPrefabs[randomIndex];
 

@@ -1,5 +1,6 @@
 using UnityEngine;
 
+// Xử lý vùng va chạm vũ khí của quái, tính giảm sát thương khi đỡ đòn và kích hoạt Perfect Parry
 public class OrcWeaponHitbox : MonoBehaviour
 {
     private OrcEnemyAI ownerAI;
@@ -7,6 +8,7 @@ public class OrcWeaponHitbox : MonoBehaviour
     private bool hitboxActive = false;
     private bool hasDealtDamageInCurrentSwing = false;
 
+    // Gán chủ thể quái sở hữu hitbox và mức sát thương của đòn đánh
     public void Initialize(OrcEnemyAI owner, int attackDamage)
     {
         ownerAI = owner;
@@ -18,12 +20,14 @@ public class OrcWeaponHitbox : MonoBehaviour
         damage = attackDamage;
     }
 
+    // Bật collider vũ khí trong pha chém chính để bắt va chạm
     public void EnableHitbox()
     {
         hitboxActive = true;
         hasDealtDamageInCurrentSwing = false;
     }
 
+    // Tắt collider vũ khí khi kết thúc đòn đánh
     public void DisableHitbox()
     {
         hitboxActive = false;
@@ -40,17 +44,16 @@ public class OrcWeaponHitbox : MonoBehaviour
         CheckHit(other);
     }
 
+    // Kiểm tra va chạm với Player để xét Perfect Parry, Block thường hoặc trừ máu trực tiếp
     private void CheckHit(Collider other)
     {
         if (!hitboxActive || hasDealtDamageInCurrentSwing) return;
 
-        // Bỏ qua chính bản thân enemy hoặc các quái vật khác
         if (ownerAI != null && (other.transform == ownerAI.transform || other.transform.IsChildOf(ownerAI.transform)))
         {
             return;
         }
 
-        // Kiểm tra xem có trúng Player hoặc PlayerHealth không
         PlayerHealth playerHealth = other.GetComponent<PlayerHealth>();
         if (playerHealth == null)
         {
@@ -65,7 +68,6 @@ public class OrcWeaponHitbox : MonoBehaviour
             Vector3 hitPoint = playerHealth.transform.position + Vector3.up * 1.15f;
             PlayerController playerController = playerHealth.GetComponent<PlayerController>();
 
-            // Xử lý Đỡ Đòn (Block / Perfect Parry) khi Player đang giữ Chuột Phải
             if (playerController != null && playerController.IsBlocking)
             {
                 bool perfectParry = playerController.IsPerfectParryWindow;
@@ -82,7 +84,7 @@ public class OrcWeaponHitbox : MonoBehaviour
 
                 if (perfectParry)
                 {
-                    // Perfect Parry: 0 sát thương + đẩy choáng ngược lại Orc + hồi 5% Max HP!
+
                     int healedHp = playerHealth.HealPercent(playerController.perfectParryHealPercent);
 
                     CombatVfxManager.SpawnFloatingText(guardPos + Vector3.up * 0.55f, "PARRY!", new Color(1f, 0.9f, 0.3f), 1.2f, 1.0f);
@@ -109,7 +111,7 @@ public class OrcWeaponHitbox : MonoBehaviour
                 }
                 else
                 {
-                    // Block thường: giảm 80% sát thương & giảm mạnh lực đẩy lùi, không phun máu
+
                     int reducedDamage = Mathf.Max(1, Mathf.RoundToInt(damage * (1f - playerController.blockDamageReduction)));
                     int blockedAmount = Mathf.Max(0, damage - reducedDamage);
                     playerHealth.TakeDamage(reducedDamage);

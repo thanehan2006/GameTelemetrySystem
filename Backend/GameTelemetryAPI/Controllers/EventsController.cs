@@ -8,6 +8,7 @@ namespace GameTelemetryAPI.Controllers
 {
     [ApiController]
     [Route("api/[controller]")]
+    // Controller tiếp nhận và truy vấn các sự kiện gameplay từ Unity client
     public class EventsController : ControllerBase
     {
         private readonly GameTelemetryContext _context;
@@ -17,9 +18,7 @@ namespace GameTelemetryAPI.Controllers
             _context = context;
         }
 
-        /// <summary>
-        /// Ghi nhận 1 sự kiện telemetry từ game (login, game_start, level_start, level_complete, player_dead, game_exit, ...)
-        /// </summary>
+        // Ghi nhận một sự kiện đơn lẻ vào phiên chơi tương ứng
         [HttpPost]
         public async Task<ActionResult<GameEventResponseDto>> RecordEvent([FromBody] CreateGameEventDto dto)
         {
@@ -28,7 +27,6 @@ namespace GameTelemetryAPI.Controllers
                 return BadRequest(ModelState);
             }
 
-            // Kiểm tra Session có tồn tại không
             var sessionExists = await _context.GameSessions.AnyAsync(s => s.SessionId == dto.SessionId);
             if (!sessionExists)
             {
@@ -56,9 +54,7 @@ namespace GameTelemetryAPI.Controllers
             });
         }
 
-        /// <summary>
-        /// Gửi theo lô (Batch) nhiều sự kiện cùng lúc (phù hợp khi game gom event gửi 1 lần hoặc khi mạng chập chờn)
-        /// </summary>
+        // Ghi nhận đồng loạt nhiều sự kiện trong một lần gọi API
         [HttpPost("batch")]
         public async Task<IActionResult> RecordEventsBatch([FromBody] CreateBatchGameEventsDto dto)
         {
@@ -87,9 +83,7 @@ namespace GameTelemetryAPI.Controllers
             return Ok(new { message = $"Đã ghi nhận thành công {events.Count} sự kiện", count = events.Count });
         }
 
-        /// <summary>
-        /// Lấy chi tiết một sự kiện theo ID
-        /// </summary>
+        // Lấy thông tin chi tiết của một sự kiện theo EventId
         [HttpGet("{id:long}")]
         public async Task<ActionResult<GameEventResponseDto>> GetEventById(long id)
         {

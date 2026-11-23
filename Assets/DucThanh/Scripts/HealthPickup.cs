@@ -4,12 +4,7 @@ using UnityEngine.Rendering;
 using UnityEditor;
 #endif
 
-/// <summary>
-/// Vật phẩm Bình Hồi Máu (PolyOne Free Rewards — SM_Rewards_Bottle):
-/// - Tự động nâng cấp cả những Nấm hồi máu cũ đã bake trong Scene thành Bình Máu thủy tinh 3D.
-/// - Có vòng sáng ma pháp trên mặt đất, luồng sáng mờ dẫn mắt, hạt sao lấp lánh bay lên và xoay lơ lửng.
-/// - Khi Player chạm vào: hồi HP, kích hoạt vòng xoáy hồi máu HDR + chữ nổi (+XX HP) + Telemetry "item_pickup".
-/// </summary>
+// Vật phẩm bình hồi máu trên bản đồ và rơi từ quái kèm hiệu ứng lơ lửng phát sáng
 public class HealthPickup : MonoBehaviour
 {
     public const string PotionAssetPath = "Assets/PolyOne/Free Rewards/Prefabs/SM_Rewards_Bottle.prefab";
@@ -39,6 +34,7 @@ public class HealthPickup : MonoBehaviour
     private float phaseOffset;
     private bool collected;
 
+    // Đăng ký prefab bình máu được nạp trước từ Preloader
     public static void RegisterPreloadedPrefab(GameObject potionPrefab)
     {
         if (potionPrefab != null)
@@ -63,6 +59,7 @@ public class HealthPickup : MonoBehaviour
         return cachedPotionPrefab;
     }
 
+    // Khởi tạo hình khối 3D và vòng hào quang nhận diện cho bình máu
     void Start()
     {
         basePosition = transform.position;
@@ -104,7 +101,7 @@ public class HealthPickup : MonoBehaviour
 
     private void EnsurePotionVisual()
     {
-        // Kiểm tra xem object hiện tại đã dùng mesh SM_Rewards_Bottle hay chưa
+
         bool alreadyBottle = false;
         foreach (MeshFilter mf in GetComponentsInChildren<MeshFilter>(true))
         {
@@ -118,7 +115,7 @@ public class HealthPickup : MonoBehaviour
 
         if (!alreadyBottle)
         {
-            // Ẩn toàn bộ mesh cũ (ví dụ SM_Mushroom_01 đã bake sẵn trong scene hoặc sphere fallback)
+
             foreach (Renderer r in GetComponentsInChildren<Renderer>(true))
             {
                 if (r is ParticleSystemRenderer) continue;
@@ -146,7 +143,7 @@ public class HealthPickup : MonoBehaviour
         }
         else if (visualTransform == transform)
         {
-            // Nếu root chính là SM_Rewards_Bottle prefab, chuẩn hóa tỷ lệ hiển thị dễ nhìn trên Terrain
+
             if (transform.localScale.x < 1.5f)
             {
                 transform.localScale = Vector3.one * 2.1f;
@@ -156,7 +153,7 @@ public class HealthPickup : MonoBehaviour
 
     private void EnsureAuraVfx()
     {
-        // 1. Đèn điểm hồng-ngọc ấm dịu
+
         glowLight = GetComponentInChildren<Light>();
         if (glowLight == null)
         {
@@ -170,12 +167,11 @@ public class HealthPickup : MonoBehaviour
         glowLight.range = 5.2f;
         glowLight.intensity = baseLightIntensity;
 
-        // 2. Vòng sáng hồi phục trên mặt đất
         if (transform.Find("PotionGroundRing") == null)
         {
             GameObject ringObj = new GameObject("PotionGroundRing");
             ringObj.transform.SetParent(transform, false);
-            // Khử scale của parent nếu root bị scale (trường hợp root chính là prefab đã scale 2.1x)
+
             float invScale = transform.localScale.x > 0.01f ? 1f / transform.localScale.x : 1f;
             ringObj.transform.localPosition = new Vector3(0f, -0.05f * invScale, 0f);
             ringObj.transform.localScale = new Vector3(1.35f * invScale, 1f * invScale, 1.35f * invScale);
@@ -190,7 +186,6 @@ public class HealthPickup : MonoBehaviour
             groundRingTransform = ringObj.transform;
         }
 
-        // 3. Cột sáng mờ thanh mảnh giúp người chơi dễ nhận ra bình máu từ xa
         if (transform.Find("PotionLightBeam") == null)
         {
             float invScale = transform.localScale.x > 0.01f ? 1f / transform.localScale.x : 1f;
@@ -212,7 +207,6 @@ public class HealthPickup : MonoBehaviour
             }
         }
 
-        // 4. Hạt sao lấp lánh bay lên quanh bình máu
         if (transform.Find("PotionSparkles") == null)
         {
             float invScale = transform.localScale.x > 0.01f ? 1f / transform.localScale.x : 1f;
@@ -261,6 +255,7 @@ public class HealthPickup : MonoBehaviour
         }
     }
 
+    // Tạo chuyển động xoay, nhấp nhô và tự động hồi máu khi người chơi chạm vào
     void Update()
     {
         if (collected || GameOverManager.IsGameOver || WeaponShopManager.IsShopOpen) return;
@@ -276,7 +271,6 @@ public class HealthPickup : MonoBehaviour
         diff.y = 0f;
         float horizSqrDist = diff.sqrMagnitude;
 
-        // Distance culling: tắt đèn & bỏ qua xoay/nhấp nhô khi Player ở xa > 26m để giảm tải GPU/CPU
         const float activeVisualRadiusSqr = 26f * 26f;
         bool inVisualRange = horizSqrDist <= activeVisualRadiusSqr;
         if (glowLight != null && glowLight.enabled != inVisualRange)
@@ -318,6 +312,7 @@ public class HealthPickup : MonoBehaviour
         }
     }
 
+    // Hồi máu cho người chơi, phát hiệu ứng hồi phục và ghi nhận telemetry
     private void Collect()
     {
         collected = true;

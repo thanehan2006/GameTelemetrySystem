@@ -2,6 +2,7 @@ using System.ComponentModel.DataAnnotations;
 
 namespace GameTelemetryAPI.DTOs
 {
+    // DTO nhận thông tin đăng ký tài khoản người chơi mới
     public class RegisterPlayerDto
     {
         [Required(ErrorMessage = "Tên người chơi không được để trống")]
@@ -13,6 +14,7 @@ namespace GameTelemetryAPI.DTOs
         public string Password { get; set; } = string.Empty;
     }
 
+    // DTO nhận thông tin đăng nhập từ game client
     public class LoginPlayerDto
     {
         [Required(ErrorMessage = "Tên người chơi không được để trống")]
@@ -24,6 +26,7 @@ namespace GameTelemetryAPI.DTOs
         public string Password { get; set; } = string.Empty;
     }
 
+    // DTO trả về thông tin người chơi sau khi xác thực hoặc truy vấn
     public class PlayerResponseDto
     {
         public int PlayerId { get; set; }

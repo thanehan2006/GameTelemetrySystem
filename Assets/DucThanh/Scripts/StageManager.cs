@@ -1,16 +1,11 @@
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.AI;
 using UnityEngine.UI;
 using TMPro;
 
-/// <summary>
-/// Điều phối toàn bộ kịch bản Gameplay 3 Màn (Action Roguelite - Chinh Phục 3 Cứ Điểm) chuẩn Đề 9:
-/// - Màn 1: Trại Rừng Ngoại Vi (Tutorial & 2 Wave Orc Trinh Sát, Skybox Bình Minh)
-/// - Màn 2: Thung Lũng Bẫy & Lính Khiên (Bẫy Gai + Orc Tanker Khiên + Orc Rìu, Skybox Hoàng Hôn)
-/// - Màn 3: Mỏ Vàng Bị Chiếm (Boss Đại Tướng Orc Warlord + Phase 2 gọi đệ tử, Skybox Đêm Trăng)
-/// Tự động gửi đầy đủ Telemetry chuẩn Đề 9: level_start, level_complete, boss_killed, checkpoint_reached, item_pickup, trap_hit, Win/Lose.
-/// </summary>
+// Điều phối toàn bộ tiến trình 3 màn chơi trong mỗi bản đồ, sinh đợt quái, boss, bẫy gai, checkpoint, dẫn đường và HUD nhiệm vụ
 public class StageManager : MonoBehaviour
 {
     private static readonly int BaseColorId = Shader.PropertyToID("_BaseColor");
@@ -30,11 +25,17 @@ public class StageManager : MonoBehaviour
         Completed
     }
 
-    [Header("Enemy Prefabs (Tận dụng sẵn từ Assets/DucThanh/Prefabs)")]
+    [Header("Enemy Prefabs")]
     public GameObject scoutOrcPrefab;
     public GameObject axeOrcPrefab;
     public GameObject shieldTankPrefab;
     public GameObject bossOrcPrefab;
+
+    [Header("Map Enemy Roster")]
+    public GameObject[] stage1ExtraEnemyPrefabs;
+    public GameObject[] stage2TankPrefabs;
+    public GameObject[] stage2StrikerPrefabs;
+    public GameObject[] stage3BossGuardPrefabs;
 
     [Header("Environment & Interactive Props")]
     public GameObject spikeTrapPrefab;
@@ -45,7 +46,7 @@ public class StageManager : MonoBehaviour
     public GameObject stoneWallPrefab;
     public GameObject fireflyFxPrefab;
 
-    [Header("Skyboxes theo từng Màn (LaFinca Midgard)")]
+    [Header("Stage Skyboxes")]
     public Material skyboxStage1Dawn;
     public Material skyboxStage2Sunset;
     public Material skyboxStage3Lunar;
@@ -55,6 +56,33 @@ public class StageManager : MonoBehaviour
     public Vector3 stage2Center = new Vector3(298f, 15f, 296f);
     public Vector3 stage3Center = new Vector3(230f, 18f, 240f);
     public float zoneTriggerRadius = 28f;
+
+    [Header("Map Identity & Next Map Progression")]
+    public int mapIndex = 1;
+    public string mapDisplayName = "Rừng Orc & Mỏ Vàng";
+    public string nextMapSceneName = "Lv2";
+
+    [Header("Tùy biến Nội dung & Tên Quái theo Map")]
+    public string stage1Title = "MÀN 1/3 • TRẠI RỪNG NGOẠI VI";
+    public string stage1Banner = "MÀN 1: TRẠI RỪNG NGOẠI VI\nTiêu diệt quân trinh sát Orc!";
+    public string stage1ClearBanner = "HOÀN THÀNH MÀN 1!\nHãy theo cột sáng vàng đến Thung Lũng Bẫy!";
+    public string travelStage2Title = "ĐẾN MÀN 2 • THUNG LŨNG BẪY";
+    public string stage2Title = "MÀN 2/3 • THUNG LŨNG BẪY & LÍNH KHIÊN";
+    public string stage2Banner = "MÀN 2: THUNG LŨNG BẪY & LÍNH KHIÊN\nCẩn thận bẫy gai và Orc Tanker!";
+    public string stage2Wave2Banner = "ĐỢT 2 — LÍNH KHIÊN & RÌU TĂNG VIỆN!";
+    public string stage2ClearBanner = "HOÀN THÀNH MÀN 2!\nTiến tới Mỏ Vàng Bị Chiếm tiêu diệt BOSS!";
+    public string travelStage3Title = "ĐẾN MÀN 3 • MỎ VÀNG BỊ CHIẾM (BOSS)";
+    public string stage3Title = "MÀN 3/3 • ĐẤU TRƯỜNG MỎ VÀNG";
+    public string bossDisplayName = "ĐẠI TƯỚNG ORC WARLORD";
+    public string bossIntroBanner = "MÀN 3: ĐẠI TƯỚNG ORC WARLORD!\nHạ gục Boss để giải phóng Mỏ Vàng!";
+    public string bossVictoryBanner = "CHIẾN THẮNG! ĐẠI TƯỚNG ORC ĐÃ BỊ TIÊU DIỆT!";
+    public string victorySubtitle = "Đại Tướng Orc Warlord đã bị tiêu diệt. Mỏ Vàng và khu rừng đã được giải phóng!";
+
+    [Header("Cân bằng Độ khó & Hiệu ứng Map")]
+    public float enemyHpMultiplier = 1f;
+    public float enemyDamageMultiplier = 1f;
+    public Color stage2UnitAuraColor = new Color(0.3f, 0.7f, 1f);
+    public Color bossAuraColor = new Color(1f, 0.18f, 0.12f);
 
     public int CurrentStage { get; private set; } = 1;
 
@@ -71,7 +99,6 @@ public class StageManager : MonoBehaviour
     private OrcEnemyAI activeBossAI;
     private bool bossEnraged;
 
-    // Waypoint Beacon dẫn đường (HDR Light Pillar + Rotating Rune Ring + Motes)
     private GameObject beaconObject;
     private Transform beaconRingTransform;
     private Material beaconBeamMat;
@@ -79,7 +106,6 @@ public class StageManager : MonoBehaviour
     private ParticleSystem beaconMotesPs;
     private Vector3 currentWaypointTarget;
 
-    // Runtime HUD
     private TMP_Text hudStageTitleText;
     private TMP_Text hudObjectiveText;
     private TMP_Text hudDashText;
@@ -87,16 +113,24 @@ public class StageManager : MonoBehaviour
     private Slider bossHpSlider;
     private TMP_Text bossNameText;
     private TMP_Text bossHpValueText;
+    private Image bossFillImage;
+    private Image bossGhostFillImage;
+    private Image bossFrameImage;
+    private float bossHpRatio = 1f;
+    private float bossGhostHpRatio = 1f;
+    private float bossGhostHoldTimer;
     private GameObject bannerRoot;
     private TMP_Text bannerText;
+    private CanvasGroup bannerCanvasGroup;
+    private float bannerStartTime;
     private float bannerHideTime;
 
-    // Dirty-tracking cho HUD (tránh tạo string & rebuild TMP mỗi frame)
     private StagePhase lastHudPhase = (StagePhase)(-1);
     private int lastHudWave = -1;
     private int lastHudMetric = int.MinValue;
     private int lastDashBlockingState = -1;
 
+    // Khởi tạo instance, đọc hệ số độ khó theo map và áp dụng tối ưu hiệu năng
     private void Awake()
     {
         if (Instance != null && Instance != this)
@@ -108,18 +142,17 @@ public class StageManager : MonoBehaviour
         CurrentStage = 1;
     }
 
+    // Dựng vật thể môi trường, HUD, cột sáng dẫn đường và bắt đầu Màn 1
     private void Start()
     {
         ApplyRuntimePerformanceOptimizations();
         ResolvePlayer();
 
-        // Đồng bộ để ScoreManager chỉ quản lý EXP nhân vật, không gửi trùng level_start/complete của Màn chơi
         if (ScoreManager.Instance != null)
         {
             ScoreManager.Instance.manageStageTelemetry = false;
         }
 
-        // Bám mặt đất chính xác cho tọa độ 3 khu vực
         stage1Center = SnapPositionToTerrain(stage1Center);
         stage2Center = SnapPositionToTerrain(stage2Center);
         stage3Center = SnapPositionToTerrain(stage3Center);
@@ -138,6 +171,7 @@ public class StageManager : MonoBehaviour
         if (beaconRingMat != null) Destroy(beaconRingMat);
     }
 
+    // Theo dõi điều kiện hoàn thành từng màn và cập nhật hướng dẫn trên HUD
     private void Update()
     {
         if (beaconRingTransform != null && beaconObject != null && beaconObject.activeSelf)
@@ -145,10 +179,22 @@ public class StageManager : MonoBehaviour
             beaconRingTransform.Rotate(Vector3.up, 38f * Time.deltaTime, Space.World);
         }
 
-        if (bannerRoot != null && bannerRoot.activeSelf && Time.unscaledTime >= bannerHideTime)
+        if (bannerRoot != null && bannerRoot.activeSelf)
         {
-            bannerRoot.SetActive(false);
+            float now = Time.unscaledTime;
+            if (now >= bannerHideTime)
+            {
+                bannerRoot.SetActive(false);
+            }
+            else if (bannerCanvasGroup != null)
+            {
+                float fadeIn = Mathf.Clamp01((now - bannerStartTime) / 0.22f);
+                float fadeOut = Mathf.Clamp01((bannerHideTime - now) / 0.38f);
+                bannerCanvasGroup.alpha = Mathf.Min(fadeIn, fadeOut);
+            }
         }
+
+        UpdateBossBarVisuals();
 
         if (GameOverManager.IsGameOver || WeaponShopManager.IsShopOpen) return;
 
@@ -163,13 +209,57 @@ public class StageManager : MonoBehaviour
         UpdatePhaseLogic();
     }
 
+    // Hiển thị thông báo sự kiện ở chính giữa màn hình kèm hiệu ứng mờ vào/ra mượt mà
     public void ShowBanner(string message, Color color, float duration = 2.5f)
     {
         if (bannerRoot == null || bannerText == null) return;
         bannerText.text = message;
         bannerText.color = color;
+        bannerStartTime = Time.unscaledTime;
+        bannerHideTime = bannerStartTime + Mathf.Max(0.8f, duration);
+        if (bannerCanvasGroup != null) bannerCanvasGroup.alpha = 0f;
         bannerRoot.SetActive(true);
-        bannerHideTime = Time.unscaledTime + duration;
+    }
+
+    // Cập nhật thanh sát thương trễ và nhịp phát sáng khi Boss vào pha cuồng nộ
+    private void UpdateBossBarVisuals()
+    {
+        if (bossBarRoot == null || !bossBarRoot.activeSelf) return;
+
+        float dt = Time.unscaledDeltaTime;
+        if (bossGhostFillImage != null)
+        {
+            if (bossGhostHpRatio > bossHpRatio)
+            {
+                if (bossGhostHoldTimer > 0f)
+                {
+                    bossGhostHoldTimer -= dt;
+                }
+                else
+                {
+                    bossGhostHpRatio = Mathf.MoveTowards(bossGhostHpRatio, bossHpRatio, dt * 0.45f);
+                    CombatHudStyler.SetGhostFillRatio(bossGhostFillImage, bossGhostHpRatio);
+                }
+            }
+            else if (bossGhostHpRatio < bossHpRatio)
+            {
+                bossGhostHpRatio = bossHpRatio;
+                CombatHudStyler.SetGhostFillRatio(bossGhostFillImage, bossGhostHpRatio);
+            }
+        }
+
+        if (bossFillImage != null)
+        {
+            if (bossEnraged)
+            {
+                float pulse = 0.86f + 0.14f * Mathf.Sin(Time.unscaledTime * 6f);
+                bossFillImage.color = Color.Lerp(CombatHudStyler.BossFillEnraged * pulse, new Color(1f, 0.56f, 0.16f, 1f), 0.25f);
+            }
+            else
+            {
+                bossFillImage.color = CombatHudStyler.BossFillNormal;
+            }
+        }
     }
 
     private IEnumerator BeginStage1Routine()
@@ -182,8 +272,8 @@ public class StageManager : MonoBehaviour
             TelemetryManager.Instance.TrackLevelStart(1);
         }
 
-        SetHudStage("MÀN 1/3 • TRẠI RỪNG NGOẠI VI", "Chuẩn bị chiến đấu...");
-        ShowBanner("MÀN 1: TRẠI RỪNG NGOẠI VI\nTiêu diệt quân trinh sát Orc!", new Color(1f, 0.88f, 0.45f), 3.0f);
+        SetHudStage(stage1Title, "Chuẩn bị chiến đấu...");
+        ShowBanner(stage1Banner, new Color(1f, 0.88f, 0.45f), 3.0f);
 
         yield return new WaitForSeconds(1.8f);
 
@@ -204,7 +294,7 @@ public class StageManager : MonoBehaviour
                     lastHudPhase = phase;
                     lastHudWave = currentWaveIndex;
                     lastHudMetric = count1;
-                    SetHudStage("MÀN 1/3 • TRẠI RỪNG NGOẠI VI", $"Đợt {currentWaveIndex}/{totalWavesInStage} — Quái còn lại: {count1}");
+                    SetHudStage(stage1Title, $"Đợt {currentWaveIndex}/{totalWavesInStage} — Quái còn lại: {count1}");
                 }
                 if (!spawningWave && count1 == 0)
                 {
@@ -227,7 +317,7 @@ public class StageManager : MonoBehaviour
                 {
                     lastHudPhase = phase;
                     lastHudMetric = dist2Int;
-                    SetHudStage("ĐẾN MÀN 2 • THUNG LŨNG BẪY", $"Theo cột sáng vàng tới Trại 2 ({dist2Int}m)");
+                    SetHudStage(travelStage2Title, $"Theo cột sáng vàng tới Trại 2 ({dist2Int}m)");
                 }
                 if (dist2 <= zoneTriggerRadius)
                 {
@@ -242,14 +332,14 @@ public class StageManager : MonoBehaviour
                     lastHudPhase = phase;
                     lastHudWave = currentWaveIndex;
                     lastHudMetric = count2;
-                    SetHudStage("MÀN 2/3 • THUNG LŨNG BẪY & LÍNH KHIÊN", $"Đợt {currentWaveIndex}/{totalWavesInStage} — Quái còn lại: {count2} (Coi chừng bẫy gai!)");
+                    SetHudStage(stage2Title, $"Đợt {currentWaveIndex}/{totalWavesInStage} — Quái còn lại: {count2} (Coi chừng bẫy!)");
                 }
                 if (!spawningWave && count2 == 0)
                 {
                     if (currentWaveIndex < totalWavesInStage)
                     {
                         currentWaveIndex++;
-                        StartCoroutine(DelayedWaveSpawn(() => SpawnStage2Wave(currentWaveIndex), 1.8f, "ĐỢT 2 — LÍNH KHIÊN & RÌU TĂNG VIỆN!"));
+                        StartCoroutine(DelayedWaveSpawn(() => SpawnStage2Wave(currentWaveIndex), 1.8f, stage2Wave2Banner));
                     }
                     else
                     {
@@ -265,7 +355,7 @@ public class StageManager : MonoBehaviour
                 {
                     lastHudPhase = phase;
                     lastHudMetric = dist3Int;
-                    SetHudStage("ĐẾN MÀN 3 • MỎ VÀNG BỊ CHIẾM (BOSS)", $"Theo cột sáng đỏ tới Đấu Trường Boss ({dist3Int}m)");
+                    SetHudStage(travelStage3Title, $"Theo cột sáng đỏ tới Đấu Trường Boss ({dist3Int}m)");
                 }
                 if (dist3 <= zoneTriggerRadius)
                 {
@@ -285,9 +375,9 @@ public class StageManager : MonoBehaviour
                     lastHudPhase = phase;
                     lastHudMetric = adds;
                     string subObj = adds > 0
-                        ? $"Hạ Đại Tướng Orc Warlord (Còn {adds} hộ vệ)"
-                        : "Hạ Đại Tướng Orc Warlord để giành chiến thắng!";
-                    SetHudStage("MÀN 3/3 • ĐẤU TRƯỜNG MỎ VÀNG", subObj);
+                        ? $"Hạ {bossDisplayName} (Còn {adds} hộ vệ)"
+                        : $"Hạ {bossDisplayName} để giành chiến thắng!";
+                    SetHudStage(stage3Title, subObj);
                 }
                 break;
         }
@@ -302,26 +392,56 @@ public class StageManager : MonoBehaviour
         spawningWave = false;
     }
 
-    // ==================== STAGE 1 ====================
+    private static GameObject PickWavePrefab(GameObject[] pool, int index, GameObject fallback)
+    {
+        if (pool == null || pool.Length == 0) return fallback;
+        for (int attempt = 0; attempt < pool.Length; attempt++)
+        {
+            GameObject candidate = pool[(index + attempt) % pool.Length];
+            if (candidate != null) return candidate;
+        }
+        return fallback;
+    }
+
+    // Sinh các đợt quái tại khu vực 1
     private void SpawnStage1Wave(int wave)
     {
+        bool hasVariety = stage1ExtraEnemyPrefabs != null && stage1ExtraEnemyPrefabs.Length > 0;
         if (wave == 1)
         {
-            for (int i = 0; i < 3; i++)
+            int count = hasVariety ? 4 : 3;
+            for (int i = 0; i < count; i++)
             {
-                SpawnOrc(scoutOrcPrefab, stage1Center, 9f, 14f, 75, 12, 3.4f, 1.8f, 0.05f, 1.65f, 1.0f, 100, false, "Orc_Scout");
+                GameObject pref = i == 0
+                    ? scoutOrcPrefab
+                    : PickWavePrefab(stage1ExtraEnemyPrefabs, i - 1, scoutOrcPrefab);
+                float spd = pref == scoutOrcPrefab ? 3.4f : 3.65f;
+                string pName = pref != null ? pref.name : "Unit";
+                SpawnOrc(pref, stage1Center, 9f, 14f, 85, 12, spd, 1.85f, 0.05f, 1.62f, 1.0f, 100, false, $"S1_W1_{pName}");
             }
         }
         else
         {
-            for (int i = 0; i < 3; i++)
+            int count = hasVariety ? 5 : 4;
+            for (int i = 0; i < count; i++)
             {
-                SpawnOrc(scoutOrcPrefab, stage1Center, 10f, 15f, 90, 14, 3.6f, 1.8f, 0.1f, 1.6f, 1.0f, 110, false, "Orc_Scout");
+                GameObject fallback = i == count - 1 && axeOrcPrefab != null ? axeOrcPrefab : scoutOrcPrefab;
+                GameObject pref = i < 2
+                    ? (i == 0 ? scoutOrcPrefab : fallback)
+                    : PickWavePrefab(stage1ExtraEnemyPrefabs, i, fallback);
+                bool isHeavy = i >= count - 2;
+                int hp = isHeavy ? 125 : 100;
+                int dmg = isHeavy ? 16 : 14;
+                float spd = isHeavy ? 3.8f : 3.6f;
+                float kb = isHeavy ? 0.15f : 0.08f;
+                float sc = isHeavy ? 1.06f : 1.0f;
+                string pName = pref != null ? pref.name : "Unit";
+                SpawnOrc(pref, stage1Center, 10f, 15f, hp, dmg, spd, 1.85f, kb, 1.56f, sc, 120, false, $"S1_W2_{pName}");
             }
-            SpawnOrc(axeOrcPrefab != null ? axeOrcPrefab : scoutOrcPrefab, stage1Center, 11f, 15f, 105, 16, 3.8f, 1.85f, 0.15f, 1.55f, 1.05f, 130, false, "Orc_Raider");
         }
     }
 
+    // Hoàn tất Màn 1, mở cổng checkpoint và chỉ đường sang Màn 2
     private void CompleteStage1()
     {
         phase = StagePhase.TravelToStage2;
@@ -330,15 +450,14 @@ public class StageManager : MonoBehaviour
             TelemetryManager.Instance.TrackLevelComplete(1);
         }
 
-        ShowBanner("HOÀN THÀNH MÀN 1!\nHãy theo cột sáng vàng đến Thung Lũng Bẫy!", new Color(0.25f, 0.95f, 0.55f), 3.6f);
+        ShowBanner(stage1ClearBanner, new Color(0.25f, 0.95f, 0.55f), 3.6f);
         GameAudioManager.PlayStageClear();
         SetWaypointBeacon(stage2Center, new Color(1f, 0.78f, 0.15f));
 
-        // Thả thêm 1 nấm hồi máu thưởng gần Trại 1
-        SpawnHealthPickupAt(stage1Center + new Vector3(4f, 0f, -2f), 45);
+        SpawnHealthPickupAt(stage1Center + new Vector3(4f, 0f, -2f), 35);
     }
 
-    // ==================== STAGE 2 ====================
+    // Kích hoạt Màn 2 với các cụm bẫy gai và lính khiên
     private void StartStage2()
     {
         phase = StagePhase.Stage2Combat;
@@ -351,7 +470,7 @@ public class StageManager : MonoBehaviour
             TelemetryManager.Instance.TrackLevelStart(2);
         }
 
-        ShowBanner("MÀN 2: THUNG LŨNG BẪY & LÍNH KHIÊN\nCẩn thận bẫy gai và Orc Tanker!", new Color(1f, 0.58f, 0.2f), 3.2f);
+        ShowBanner(stage2Banner, new Color(1f, 0.58f, 0.2f), 3.2f);
 
         currentWaveIndex = 1;
         totalWavesInStage = 2;
@@ -360,21 +479,33 @@ public class StageManager : MonoBehaviour
 
     private void SpawnStage2Wave(int wave)
     {
-        GameObject tankPref = shieldTankPrefab != null ? shieldTankPrefab : scoutOrcPrefab;
-        GameObject axePref = axeOrcPrefab != null ? axeOrcPrefab : scoutOrcPrefab;
+        GameObject tankFallback = shieldTankPrefab != null ? shieldTankPrefab : scoutOrcPrefab;
+        GameObject axeFallback = axeOrcPrefab != null ? axeOrcPrefab : scoutOrcPrefab;
+        bool hasVariety = (stage2TankPrefabs != null && stage2TankPrefabs.Length > 0)
+            || (stage2StrikerPrefabs != null && stage2StrikerPrefabs.Length > 0);
 
-        // 2 Lính Khiên Tanker (máu trâu, khó bị đẩy lùi)
         for (int i = 0; i < 2; i++)
         {
-            GameObject tank = SpawnOrc(tankPref, stage2Center, 9f, 15f, 165, 16, 3.1f, 1.95f, 0.65f, 1.75f, 1.18f, 150, false, "Orc_Shield_Tank");
-            AddUnitAuraLight(tank, new Color(0.3f, 0.7f, 1f), 3.5f, 1.6f);
+            GameObject tankPref = PickWavePrefab(stage2TankPrefabs, (wave - 1) * 2 + i, tankFallback);
+            bool isSecondWaveBrute = hasVariety && wave == 2 && i == 1;
+            int tankHp = isSecondWaveBrute ? 220 : 185;
+            int tankDmg = isSecondWaveBrute ? 19 : 16;
+            float tankScale = isSecondWaveBrute ? 1.24f : 1.16f;
+            string tankName = tankPref != null ? tankPref.name : "Tank";
+            GameObject tank = SpawnOrc(tankPref, stage2Center, 9f, 15f, tankHp, tankDmg, 3.25f, 2.0f, 0.60f, 1.75f, tankScale, 160, false, $"Stage2_Tank_{tankName}");
+            AddUnitAuraLight(tank, stage2UnitAuraColor, 3.8f, 1.7f);
         }
 
-        // Lính Rìu Sát Thương cao (Wave 1: 2 con, Wave 2: 3 con)
-        int axeCount = wave == 1 ? 2 : 3;
+        int axeCount = wave == 1 ? (hasVariety ? 3 : 2) : (hasVariety ? 4 : 3);
         for (int i = 0; i < axeCount; i++)
         {
-            SpawnOrc(axePref, stage2Center, 10f, 16f, 95, 20, 4.2f, 1.85f, 0.15f, 1.45f, 1.05f, 130, false, "Orc_Axe_Berserker");
+            GameObject strikerPref = PickWavePrefab(stage2StrikerPrefabs, (wave - 1) * 3 + i, axeFallback);
+            string strikerName = strikerPref != null ? strikerPref.name : "Striker";
+            GameObject striker = SpawnOrc(strikerPref, stage2Center, 10f, 16f, 120, 18, 4.15f, 1.9f, 0.18f, 1.50f, 1.06f, 140, false, $"Stage2_Striker_{strikerName}");
+            if (hasVariety && i % 2 == 1)
+            {
+                AddUnitAuraLight(striker, stage2UnitAuraColor, 3.0f, 1.2f);
+            }
         }
     }
 
@@ -386,14 +517,14 @@ public class StageManager : MonoBehaviour
             TelemetryManager.Instance.TrackLevelComplete(2);
         }
 
-        ShowBanner("HOÀN THÀNH MÀN 2!\nTiến tới Mỏ Vàng Bị Chiếm tiêu diệt BOSS!", new Color(0.25f, 0.95f, 0.55f), 3.6f);
+        ShowBanner(stage2ClearBanner, new Color(0.25f, 0.95f, 0.55f), 3.6f);
         GameAudioManager.PlayStageClear();
         SetWaypointBeacon(stage3Center, new Color(1f, 0.22f, 0.22f));
 
-        SpawnHealthPickupAt(stage2Center + new Vector3(-4f, 0f, -3f), 55);
+        SpawnHealthPickupAt(stage2Center + new Vector3(-4f, 0f, -3f), 45);
     }
 
-    // ==================== STAGE 3 (BOSS) ====================
+    // Triệu hồi Boss đấu trường cùng thanh máu Boss và quân hộ vệ
     private void StartStage3Boss()
     {
         phase = StagePhase.Stage3Boss;
@@ -407,18 +538,23 @@ public class StageManager : MonoBehaviour
             TelemetryManager.Instance.TrackLevelStart(3);
         }
 
-        ShowBanner("MÀN 3: ĐẠI TƯỚNG ORC WARLORD!\nHạ gục Boss để giải phóng Mỏ Vàng!", new Color(1f, 0.28f, 0.28f), 3.5f);
+        ShowBanner(bossIntroBanner, new Color(1f, 0.28f, 0.28f), 3.5f);
         GameAudioManager.PlayBgm(GameAudioManager.BgmTrack.Boss, 1.2f);
         GameAudioManager.PlayBossRoar();
 
         GameObject bPrefab = bossOrcPrefab != null ? bossOrcPrefab : (shieldTankPrefab != null ? shieldTankPrefab : scoutOrcPrefab);
-        GameObject bossObj = SpawnOrc(bPrefab, stage3Center, 5f, 9f, 560, 26, 4.0f, 2.4f, 0.78f, 1.45f, 1.55f, 500, true, "BOSS_Orc_Warlord");
+        GameObject bossObj = SpawnOrc(bPrefab, stage3Center, 5f, 9f, 700, 24, 3.9f, 2.4f, 0.78f, 1.50f, 1.55f, 500, true, "BOSS_Unit");
 
         if (bossObj != null)
         {
-            AddUnitAuraLight(bossObj, new Color(1f, 0.18f, 0.12f), 7f, 3.2f);
+            AddUnitAuraLight(bossObj, bossAuraColor, 7f, 3.2f);
             activeBoss = bossObj.GetComponent<EnemyHealth>();
             activeBossAI = bossObj.GetComponent<OrcEnemyAI>();
+
+            if (bossNameText != null)
+            {
+                bossNameText.text = $"❖ BOSS: {bossDisplayName} ❖";
+            }
 
             if (activeBoss != null)
             {
@@ -429,8 +565,21 @@ public class StageManager : MonoBehaviour
         }
     }
 
+    // Cập nhật thanh máu Boss, thanh sát thương trễ và kích hoạt pha cuồng nộ khi máu Boss dưới 50%
     private void HandleBossHealthChanged(int currentHp, int maxHp)
     {
+        float nextRatio = maxHp > 0 ? Mathf.Clamp01((float)currentHp / maxHp) : 0f;
+        if (nextRatio < bossHpRatio)
+        {
+            bossGhostHoldTimer = 0.20f;
+        }
+        else if (nextRatio > bossHpRatio)
+        {
+            bossGhostHpRatio = nextRatio;
+            CombatHudStyler.SetGhostFillRatio(bossGhostFillImage, bossGhostHpRatio);
+        }
+        bossHpRatio = nextRatio;
+
         if (bossHpSlider != null)
         {
             bossHpSlider.maxValue = maxHp;
@@ -442,13 +591,13 @@ public class StageManager : MonoBehaviour
             bossHpValueText.text = $"{currentHp} / {maxHp}";
         }
 
-        // Phase 2: Cuồng nộ khi Boss xuống dưới 50% HP
         if (!bossEnraged && currentHp > 0 && currentHp <= maxHp * 0.5f)
         {
             bossEnraged = true;
             if (activeBossAI != null)
             {
-                activeBossAI.ApplyCombatStats(4.7f, 32, 2.5f, 0.85f, 1.15f);
+                int enragedDmg = Mathf.Max(1, Mathf.RoundToInt(30 * Mathf.Max(0.5f, enemyDamageMultiplier)));
+                activeBossAI.ApplyCombatStats(4.5f, enragedDmg, 2.5f, 0.85f, 1.22f);
             }
 
             if (ThirdPersonCamera.Instance != null)
@@ -463,15 +612,19 @@ public class StageManager : MonoBehaviour
                 CombatVfxManager.SpawnBossEnrageEffect(activeBoss.transform);
             }
 
-            // Triệu hồi 2 Orc hộ vệ
-            GameObject addPref = axeOrcPrefab != null ? axeOrcPrefab : scoutOrcPrefab;
-            for (int i = 0; i < 2; i++)
+            GameObject addFallback = axeOrcPrefab != null ? axeOrcPrefab : scoutOrcPrefab;
+            int guardCount = (stage3BossGuardPrefabs != null && stage3BossGuardPrefabs.Length > 0) ? 3 : 2;
+            for (int i = 0; i < guardCount; i++)
             {
-                SpawnOrc(addPref, stage3Center, 8f, 13f, 85, 16, 4.0f, 1.85f, 0.1f, 1.55f, 1.0f, 100, false, "Orc_BossGuard");
+                GameObject guardPref = PickWavePrefab(stage3BossGuardPrefabs, i, addFallback);
+                string gName = guardPref != null ? guardPref.name : "Guard";
+                GameObject guard = SpawnOrc(guardPref, stage3Center, 8f, 13f, 105, 15, 4.0f, 1.9f, 0.15f, 1.52f, 1.06f, 110, false, $"BossGuard_{gName}");
+                AddUnitAuraLight(guard, bossAuraColor, 3.6f, 1.5f);
             }
         }
     }
 
+    // Xử lý chiến thắng khi tiêu diệt Boss và gọi màn hình kết quả Victory
     private void HandleBossDied()
     {
         if (phase == StagePhase.Completed) return;
@@ -485,7 +638,7 @@ public class StageManager : MonoBehaviour
             TelemetryManager.Instance.TrackGameEnded("Win");
         }
 
-        ShowBanner("CHIẾN THẮNG! ĐẠI TƯỚNG ORC ĐÃ BỊ TIÊU DIỆT!", new Color(0.2f, 1f, 0.45f), 4.0f);
+        ShowBanner(bossVictoryBanner, new Color(0.2f, 1f, 0.45f), 4.0f);
         CombatVfxManager.SpawnVictoryCelebration(playerTransform != null ? playerTransform.position : stage3Center);
         StartCoroutine(ShowVictoryDelayed());
     }
@@ -499,7 +652,7 @@ public class StageManager : MonoBehaviour
         }
     }
 
-    // ==================== SPAWNING HELPERS ====================
+    // Khởi tạo quái hoặc Boss trên địa hình kèm gắn vầng hào quang và chỉ số cân bằng
     private GameObject SpawnOrc(
         GameObject prefab,
         Vector3 arenaCenter,
@@ -522,42 +675,78 @@ public class StageManager : MonoBehaviour
             return null;
         }
 
-        Vector2 dir2D = Random.insideUnitCircle.normalized;
-        if (dir2D.sqrMagnitude < 0.01f) dir2D = Vector2.right;
+        Vector3 spawnPos = arenaCenter;
+        bool hasNavMeshPoint = false;
 
-        Vector3 spawnPos = arenaCenter + new Vector3(dir2D.x, 0f, dir2D.y) * Random.Range(minRadius, maxRadius);
-        spawnPos = SnapPositionToTerrain(spawnPos);
+        for (int attempt = 0; attempt < 6; attempt++)
+        {
+            Vector2 dir2D = Random.insideUnitCircle.normalized;
+            if (dir2D.sqrMagnitude < 0.01f) dir2D = Vector2.right;
+
+            Vector3 candidate = arenaCenter + new Vector3(dir2D.x, 0f, dir2D.y) * Random.Range(minRadius, maxRadius);
+            candidate = SnapPositionToTerrain(candidate);
+
+            if (NavMesh.SamplePosition(candidate, out NavMeshHit navHit, 7f, NavMesh.AllAreas))
+            {
+                candidate = navHit.position;
+                hasNavMeshPoint = true;
+            }
+
+            if (!Physics.CheckSphere(candidate + Vector3.up * 1.45f, 0.55f, ~0, QueryTriggerInteraction.Ignore))
+            {
+                spawnPos = candidate;
+                break;
+            }
+
+            if (attempt == 5)
+            {
+                spawnPos = candidate;
+            }
+        }
 
         GameObject enemy = Instantiate(prefab, spawnPos, Quaternion.identity);
         enemy.name = unitName;
         enemy.transform.localScale = Vector3.one * scale;
         CombatVfxManager.SpawnEnemySpawnEffect(spawnPos, isBoss);
+        if (mapIndex >= 2 && (isBoss || kbResist >= 0.45f || unitName.IndexOf("Demon", System.StringComparison.OrdinalIgnoreCase) >= 0))
+        {
+            CombatVfxManager.AttachEnemyBiomeAura(enemy.transform, mapIndex, isBoss || kbResist >= 0.45f);
+        }
+
+        int scaledHp = Mathf.Max(1, Mathf.RoundToInt(hp * Mathf.Max(0.5f, enemyHpMultiplier)));
+        int scaledDmg = Mathf.Max(1, Mathf.RoundToInt(damage * Mathf.Max(0.5f, enemyDamageMultiplier)));
 
         EnemyHealth eh = enemy.GetComponent<EnemyHealth>();
         if (eh != null)
         {
             eh.isBoss = isBoss;
             eh.scoreValue = scoreVal;
-            eh.goldReward = isBoss ? 200 : Mathf.Max(30, Mathf.RoundToInt(scoreVal * 0.42f));
+            float mapGoldMult = 1f + Mathf.Max(0, mapIndex - 1) * 0.12f;
+            eh.goldReward = isBoss ? 220 : Mathf.Max(22, Mathf.RoundToInt(scoreVal * 0.30f * mapGoldMult));
             GameObject potionPrefab = HealthPickup.GetPotionPrefab();
             eh.healPickupPrefab = potionPrefab != null ? potionPrefab : mushroomPickupPrefab;
-            eh.dropHealChance = isBoss ? 0f : 0.30f;
-            eh.SetMaxHealth(hp);
+            eh.dropHealChance = isBoss ? 0f : 0.22f;
+            eh.SetMaxHealth(scaledHp);
             activeWaveEnemies.Add(eh);
         }
 
         OrcEnemyAI ai = enemy.GetComponent<OrcEnemyAI>();
         if (ai != null)
         {
-            ai.ApplyCombatStats(speed, damage, range, kbResist, cooldown);
+            ai.ApplyCombatStats(speed, scaledDmg, range, kbResist, cooldown);
+            if (hasNavMeshPoint)
+            {
+                ai.EnsureOnNavMesh(7f);
+            }
         }
 
         return enemy;
     }
 
+    // Dựng hoặc liên kết trại lửa checkpoint, cụm bẫy gai và bình hồi máu trên bản đồ
     private void BuildStageEnvironments()
     {
-        // Nếu đã bake sẵn StageProps_Generated trực tiếp trong Scene thì dùng luôn, không tạo trùng
+
         if (GameObject.Find("StageProps_Generated") != null)
         {
             return;
@@ -565,25 +754,21 @@ public class StageManager : MonoBehaviour
 
         GameObject propsRoot = new GameObject("StageProps_Generated");
 
-        // --- CHECKPOINTS tại 3 khu vực ---
         CreateCheckpoint("Checkpoint_Stage1", stage1Center + new Vector3(-2.5f, 0f, 2f), 1, "Trại Rừng Ngoại Vi", 30, propsRoot.transform);
-        CreateCheckpoint("Checkpoint_Stage2", stage2Center + new Vector3(3f, 0f, 0f), 2, "Thung Lũng Bẫy", 50, propsRoot.transform);
-        CreateCheckpoint("Checkpoint_Stage3", stage3Center + new Vector3(0f, 0f, 16f), 3, "Cổng Mỏ Vàng", 60, propsRoot.transform);
+        CreateCheckpoint("Checkpoint_Stage2", stage2Center + new Vector3(3f, 0f, 0f), 2, "Thung Lũng Bẫy", 45, propsRoot.transform);
+        CreateCheckpoint("Checkpoint_Stage3", stage3Center + new Vector3(0f, 0f, 16f), 3, "Cổng Mỏ Vàng", 55, propsRoot.transform);
 
-        // --- MÀN 1: Cột Cổ Ngữ & Nấm hồi máu ---
         if (runeStonePrefab != null)
         {
             SpawnPropOnTerrain(runeStonePrefab, stage1Center + new Vector3(9f, 0f, 6f), Quaternion.Euler(0f, -35f, 0f), Vector3.one * 1.3f, propsRoot.transform, "Stage1_RuneStone");
         }
-        SpawnHealthPickupAt(stage1Center + new Vector3(-6f, 0f, -5f), 40, propsRoot.transform);
+        SpawnHealthPickupAt(stage1Center + new Vector3(-6f, 0f, -5f), 35, propsRoot.transform);
 
-        // --- ĐƯỜNG TỪ MÀN 1 SANG MÀN 2: 2 Nấm hồi máu dẫn đường ---
         Vector3 mid12A = Vector3.Lerp(stage1Center, stage2Center, 0.35f);
         Vector3 mid12B = Vector3.Lerp(stage1Center, stage2Center, 0.68f);
-        SpawnHealthPickupAt(mid12A, 40, propsRoot.transform);
-        SpawnHealthPickupAt(mid12B, 40, propsRoot.transform);
+        SpawnHealthPickupAt(mid12A, 35, propsRoot.transform);
+        SpawnHealthPickupAt(mid12B, 35, propsRoot.transform);
 
-        // --- MÀN 2: 6 Bẫy Gai quanh Thung Lũng + 2 Nấm Hồi Máu ---
         Vector3[] trapOffsets =
         {
             new Vector3(-7f, 0f, 5f),
@@ -597,14 +782,12 @@ public class StageManager : MonoBehaviour
         {
             SpawnTrapAt(stage2Center + trapOffsets[i], propsRoot.transform, $"Stage2_SpikeTrap_{i + 1}");
         }
-        SpawnHealthPickupAt(stage2Center + new Vector3(-11f, 0f, 1f), 50, propsRoot.transform);
-        SpawnHealthPickupAt(stage2Center + new Vector3(11f, 0f, -2f), 50, propsRoot.transform);
+        SpawnHealthPickupAt(stage2Center + new Vector3(-11f, 0f, 1f), 40, propsRoot.transform);
+        SpawnHealthPickupAt(stage2Center + new Vector3(11f, 0f, -2f), 40, propsRoot.transform);
 
-        // --- ĐƯỜNG TỪ MÀN 2 SANG MÀN 3: 1 Nấm hồi máu ---
         Vector3 mid23 = Vector3.Lerp(stage2Center, stage3Center, 0.5f);
-        SpawnHealthPickupAt(mid23, 50, propsRoot.transform);
+        SpawnHealthPickupAt(mid23, 40, propsRoot.transform);
 
-        // --- MÀN 3: Đấu trường Mỏ Vàng Bị Chiếm (Gold_Mine + Trolley_Gold + Tường Đá + Đom Đóm) ---
         if (goldMinePrefab != null)
         {
             SpawnPropOnTerrain(goldMinePrefab, stage3Center + new Vector3(0f, 0f, -12f), Quaternion.Euler(0f, 180f, 0f), Vector3.one * 1.4f, propsRoot.transform, "Stage3_GoldMine");
@@ -620,7 +803,7 @@ public class StageManager : MonoBehaviour
             float ringRadius = 19f;
             for (int i = 0; i < wallCount; i++)
             {
-                // Chừa lối vào ở hướng gần Trại 2
+
                 if (i == 1 || i == 2) continue;
                 float angle = i * (360f / wallCount) * Mathf.Deg2Rad;
                 Vector3 wallPos = stage3Center + new Vector3(Mathf.Cos(angle), 0f, Mathf.Sin(angle)) * ringRadius;
@@ -633,9 +816,8 @@ public class StageManager : MonoBehaviour
             SpawnPropOnTerrain(fireflyFxPrefab, stage3Center + new Vector3(0f, 1.5f, 0f), Quaternion.identity, Vector3.one, propsRoot.transform, "Stage3_Fireflies");
         }
 
-        // 2 Nấm hồi máu dự phòng ở hai bên đấu trường Boss
-        SpawnHealthPickupAt(stage3Center + new Vector3(-12f, 0f, 4f), 60, propsRoot.transform);
-        SpawnHealthPickupAt(stage3Center + new Vector3(12f, 0f, 4f), 60, propsRoot.transform);
+        SpawnHealthPickupAt(stage3Center + new Vector3(-12f, 0f, 4f), 50, propsRoot.transform);
+        SpawnHealthPickupAt(stage3Center + new Vector3(12f, 0f, 4f), 50, propsRoot.transform);
     }
 
     private void CreateCheckpoint(string objName, Vector3 rawPos, int stageNum, string title, int healBonus, Transform parent)
@@ -674,13 +856,11 @@ public class StageManager : MonoBehaviour
         trapObj.name = trapName;
         TrapHazard hazard = trapObj.GetComponent<TrapHazard>();
         if (hazard == null) hazard = trapObj.AddComponent<TrapHazard>();
-        hazard.damage = 22;
+        hazard.damage = Mathf.Max(1, Mathf.RoundToInt(18 * Mathf.Max(0.5f, enemyDamageMultiplier)));
+        hazard.hitCooldown = 1.25f;
         hazard.triggerRadius = 1.75f;
     }
 
-    /// <summary>
-    /// Tối ưu hiệu năng runtime cho Terrain, Camera và Frame Pacing mà không cần sửa trực tiếp Prefab map dùng chung.
-    /// </summary>
     private static void ApplyRuntimePerformanceOptimizations()
     {
         QualitySettings.vSyncCount = 0;
@@ -694,6 +874,8 @@ public class StageManager : MonoBehaviour
         {
             mainCam.farClipPlane = 240f;
         }
+
+        QualitySettings.shadowDistance = Mathf.Min(QualitySettings.shadowDistance, 38f);
 
         Terrain terrain = Terrain.activeTerrain;
         if (terrain != null)
@@ -763,15 +945,12 @@ public class StageManager : MonoBehaviour
     {
         if (skyMat == null) return;
         RenderSettings.skybox = skyMat;
-        DynamicGI.UpdateEnvironment();
     }
 
-    // ==================== WAYPOINT BEACON (HDR LIGHT PILLAR + RUNE RING + MOTES) ====================
     private void CreateWaypointBeacon()
     {
         beaconObject = new GameObject("StageWaypointBeacon");
 
-        // 1. Trụ sáng HDR mờ dần lên trời
         GameObject pillar = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
         pillar.name = "BeaconPillar";
         pillar.transform.SetParent(beaconObject.transform, false);
@@ -792,7 +971,6 @@ public class StageManager : MonoBehaviour
             pr.receiveShadows = false;
         }
 
-        // 2. Vòng ma pháp xoay tròn trên mặt đất
         GameObject ring = new GameObject("BeaconGroundRing");
         ring.transform.SetParent(beaconObject.transform, false);
         ring.transform.localPosition = Vector3.up * 0.16f;
@@ -806,7 +984,6 @@ public class StageManager : MonoBehaviour
         rmr.receiveShadows = false;
         beaconRingTransform = ring.transform;
 
-        // 3. Các đốm sáng bay dọc theo trụ dẫn đường
         GameObject motesObj = new GameObject("BeaconMotes");
         motesObj.transform.SetParent(beaconObject.transform, false);
         motesObj.transform.localPosition = Vector3.up * 0.5f;
@@ -873,44 +1050,45 @@ public class StageManager : MonoBehaviour
         if (beaconObject != null) beaconObject.SetActive(false);
     }
 
-    // ==================== RUNTIME HUD ====================
+    // Khởi tạo hoặc nâng cấp giao diện bảng nhiệm vụ, thanh máu Boss và banner trên Canvas
     private void BuildRuntimeHud()
     {
         Canvas canvas = FindFirstObjectByType<Canvas>();
         if (canvas == null) return;
 
-        // 1. Mission Panel (dùng lại nếu đã bake sẵn trong Scene)
         Transform existingMission = canvas.transform.Find("StageMissionHUD");
+        GameObject missionPanel;
         if (existingMission != null)
         {
+            missionPanel = existingMission.gameObject;
             hudStageTitleText = existingMission.Find("StageTitleText")?.GetComponent<TMP_Text>();
             hudObjectiveText = existingMission.Find("ObjectiveText")?.GetComponent<TMP_Text>();
             hudDashText = existingMission.Find("DashStatusText")?.GetComponent<TMP_Text>();
         }
         else
         {
-            GameObject missionPanel = CreateUiPanel("StageMissionHUD", canvas.transform,
+            missionPanel = CreateUiPanel("StageMissionHUD", canvas.transform,
                 new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(0f, 1f),
-                new Vector2(20f, -20f), new Vector2(410f, 108f),
-                new Color(0.05f, 0.08f, 0.14f, 0.78f));
+                new Vector2(22f, -20f), new Vector2(452f, 128f),
+                CombatHudStyler.ObsidianDeep);
 
             hudStageTitleText = CreateUiText("StageTitleText", missionPanel.transform,
                 new Vector2(0f, 1f), new Vector2(1f, 1f), new Vector2(0.5f, 1f),
                 new Vector2(0f, -10f), new Vector2(-28f, 28f),
-                "MÀN 1/3 • TRẠI RỪNG NGOẠI VI", 18, FontStyles.Bold, new Color(1f, 0.84f, 0.32f), TextAlignmentOptions.Left);
+                "MÀN 1/3 • TRẠI RỪNG NGOẠI VI", 16.5f, FontStyles.Bold, Color.white, TextAlignmentOptions.MidlineLeft);
 
             hudObjectiveText = CreateUiText("ObjectiveText", missionPanel.transform,
                 new Vector2(0f, 1f), new Vector2(1f, 1f), new Vector2(0.5f, 1f),
-                new Vector2(0f, -42f), new Vector2(-28f, 26f),
-                "Đang khởi tạo nhiệm vụ...", 15, FontStyles.Normal, Color.white, TextAlignmentOptions.Left);
+                new Vector2(0f, -46f), new Vector2(-28f, 40f),
+                "Đang khởi tạo nhiệm vụ...", 15, FontStyles.Bold, Color.white, TextAlignmentOptions.MidlineLeft);
 
             hudDashText = CreateUiText("DashStatusText", missionPanel.transform,
-                new Vector2(0f, 1f), new Vector2(1f, 1f), new Vector2(0.5f, 1f),
-                new Vector2(0f, -72f), new Vector2(-28f, 24f),
-                "[Chuột Trái] Chém   •   [Giữ Chuột Phải] Đỡ đòn (Block)", 13, FontStyles.Normal, new Color(0.55f, 0.92f, 1f), TextAlignmentOptions.Left);
+                new Vector2(0f, 0f), new Vector2(1f, 0f), new Vector2(0.5f, 0f),
+                new Vector2(0f, 3f), new Vector2(-28f, 28f),
+                "[LMB] Chém  •  [RMB] Đỡ  •  [Tab/Q] Khóa  •  [B] Shop", 12.6f, FontStyles.Bold, Color.white, TextAlignmentOptions.MidlineLeft);
         }
+        CombatHudStyler.StyleMissionHud(missionPanel, hudStageTitleText, hudObjectiveText, hudDashText);
 
-        // 2. Boss HP Bar (dùng lại nếu đã bake sẵn trong Scene)
         Transform existingBossBar = canvas.transform.Find("BossHpBarHUD");
         if (existingBossBar != null)
         {
@@ -918,24 +1096,23 @@ public class StageManager : MonoBehaviour
             bossNameText = existingBossBar.Find("BossNameText")?.GetComponent<TMP_Text>();
             bossHpValueText = existingBossBar.Find("BossHpValueText")?.GetComponent<TMP_Text>();
             bossHpSlider = existingBossBar.Find("BossSlider")?.GetComponent<Slider>();
-            bossBarRoot.SetActive(false);
         }
         else
         {
             bossBarRoot = CreateUiPanel("BossHpBarHUD", canvas.transform,
                 new Vector2(0.5f, 1f), new Vector2(0.5f, 1f), new Vector2(0.5f, 1f),
-                new Vector2(0f, -22f), new Vector2(520f, 68f),
-                new Color(0.12f, 0.03f, 0.05f, 0.85f));
+                new Vector2(0f, -20f), new Vector2(568f, 76f),
+                CombatHudStyler.CrimsonObsidian);
 
             bossNameText = CreateUiText("BossNameText", bossBarRoot.transform,
-                new Vector2(0f, 1f), new Vector2(0.75f, 1f), new Vector2(0f, 1f),
-                new Vector2(16f, -8f), new Vector2(0f, 24f),
-                "BOSS: ĐẠI TƯỚNG ORC WARLORD", 16, FontStyles.Bold, new Color(1f, 0.38f, 0.32f), TextAlignmentOptions.Left);
+                new Vector2(0f, 1f), new Vector2(0.76f, 1f), new Vector2(0f, 1f),
+                new Vector2(34f, -8f), new Vector2(-8f, 26f),
+                "❖ BOSS: ĐẠI TƯỚNG ORC WARLORD ❖", 16, FontStyles.Bold, Color.white, TextAlignmentOptions.MidlineLeft);
 
             bossHpValueText = CreateUiText("BossHpValueText", bossBarRoot.transform,
-                new Vector2(0.65f, 1f), new Vector2(1f, 1f), new Vector2(1f, 1f),
-                new Vector2(-16f, -8f), new Vector2(0f, 24f),
-                "560 / 560", 14, FontStyles.Bold, Color.white, TextAlignmentOptions.Right);
+                new Vector2(0.76f, 1f), new Vector2(1f, 1f), new Vector2(1f, 1f),
+                new Vector2(-20f, -8f), new Vector2(-4f, 26f),
+                "700 / 700", 14.5f, FontStyles.Bold, Color.white, TextAlignmentOptions.MidlineRight);
 
             GameObject sliderGo = new GameObject("BossSlider", typeof(RectTransform), typeof(Slider));
             sliderGo.transform.SetParent(bossBarRoot.transform, false);
@@ -944,12 +1121,12 @@ public class StageManager : MonoBehaviour
             sRt.anchorMax = new Vector2(1f, 0f);
             sRt.pivot = new Vector2(0.5f, 0f);
             sRt.anchoredPosition = new Vector2(0f, 12f);
-            sRt.sizeDelta = new Vector2(-32f, 18f);
+            sRt.sizeDelta = new Vector2(-40f, 20f);
 
             GameObject bgGo = new GameObject("Bg", typeof(RectTransform), typeof(Image));
             bgGo.transform.SetParent(sliderGo.transform, false);
             StretchRect(bgGo.GetComponent<RectTransform>());
-            bgGo.GetComponent<Image>().color = new Color(0.25f, 0.08f, 0.08f, 0.95f);
+            bgGo.GetComponent<Image>().color = new Color(0.14f, 0.035f, 0.055f, 0.96f);
 
             GameObject fillArea = new GameObject("FillArea", typeof(RectTransform));
             fillArea.transform.SetParent(sliderGo.transform, false);
@@ -959,46 +1136,55 @@ public class StageManager : MonoBehaviour
             fillGo.transform.SetParent(fillArea.transform, false);
             StretchRect(fillGo.GetComponent<RectTransform>());
             Image fillImg = fillGo.GetComponent<Image>();
-            fillImg.color = new Color(0.92f, 0.18f, 0.22f, 1f);
+            fillImg.color = CombatHudStyler.BossFillNormal;
 
             bossHpSlider = sliderGo.GetComponent<Slider>();
             bossHpSlider.interactable = false;
             bossHpSlider.transition = Selectable.Transition.None;
             bossHpSlider.fillRect = fillGo.GetComponent<RectTransform>();
             bossHpSlider.minValue = 0f;
-            bossHpSlider.maxValue = 560f;
-            bossHpSlider.value = 560f;
-
-            bossBarRoot.SetActive(false);
+            bossHpSlider.maxValue = 700f;
+            bossHpSlider.value = 700f;
         }
+        CombatHudStyler.StyleBossHud(
+            bossBarRoot,
+            bossHpSlider,
+            bossNameText,
+            bossHpValueText,
+            out bossFillImage,
+            out bossGhostFillImage,
+            out bossFrameImage);
+        bossBarRoot.SetActive(false);
 
-        // 3. Banner Thông Báo (dùng lại nếu đã bake sẵn trong Scene)
         Transform existingBanner = canvas.transform.Find("StageBannerHUD");
         if (existingBanner != null)
         {
             bannerRoot = existingBanner.gameObject;
             bannerText = existingBanner.Find("BannerText")?.GetComponent<TMP_Text>();
-            bannerRoot.SetActive(false);
         }
         else
         {
             bannerRoot = CreateUiPanel("StageBannerHUD", canvas.transform,
                 new Vector2(0.5f, 0.78f), new Vector2(0.5f, 0.78f), new Vector2(0.5f, 0.5f),
-                Vector2.zero, new Vector2(640f, 84f),
-                new Color(0.04f, 0.06f, 0.1f, 0.82f));
+                Vector2.zero, new Vector2(740f, 98f),
+                new Color(0.035f, 0.050f, 0.090f, 0.90f));
 
             bannerText = CreateUiText("BannerText", bannerRoot.transform,
                 Vector2.zero, Vector2.one, new Vector2(0.5f, 0.5f),
-                Vector2.zero, new Vector2(-24f, -12f),
-                "", 20, FontStyles.Bold, Color.white, TextAlignmentOptions.Center);
-
-            bannerRoot.SetActive(false);
+                Vector2.zero, new Vector2(-88f, -24f),
+                "", 21, FontStyles.Bold, Color.white, TextAlignmentOptions.Center);
         }
+        CombatHudStyler.StyleStageBanner(bannerRoot, bannerText, out bannerCanvasGroup);
+        bannerRoot.SetActive(false);
     }
 
     private void ShowBossBar(int currentHp, int maxHp)
     {
         if (bossBarRoot == null) return;
+        float ratio = maxHp > 0 ? Mathf.Clamp01((float)currentHp / maxHp) : 1f;
+        bossHpRatio = ratio;
+        bossGhostHpRatio = ratio;
+        CombatHudStyler.SetGhostFillRatio(bossGhostFillImage, ratio);
         bossBarRoot.SetActive(true);
         HandleBossHealthChanged(currentHp, maxHp);
     }
@@ -1006,26 +1192,33 @@ public class StageManager : MonoBehaviour
     private void SetHudStage(string title, string objective)
     {
         if (hudStageTitleText != null) hudStageTitleText.text = title;
-        if (hudObjectiveText != null) hudObjectiveText.text = objective;
+        if (hudObjectiveText != null)
+        {
+            hudObjectiveText.text = string.IsNullOrEmpty(objective) ? "" : $"<color=#E8C56E>◆</color> {objective}";
+        }
     }
 
     private void UpdateDashHud()
     {
         if (hudDashText == null || playerController == null) return;
 
-        int state = playerController.IsBlocking ? 1 : 0;
+        bool isLocked = PlayerAttack.CurrentLockedTarget != null && !PlayerAttack.CurrentLockedTarget.IsDead;
+        int state = playerController.IsBlocking ? 1 : (isLocked ? 2 : 0);
         if (state == lastDashBlockingState) return;
         lastDashBlockingState = state;
 
+        hudDashText.color = Color.white;
         if (state == 1)
         {
-            hudDashText.text = "[Chuột Phải] ĐANG ĐỠ ĐÒN (BLOCK / PARRY)";
-            hudDashText.color = new Color(1f, 0.86f, 0.32f);
+            hudDashText.text = "<color=#FFD966><b>[RMB]</b> ĐANG ĐỠ ĐÒN (BLOCK / PARRY)</color>";
+        }
+        else if (state == 2)
+        {
+            hudDashText.text = "<color=#FFAE4A><b>[KHÓA MỤC TIÊU]</b></color>  <color=#5C6A85>•</color>  <color=#E8C56E><b>[Tab]</b></color> Đổi  <color=#5C6A85>•</color>  <color=#E8C56E><b>[Q]</b></color> Bỏ Khóa";
         }
         else
         {
-            hudDashText.text = "[LMB] Chém  •  [RMB] Đỡ  •  [B] Cửa Hàng";
-            hudDashText.color = new Color(0.55f, 0.92f, 1f);
+            hudDashText.text = "<color=#7BE5FF><b>[LMB]</b></color> Chém  <color=#5C6A85>•</color>  <color=#7BE5FF><b>[RMB]</b></color> Đỡ  <color=#5C6A85>•</color>  <color=#7BE5FF><b>[Tab/Q]</b></color> Khóa  <color=#5C6A85>•</color>  <color=#E8C56E><b>[B]</b></color> Shop";
         }
     }
 
@@ -1072,7 +1265,6 @@ public class StageManager : MonoBehaviour
         rt.offsetMax = Vector2.zero;
     }
 
-    // ==================== UTILITY ====================
     private void CleanupDeadEnemies()
     {
         for (int i = activeWaveEnemies.Count - 1; i >= 0; i--)
@@ -1089,7 +1281,6 @@ public class StageManager : MonoBehaviour
         Vector3 rayOrigin = new Vector3(rawPos.x, rawPos.y + 120f, rawPos.z);
         int hitCount = Physics.RaycastNonAlloc(rayOrigin, Vector3.down, TerrainHitBuffer, 280f, ~0, QueryTriggerInteraction.Ignore);
 
-        // Ưu tiên bề mặt TerrainCollider trước
         for (int i = 0; i < hitCount; i++)
         {
             if (TerrainHitBuffer[i].collider is TerrainCollider)
@@ -1098,7 +1289,6 @@ public class StageManager : MonoBehaviour
             }
         }
 
-        // Fallback: bề mặt cao nhất bất kỳ
         float highestY = float.MinValue;
         bool found = false;
         for (int i = 0; i < hitCount; i++)

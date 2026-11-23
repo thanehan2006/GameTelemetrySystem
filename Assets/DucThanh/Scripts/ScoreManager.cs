@@ -3,10 +3,7 @@ using UnityEngine;
 using UnityEngine.UI;
 using TMPro;
 
-/// <summary>
-/// Quản lý Điểm (Score) và Vàng (Gold) của Player trong trận đấu.
-/// Tái sử dụng thanh ExpBar ở góc trên-phải thành khung hiển thị Vàng & phím mở Cửa Hàng [B].
-/// </summary>
+// Lưu trữ điểm số, lượng vàng hiện có của người chơi và cập nhật hiển thị lên HUD
 public class ScoreManager : MonoBehaviour
 {
     public static ScoreManager Instance;
@@ -16,7 +13,6 @@ public class ScoreManager : MonoBehaviour
     public int gold = 0;
     public int totalGoldEarned = 0;
 
-    // Giữ lại các trường cũ để tương thích scene/inspector, không còn bật popup lên cấp chọn đồ
     [HideInInspector] public int currentLevel = 1;
     [HideInInspector] public int maxLevel = 10;
     [HideInInspector] public int baseExpToLevelUp = 200;
@@ -30,6 +26,11 @@ public class ScoreManager : MonoBehaviour
 
     public event Action<int> OnGoldChanged;
 
+    private RectTransform goldHudRect;
+    private Image goldGemImage;
+    private float goldPopTimer;
+
+    // Khởi tạo Singleton và tìm text hiển thị vàng trên giao diện
     private void Awake()
     {
         if (Instance == null)
@@ -52,31 +53,52 @@ public class ScoreManager : MonoBehaviour
         UpdateGoldHud();
     }
 
+    // Đồng bộ giao diện thanh vàng ban đầu
     private void Start()
     {
-        // Tự khởi tạo Cửa Hàng Vũ Khí
+
         if (WeaponShopManager.Instance == null && GetComponent<WeaponShopManager>() == null)
         {
             gameObject.AddComponent<WeaponShopManager>();
         }
     }
 
+    // Cộng điểm chiến công khi hạ gục kẻ địch
     public void AddScore(int points)
     {
         if (GameOverManager.IsGameOver) return;
         score += Mathf.Max(0, points);
     }
 
+    // Cộng vàng nhặt được và làm mới HUD
     public void AddGold(int amount)
     {
         if (GameOverManager.IsGameOver || amount <= 0) return;
 
         gold += amount;
         totalGoldEarned += amount;
+        goldPopTimer = 0.24f;
         UpdateGoldHud();
         OnGoldChanged?.Invoke(gold);
     }
 
+    // Tạo hiệu ứng nảy nhẹ khung hiển thị vàng khi vừa nhặt thưởng
+    private void Update()
+    {
+        if (goldPopTimer <= 0f || goldHudRect == null) return;
+
+        goldPopTimer = Mathf.Max(0f, goldPopTimer - Time.unscaledDeltaTime);
+        float t = goldPopTimer / 0.24f;
+        float bump = 1f + Mathf.Sin(t * Mathf.PI) * 0.045f;
+        goldHudRect.localScale = new Vector3(bump, bump, 1f);
+
+        if (goldGemImage != null)
+        {
+            goldGemImage.color = Color.Lerp(new Color(1f, 0.80f, 0.24f, 1f), Color.white, t * 0.85f);
+        }
+    }
+
+    // Kiểm tra và trừ vàng khi người chơi mua vũ khí hoặc bình máu
     public bool TrySpendGold(int cost)
     {
         if (cost < 0 || gold < cost) return false;
@@ -87,41 +109,31 @@ public class ScoreManager : MonoBehaviour
         return true;
     }
 
+    // Áp dụng giao diện Dark-Fantasy đồng bộ cho thẻ hiển thị vàng và phím mở cửa hàng
     private void StyleExpBarAsGoldHud()
     {
         if (expSlider == null) return;
 
-        expSlider.interactable = false;
-        expSlider.minValue = 0f;
-        expSlider.maxValue = 1f;
-        expSlider.value = 0f;
+        CombatHudStyler.StyleGoldHud(
+            expSlider.gameObject,
+            scoreText,
+            out TMP_Text styledGoldText,
+            out goldHudRect,
+            out goldGemImage);
 
-        // Ẩn thanh fill xanh cũ để biến khung này thành thẻ hiển thị Vàng gọn đẹp
-        if (expSlider.fillRect != null)
+        if (scoreText == null && styledGoldText != null)
         {
-            expSlider.fillRect.gameObject.SetActive(false);
-        }
-
-        Transform bg = expSlider.transform.Find("Background");
-        if (bg != null)
-        {
-            Image bgImg = bg.GetComponent<Image>();
-            if (bgImg != null) bgImg.color = new Color(0.06f, 0.08f, 0.13f, 0.88f);
-
-            Outline outline = bg.GetComponent<Outline>();
-            if (outline == null) outline = bg.gameObject.AddComponent<Outline>();
-            outline.effectColor = new Color(0.90f, 0.70f, 0.25f, 0.65f);
-            outline.effectDistance = new Vector2(1.2f, -1.2f);
+            scoreText = styledGoldText;
         }
     }
 
+    // Cập nhật số vàng hiện tại và gợi ý mở cửa hàng lên màn hình
     private void UpdateGoldHud()
     {
         if (scoreText != null)
         {
-            scoreText.text = $"VÀNG: {gold:N0} G   •   [B] CỬA HÀNG";
-            scoreText.color = new Color(1f, 0.86f, 0.34f, 1f);
-            scoreText.fontSize = 15f;
+            scoreText.text = $"<color=#FFD85C><b>{gold:N0} G</b></color>   <color=#5C6A85>•</color>   <color=#E8C56E><b>[B]</b></color> <color=#DDE5F5>CỬA HÀNG</color>";
+            scoreText.color = Color.white;
         }
 
         if (levelText != null)

@@ -1,17 +1,12 @@
 using System;
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.SceneManagement;
 using UnityEngine.UI;
 using TMPro;
 
-/// <summary>
-/// Điều khiển toàn bộ Scene Chọn Nhân Vật (CharacterSelectScene.unity):
-/// - Toàn bộ 4 nhân vật 3D, bệ đá, ánh sáng và UI Canvas được bake sẵn trực tiếp trong Scene (nhìn thấy ngay ở Edit Mode).
-/// - Hỗ trợ chọn bằng 4 thẻ nhân vật, click trực tiếp lên model 3D, hoặc phím 1-4 / A-D / Mũi tên.
-/// - Kéo chuột trái trên sân khấu để xoay nhân vật đang chọn 360°.
-/// - Nhấn "VÀO CHIẾN ĐẤU" (hoặc Enter) sẽ lưu nhân vật vào SelectedCharacterStore và tải màn Lv1.
-/// </summary>
+// Điều khiển màn hình chọn nhân vật 3D tương tác, xoay góc nhìn, xem chỉ số và xác nhận vào chọn bản đồ
 public class CharacterSelectController : MonoBehaviour
 {
     [Serializable]
@@ -38,10 +33,10 @@ public class CharacterSelectController : MonoBehaviour
 
     [Header("Config & Navigation")]
     [SerializeField] private CharacterRosterConfig rosterConfig;
-    [SerializeField] private string gameplaySceneName = "Lv1";
+    [SerializeField] private string nextSceneName = "PickMap";
     [SerializeField] private string backSceneName = "LoginScene";
 
-    [Header("3D Stage References (Pre-Baked in Scene)")]
+    [Header("3D Stage References")]
     [SerializeField] private Camera showcaseCamera;
     [SerializeField] private Light heroSpotlight;
     [SerializeField] private Transform spotlightAnchor;
@@ -55,7 +50,7 @@ public class CharacterSelectController : MonoBehaviour
     [SerializeField] private float selectedScaleBoost = 1.08f;
     [SerializeField] private float unselectedScale = 0.94f;
 
-    [Header("UI Hero Info Panel (Pre-Baked in Scene)")]
+    [Header("UI Hero Info Panel")]
     [SerializeField] private Image roleBadgeBg;
     [SerializeField] private TMP_Text roleBadgeText;
     [SerializeField] private TMP_Text heroNameText;
@@ -64,7 +59,7 @@ public class CharacterSelectController : MonoBehaviour
     [SerializeField] private TMP_Text heroPerkText;
     [SerializeField] private Image infoAccentLine;
 
-    [Header("UI Stat Bars (Pre-Baked in Scene)")]
+    [Header("UI Stat Bars")]
     [SerializeField] private Slider hpSlider;
     [SerializeField] private TMP_Text hpValueText;
     [SerializeField] private Slider atkSlider;
@@ -74,7 +69,7 @@ public class CharacterSelectController : MonoBehaviour
     [SerializeField] private Slider defSlider;
     [SerializeField] private TMP_Text defValueText;
 
-    [Header("UI Controls (Pre-Baked in Scene)")]
+    [Header("UI Controls")]
     [SerializeField] private HeroCardView[] heroCards = new HeroCardView[4];
     [SerializeField] private Button playButton;
     [SerializeField] private Button backButton;
@@ -93,6 +88,7 @@ public class CharacterSelectController : MonoBehaviour
     private float[] turntableYaws = new float[4];
     private MaterialPropertyBlock ringPropBlock;
 
+    // Khóa con trỏ chuột về tự do và đảm bảo UI sẵn sàng tương tác
     private void Awake()
     {
         if (rosterConfig == null)
@@ -118,8 +114,11 @@ public class CharacterSelectController : MonoBehaviour
                 turntableYaws[i] = 180f;
             }
         }
+
+        StripShowcaseWeapons(false);
     }
 
+    // Gắn sự kiện nút bấm và đặt camera/thông số tại nhân vật đang chọn
     private void Start()
     {
         Time.timeScale = 1f;
@@ -197,6 +196,7 @@ public class CharacterSelectController : MonoBehaviour
         }
     }
 
+    // Xử lý phím tắt, kéo xoay nhân vật và nội suy camera cùng thanh chỉ số
     private void Update()
     {
         HandleKeyboardInput();
@@ -205,6 +205,7 @@ public class CharacterSelectController : MonoBehaviour
         UpdateStatBarsSmooth();
     }
 
+    // Chuyển sang nhân vật kế tiếp hoặc trước đó trong danh sách
     public void CycleCharacter(int delta)
     {
         int count = heroSlots != null && heroSlots.Length > 0 ? heroSlots.Length : 4;
@@ -212,6 +213,7 @@ public class CharacterSelectController : MonoBehaviour
         SelectCharacter(next, false);
     }
 
+    // Chọn nhân vật theo chỉ số, cập nhật UI và lưu vào SelectedCharacterStore
     public void SelectCharacter(int index, bool instant = false)
     {
         int count = heroSlots != null && heroSlots.Length > 0 ? heroSlots.Length : 4;
@@ -241,6 +243,7 @@ public class CharacterSelectController : MonoBehaviour
         }
     }
 
+    // Lưu nhân vật đã chọn và chuyển sang màn hình chọn bản đồ (PickMap)
     public void ConfirmAndPlay()
     {
         if (isTransitioning) return;
@@ -249,10 +252,18 @@ public class CharacterSelectController : MonoBehaviour
         SelectedCharacterStore.SelectedIndex = selectedIndex;
         GameAudioManager.PlayWeaponEquip();
 
-        string target = string.IsNullOrWhiteSpace(gameplaySceneName) ? "Lv1" : gameplaySceneName;
-        LoadingController.LoadScene(target);
+        string target = string.IsNullOrWhiteSpace(nextSceneName) ? "PickMap" : nextSceneName;
+        if (Application.CanStreamedLevelBeLoaded(target))
+        {
+            SceneManager.LoadScene(target);
+        }
+        else
+        {
+            LoadingController.LoadScene("Lv1");
+        }
     }
 
+    // Quay lại màn hình đăng nhập
     public void GoBackToLogin()
     {
         GameAudioManager.PlayUiClick();
@@ -297,7 +308,6 @@ public class CharacterSelectController : MonoBehaviour
                 return;
             }
 
-            // Click trực tiếp lên 1 trong 4 nhân vật 3D trên sân khấu để chọn nhanh
             if (showcaseCamera != null)
             {
                 Ray ray = showcaseCamera.ScreenPointToRay(Input.mousePosition);
@@ -548,4 +558,118 @@ public class CharacterSelectController : MonoBehaviour
             r.SetPropertyBlock(ringPropBlock);
         }
     }
+
+    // Loại bỏ vũ khí gắn trên tay các nhân vật trưng bày để chỉ hiển thị người mẫu nhân vật
+    private void StripShowcaseWeapons(bool immediate)
+    {
+        if (heroSlots == null) return;
+
+        var targets = new List<GameObject>();
+        for (int i = 0; i < heroSlots.Length; i++)
+        {
+            Transform root = heroSlots[i]?.modelTurntable;
+            if (root == null) continue;
+
+            Animator anim = heroSlots[i].heroAnimator != null
+                ? heroSlots[i].heroAnimator
+                : root.GetComponentInChildren<Animator>(true);
+
+            if (anim != null)
+            {
+                CollectHandWeapons(anim.GetBoneTransform(HumanBodyBones.RightHand), targets);
+                CollectHandWeapons(anim.GetBoneTransform(HumanBodyBones.LeftHand), targets);
+            }
+
+            Transform[] descendants = root.GetComponentsInChildren<Transform>(true);
+            for (int d = 0; d < descendants.Length; d++)
+            {
+                Transform t = descendants[d];
+                if (t == null) continue;
+
+                if (string.Equals(t.name, "mixamorig:RightHand", StringComparison.Ordinal)
+                    || string.Equals(t.name, "mixamorig:LeftHand", StringComparison.Ordinal))
+                {
+                    CollectHandWeapons(t, targets);
+                }
+                else if (IsNamedWeaponProp(t) && !targets.Contains(t.gameObject))
+                {
+                    targets.Add(t.gameObject);
+                }
+            }
+        }
+
+        for (int i = 0; i < targets.Count; i++)
+        {
+            GameObject weaponGo = targets[i];
+            if (weaponGo == null) continue;
+
+            if (immediate)
+            {
+#if UNITY_EDITOR
+                if (!UnityEditor.PrefabUtility.IsPartOfPrefabInstance(weaponGo)
+                    || UnityEditor.PrefabUtility.GetNearestPrefabInstanceRoot(weaponGo) == weaponGo)
+                {
+                    DestroyImmediate(weaponGo);
+                }
+                else
+                {
+                    weaponGo.SetActive(false);
+                }
+#else
+                weaponGo.SetActive(false);
+#endif
+            }
+            else
+            {
+                weaponGo.SetActive(false);
+                Destroy(weaponGo);
+            }
+        }
+    }
+
+    // Thu thập các vật thể không phải xương gắn trực tiếp trên bàn tay nhân vật
+    private static void CollectHandWeapons(Transform hand, List<GameObject> targets)
+    {
+        if (hand == null) return;
+        for (int c = 0; c < hand.childCount; c++)
+        {
+            Transform child = hand.GetChild(c);
+            if (child == null) continue;
+            if (child.name.StartsWith("mixamorig:", StringComparison.OrdinalIgnoreCase)) continue;
+            if (child.GetComponentInChildren<Renderer>(true) == null) continue;
+            if (child.GetComponentInChildren<SkinnedMeshRenderer>(true) != null) continue;
+
+            if (!targets.Contains(child.gameObject))
+            {
+                targets.Add(child.gameObject);
+            }
+        }
+    }
+
+    // Nhận diện prop vũ khí theo tiền tố tên phổ biến nếu được gắn ngoài xương bàn tay
+    private static bool IsNamedWeaponProp(Transform t)
+    {
+        if (t.GetComponentInChildren<MeshRenderer>(true) == null) return false;
+        if (t.GetComponentInChildren<SkinnedMeshRenderer>(true) != null) return false;
+
+        string[] prefixes = { "Sword", "Hammer", "Scythe", "Axe", "Weapon", "Staff", "Mace", "Blade" };
+        for (int i = 0; i < prefixes.Length; i++)
+        {
+            if (t.name.StartsWith(prefixes[i], StringComparison.OrdinalIgnoreCase)) return true;
+        }
+        return false;
+    }
+
+#if UNITY_EDITOR
+    // Cho phép xóa nhanh vũ khí khỏi các nhân vật ngay trong chế độ chỉnh sửa Scene
+    [ContextMenu("Xóa vũ khí khỏi nhân vật trong Scene")]
+    private void StripShowcaseWeaponsInEditor()
+    {
+        StripShowcaseWeapons(true);
+        if (!Application.isPlaying)
+        {
+            UnityEditor.SceneManagement.EditorSceneManager.MarkSceneDirty(gameObject.scene);
+        }
+    }
+#endif
 }

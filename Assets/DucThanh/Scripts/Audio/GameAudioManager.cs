@@ -3,13 +3,7 @@ using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 
-/// <summary>
-/// Quản lý toàn bộ âm thanh & nhạc nền (BGM + SFX) xuyên suốt game (Loading -> Login -> Lv1 3 Màn):
-/// - Tự động tải clip từ Assets/Resources/Audio/*.wav (có thể thay thế trực tiếp bằng file .wav/.mp3 khác).
-/// - Tự chuyển nhạc nền mượt mà (Crossfade) theo Scene & giai đoạn Boss Fight.
-/// - Biến thiên cao độ nhẹ (Pitch Randomization) giúp tiếng chém/bước chân tự nhiên, không bị máy móc.
-/// - Phím M để bật/tắt nhanh âm thanh (Mute).
-/// </summary>
+// Quản lý phát nhạc nền BGM chuyển cảnh mượt (crossfade) và âm thanh hiệu ứng SFX toàn game
 public class GameAudioManager : MonoBehaviour
 {
     public enum BgmTrack
@@ -17,6 +11,8 @@ public class GameAudioManager : MonoBehaviour
         None,
         Menu,
         ForestCombat,
+        FrostCombat,
+        InfernoCombat,
         Boss
     }
 
@@ -39,11 +35,13 @@ public class GameAudioManager : MonoBehaviour
     private readonly Dictionary<string, AudioClip> clipCache = new Dictionary<string, AudioClip>();
 
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
+    // Tự động khởi tạo trình quản lý âm thanh trước khi scene đầu tiên chạy
     private static void AutoBootstrap()
     {
         EnsureInstance();
     }
 
+    // Lấy hoặc tạo instance GameAudioManager tồn tại xuyên suốt các scene
     public static GameAudioManager EnsureInstance()
     {
         if (instance != null) return instance;
@@ -124,9 +122,10 @@ public class GameAudioManager : MonoBehaviour
         SyncBgmForScene(scene.name);
     }
 
+    // Tự động chọn và phát nhạc nền phù hợp theo từng scene hiện tại
     private void SyncBgmForScene(string sceneName)
     {
-        if (sceneName == "LoadingScene" || sceneName == "LoginScene" || sceneName == "PickCharacter")
+        if (sceneName == "LoadingScene" || sceneName == "LoginScene" || sceneName == "PickCharacter" || sceneName == "PickMap")
         {
             PlayBgmInternal(BgmTrack.Menu, 0.8f);
         }
@@ -134,21 +133,30 @@ public class GameAudioManager : MonoBehaviour
         {
             PlayBgmInternal(BgmTrack.ForestCombat, 1.0f);
         }
+        else if (sceneName == "Lv2")
+        {
+            PlayBgmInternal(BgmTrack.FrostCombat, 1.0f);
+        }
+        else if (sceneName == "Lv3")
+        {
+            PlayBgmInternal(BgmTrack.InfernoCombat, 1.0f);
+        }
     }
 
+    // Bật/tắt toàn bộ âm thanh game bằng phím tắt
     public void ToggleMute()
     {
         isMuted = !isMuted;
         AudioListener.volume = isMuted ? 0f : 1f;
     }
 
-    // ==================== BGM CONTROL ====================
-
+    // Phát bản nhạc nền chỉ định với thời gian chuyển mượt
     public static void PlayBgm(BgmTrack track, float fadeDuration = 1.0f)
     {
         EnsureInstance().PlayBgmInternal(track, fadeDuration);
     }
 
+    // Giảm dần âm lượng nhạc nền hiện tại
     public static void FadeOutBgm(float duration = 0.8f)
     {
         EnsureInstance().PlayBgmInternal(BgmTrack.None, duration);
@@ -163,6 +171,8 @@ public class GameAudioManager : MonoBehaviour
         {
             BgmTrack.Menu => LoadClip("bgm_menu"),
             BgmTrack.ForestCombat => LoadClip("bgm_forest_combat"),
+            BgmTrack.FrostCombat => LoadClip("bgm_frost_combat"),
+            BgmTrack.InfernoCombat => LoadClip("bgm_inferno_combat"),
             BgmTrack.Boss => LoadClip("bgm_boss"),
             _ => null
         };
@@ -174,6 +184,7 @@ public class GameAudioManager : MonoBehaviour
     private AudioSource GetActiveBgmSource() => usingSourceA ? bgmSourceA : bgmSourceB;
     private AudioSource GetInactiveBgmSource() => usingSourceA ? bgmSourceB : bgmSourceA;
 
+    // Chuyển âm lượng giữa kênh nhạc cũ và kênh nhạc mới
     private IEnumerator CrossfadeBgmCoroutine(AudioClip nextClip, float duration)
     {
         AudioSource fadeOut = GetActiveBgmSource();
@@ -221,8 +232,6 @@ public class GameAudioManager : MonoBehaviour
 
         crossfadeRoutine = null;
     }
-
-    // ==================== SFX PLAYBACK ====================
 
     private void PlaySfxClip(string clipName, float volumeScale = 1f, float pitchMin = 1f, float pitchMax = 1f)
     {
@@ -273,13 +282,12 @@ public class GameAudioManager : MonoBehaviour
         return loaded;
     }
 
-    // ==================== STATIC SFX SHORTCUTS ====================
-
     public static void PlaySwordSwing() => EnsureInstance().PlaySfxClip("sfx_sword_swing", 0.72f, 0.92f, 1.08f);
     public static void PlaySwordHit(bool heavy = false) => EnsureInstance().PlaySfxClip("sfx_sword_hit", heavy ? 1.0f : 0.85f, heavy ? 0.84f : 0.94f, heavy ? 0.96f : 1.08f);
     public static void PlayPlayerHurt() => EnsureInstance().PlaySfxClip("sfx_player_hurt", 0.95f, 0.92f, 1.05f);
     public static void PlayFootstep() => EnsureInstance().PlaySfxClip("sfx_footstep", 0.36f, 0.88f, 1.16f);
     public static void PlayOrcAttack() => EnsureInstance().PlaySfxClip("sfx_orc_attack", 0.65f, 0.88f, 1.06f);
+    // Phát hiệu ứng âm thanh khi tiêu diệt quái thường hoặc Boss
     public static void PlayEnemyDeath(bool isBoss = false)
     {
         if (isBoss)
@@ -298,11 +306,13 @@ public class GameAudioManager : MonoBehaviour
     public static void PlayCheckpoint() => EnsureInstance().PlaySfxClip("sfx_checkpoint", 0.88f, 1f, 1f);
     public static void PlayWeaponEquip() => EnsureInstance().PlaySfxClip("sfx_weapon_equip", 0.88f, 0.96f, 1.05f);
     public static void PlayStageClear() => EnsureInstance().PlaySfxClip("sfx_stage_clear", 0.92f, 1f, 1f);
+    // Phát âm thanh chúc mừng chiến thắng
     public static void PlayVictory()
     {
         FadeOutBgm(0.6f);
         EnsureInstance().PlaySfxClip("sfx_victory", 0.95f, 1f, 1f);
     }
+    // Phát âm thanh thông báo thất bại
     public static void PlayGameOver()
     {
         FadeOutBgm(0.6f);

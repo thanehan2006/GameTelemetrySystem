@@ -4,13 +4,7 @@ using UnityEngine.SceneManagement;
 using UnityEngine.UI;
 using TMPro;
 
-/// <summary>
-/// Màn hình Loading phong cách Action RPG AAA:
-/// - Hình nền nghệ thuật Rừng Orc & Mỏ Vàng kèm hiệu ứng Ken Burns zoom mượt + đom đóm bay.
-/// - Logo game VANGUARD: RAID OF THE ORC WOODS, mẹo chơi luân phiên chuẩn gameplay 3 Màn.
-/// - Tải trước toàn bộ asset bắt buộc (UI, Audio BGM/SFX, Nhân vật 3D, Phần thưởng, Shader) trước khi nạp Scene đích.
-/// - Chỉ hoàn tất & kích hoạt Scene đích khi cả tài nguyên lẫn Scene đã tải xong 100%.
-/// </summary>
+// Điều khiển màn hình tải cảnh (LoadingScene), luân phiên mẹo chơi và đồng bộ tiến trình nạp tài nguyên
 public class LoadingController : MonoBehaviour
 {
     public const string LoadingSceneName = "LoadingScene";
@@ -47,7 +41,7 @@ public class LoadingController : MonoBehaviour
         "Mẹo hồi phục: Nhặt Bình Hồi Máu phát sáng trên đường hoặc rơi từ quái và chạm Trại Lửa Checkpoint để hồi HP."
     };
 
-    [Header("Optional Pre-Baked UI References")]
+    [Header("UI References")]
     [SerializeField] private RectTransform keyArtRect;
     [SerializeField] private TMP_Text tipText;
 
@@ -64,9 +58,7 @@ public class LoadingController : MonoBehaviour
         pendingTargetScene = null;
     }
 
-    /// <summary>
-    /// Chuyển sang bất kỳ Scene nào thông qua LoadingScene để đảm bảo asset đã được tải đầy đủ trước khi vào màn.
-    /// </summary>
+    // Lưu tên scene đích và chuyển qua LoadingScene để tải bất đồng bộ
     public static void LoadScene(string targetSceneName)
     {
         if (string.IsNullOrWhiteSpace(targetSceneName)) return;
@@ -83,6 +75,7 @@ public class LoadingController : MonoBehaviour
         SceneManager.LoadScene(targetSceneName);
     }
 
+    // Áp dụng giao diện Loading, ẩn mẹo phù hợp và bắt đầu coroutine tải dữ liệu
     private void Start()
     {
         Time.timeScale = 1f;
@@ -111,6 +104,9 @@ public class LoadingController : MonoBehaviour
                 if (tipTf != null) tipText = tipTf.GetComponent<TMP_Text>();
             }
 
+            TMP_Text bakedBadge = canvas.transform.Find("GameBrandHeader/Badge")?.GetComponent<TMP_Text>();
+            if (bakedBadge != null) bakedBadge.text = "ACTION ROGUELITE  •  DARK FANTASY";
+
             if (canvas.transform.Find("LoadingEmbers") == null)
             {
                 GameObject emberLayer = new GameObject("LoadingEmbers", typeof(RectTransform));
@@ -123,12 +119,13 @@ public class LoadingController : MonoBehaviour
             return;
         }
 
-        ApplyAaaLoadingTheme();
+        ApplyLoadingTheme();
     }
 
+    // Cho phép nhấn phím R để tải lại nếu thiếu tài nguyên bắt buộc
     private void Update()
     {
-        // Hiệu ứng Ken Burns zoom chậm tạo chiều sâu điện ảnh cho hình nền Loading
+
         if (keyArtRect != null)
         {
             float scale = 1.0f + Mathf.PingPong(Time.unscaledTime * 0.012f, 0.06f);
@@ -136,7 +133,7 @@ public class LoadingController : MonoBehaviour
         }
     }
 
-    private void ApplyAaaLoadingTheme()
+    private void ApplyLoadingTheme()
     {
         Canvas canvas = FindFirstObjectByType<Canvas>();
         if (canvas == null) return;
@@ -144,22 +141,18 @@ public class LoadingController : MonoBehaviour
         FantasyUiThemeHelper.ConfigureResponsiveCanvas(canvas);
         TMP_FontAsset sharedFont = progressText != null ? progressText.font : (loadingStatus != null ? loadingStatus.font : null);
 
-        // Ẩn Background & LoadingTitle mặc định cũ nếu tồn tại trên Canvas
         Transform oldBg = canvas.transform.Find("Background");
         if (oldBg != null) oldBg.gameObject.SetActive(false);
 
         Transform oldTitle = canvas.transform.Find("LoadingTitle");
         if (oldTitle != null) oldTitle.gameObject.SetActive(false);
 
-        // 1. Hình nền nghệ thuật Rừng Orc & Mỏ Vàng (Assets/Resources/UI/LoadingBg.jpg)
         RawImage keyArt = FantasyUiThemeHelper.CreateFullscreenKeyArt(canvas.transform, "UI/LoadingBg", "LoadingKeyArt");
         keyArtRect = keyArt.rectTransform;
 
-        // 2. Lớp chuyển tối mượt phía trên & phía dưới giúp chữ sắc nét tuyệt đối
         Image veil = FantasyUiThemeHelper.CreateGradientOverlay(canvas.transform, "LoadingGradientVeil", false, new Color(0.03f, 0.05f, 0.09f, 1f));
         veil.transform.SetSiblingIndex(1);
 
-        // 3. Hạt đom đóm / tàn lửa vàng bay lơ lửng
         GameObject emberLayer = new GameObject("LoadingEmbers", typeof(RectTransform));
         emberLayer.transform.SetParent(canvas.transform, false);
         emberLayer.transform.SetSiblingIndex(2);
@@ -167,7 +160,6 @@ public class LoadingController : MonoBehaviour
         FloatingEmbersUI embers = emberLayer.AddComponent<FloatingEmbersUI>();
         embers.Initialize(26, 0.05f, 0.95f, new Color(1f, 0.85f, 0.35f, 1f), new Color(0.45f, 0.95f, 0.65f, 1f));
 
-        // 4. Khối Logo Game góc trên-trái
         GameObject brandGroup = new GameObject("GameBrandHeader", typeof(RectTransform));
         brandGroup.transform.SetParent(canvas.transform, false);
         RectTransform brandRt = brandGroup.GetComponent<RectTransform>();
@@ -177,7 +169,7 @@ public class LoadingController : MonoBehaviour
         brandRt.anchoredPosition = new Vector2(88f, -64f);
         brandRt.sizeDelta = new Vector2(680f, 160f);
 
-        TMP_Text badge = FantasyUiThemeHelper.CreateText(brandGroup.transform, "Badge", "AEGIS TELEMETRY  •  ACTION ROGUELITE",
+        TMP_Text badge = FantasyUiThemeHelper.CreateText(brandGroup.transform, "Badge", "ACTION ROGUELITE  •  DARK FANTASY",
             15f, FontStyles.Bold, FantasyUiThemeHelper.GoldBright, TextAlignmentOptions.Left, sharedFont);
         SetTopLeftRect(badge.rectTransform, 0f, 0f, 650f, 24f);
         badge.characterSpacing = 6f;
@@ -199,7 +191,6 @@ public class LoadingController : MonoBehaviour
         SetTopLeftRect(sub.rectTransform, 0f, -114f, 650f, 32f);
         sub.characterSpacing = 5f;
 
-        // 5. Thanh Loading & Mẹo chơi sát đáy màn hình (kiểu game AAA)
         GameObject footer = new GameObject("LoadingFooterHUD", typeof(RectTransform));
         footer.transform.SetParent(canvas.transform, false);
         RectTransform footRt = footer.GetComponent<RectTransform>();
@@ -209,7 +200,6 @@ public class LoadingController : MonoBehaviour
         footRt.anchoredPosition = new Vector2(0f, 54f);
         footRt.sizeDelta = new Vector2(-176f, 130f);
 
-        // Mẹo chơi
         tipText = FantasyUiThemeHelper.CreateText(footer.transform, "GameplayTipText", GameplayTips[0],
             19f, FontStyles.Normal, new Color(0.88f, 0.91f, 0.96f, 0.95f), TextAlignmentOptions.Left, sharedFont);
         RectTransform tipRt = tipText.rectTransform;
@@ -219,7 +209,6 @@ public class LoadingController : MonoBehaviour
         tipRt.anchoredPosition = new Vector2(0f, 0f);
         tipRt.sizeDelta = new Vector2(0f, 36f);
 
-        // Style lại ProgressBar có sẵn (bỏ Handle tròn xấu, biến thành thanh vàng kim sắc nét)
         if (progressBar != null)
         {
             progressBar.transform.SetParent(footer.transform, false);
@@ -277,7 +266,6 @@ public class LoadingController : MonoBehaviour
             }
         }
 
-        // Trạng thái nạp (góc dưới-trái dưới thanh progress)
         if (loadingStatus != null)
         {
             loadingStatus.transform.SetParent(footer.transform, false);
@@ -294,7 +282,6 @@ public class LoadingController : MonoBehaviour
             loadingStatus.alignment = TextAlignmentOptions.MidlineLeft;
         }
 
-        // Phần trăm tải (góc dưới-phải dưới thanh progress)
         if (progressText != null)
         {
             progressText.transform.SetParent(footer.transform, false);
@@ -321,6 +308,7 @@ public class LoadingController : MonoBehaviour
         rt.sizeDelta = new Vector2(w, h);
     }
 
+    // Nạp trước tài nguyên game bằng GameAssetPreloader rồi kích hoạt scene chiến đấu
     private IEnumerator LoadSceneAsync()
     {
         if (progressBar == null || progressText == null || loadingStatus == null)
@@ -332,7 +320,6 @@ public class LoadingController : MonoBehaviour
         string requestedScene = pendingTargetScene;
         pendingTargetScene = null;
 
-        // Tự chuyển hướng MainScene cũ sang LoginScene theo luồng Loading -> Login -> PickCharacter -> Lv1
         string targetScene = !string.IsNullOrWhiteSpace(requestedScene)
             ? requestedScene.Trim()
             : (string.IsNullOrWhiteSpace(sceneToLoad) || sceneToLoad == "MainScene" ? "LoginScene" : sceneToLoad.Trim());
@@ -369,7 +356,6 @@ public class LoadingController : MonoBehaviour
         loadingStartRealtime = Time.realtimeSinceStartup;
         nextTipSwitchTime = loadingStartRealtime + 2.2f;
 
-        // Giai đoạn 1: Tải xong toàn bộ asset trước khi gọi SceneManager.LoadSceneAsync (tránh kẹt hàng đợi PreloadManager)
         GameAssetPreloader preloader = GameAssetPreloader.EnsureInstance();
         bool needsCorePreload = preloadCoreAssets && (!GameAssetPreloader.IsCoreAssetsLoaded || GameAssetPreloader.HasMissingCoreAssets);
         bool hasExtras = (extraResourcePaths != null && extraResourcePaths.Length > 0)
@@ -409,7 +395,6 @@ public class LoadingController : MonoBehaviour
             yield return null;
         }
 
-        // Giai đoạn 2: Tải bất đồng bộ Scene đích sau khi toàn bộ asset đã hoàn tất
         AsyncOperation operation = SceneManager.LoadSceneAsync(targetScene);
         if (operation == null)
         {
@@ -435,7 +420,6 @@ public class LoadingController : MonoBehaviour
             yield return null;
         }
 
-        // Giai đoạn 3: Chốt 100% và kích hoạt Scene đích
         progressBar.value = 1f;
         progressText.text = "100%";
         loadingStatus.text = "Đã tải xong tài nguyên — Sẵn sàng ra trận!";
@@ -498,7 +482,10 @@ public class LoadingController : MonoBehaviour
         {
             "LoginScene" => "Đăng Nhập",
             "PickCharacter" => "Chọn Nhân Vật",
-            "Lv1" => "Rừng Orc (Màn 1)",
+            "PickMap" => "Chọn Bản Đồ",
+            "Lv1" => "Rừng Orc (Map 1)",
+            "Lv2" => "Cao Nguyên Băng Tuyết (Map 2)",
+            "Lv3" => "Pháo Đài Dung Nham (Map 3)",
             _ => sceneName
         };
     }

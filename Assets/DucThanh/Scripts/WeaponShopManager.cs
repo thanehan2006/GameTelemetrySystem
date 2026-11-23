@@ -7,13 +7,7 @@ using TMPro;
 using UnityEditor;
 #endif
 
-/// <summary>
-/// Cửa Hàng Rèn Vũ Khí & Bình Hồi Máu phong cách Action RPG AAA:
-/// - Tự động chụp ảnh chân dung 3D sắc nét (1 Studio Camera + 1 RenderTexture dùng chung) cho từng model vũ khí trong WeaponUpgradeConfig.
-/// - Hiển thị icon cho Bình Hồi Máu (icon_potion) & Vàng (icon_gold).
-/// - Phân bậc phẩm chất vũ khí (Hiếm / Sử Thi / Huyền Thoại / Thần Thoại) với viền màu riêng và hiệu ứng mở mượt.
-/// - Mở nhanh bằng phím [B] mọi lúc hoặc [E] gần Trại Lửa, gửi đủ Telemetry Đề 9.
-/// </summary>
+// Quản lý cửa hàng rèn vũ khí và mua bình hồi máu [B]/[E], dựng ảnh xem trước 3D và gắn vũ khí lên tay nhân vật
 public class WeaponShopManager : MonoBehaviour
 {
     public static WeaponShopManager Instance { get; private set; }
@@ -23,18 +17,18 @@ public class WeaponShopManager : MonoBehaviour
 
     [Header("Shop Config")]
     public WeaponUpgradeConfigSO weaponConfig;
-    public int potionPrice = 50;
-    public int potionHealAmount = 80;
+    public int potionPrice = 65;
+    public int potionHealAmount = 75;
 
-    private static readonly int[] DefaultWeaponPrices = { 60, 100, 150, 210, 280, 360, 450, 550 };
-    private static readonly int[] DefaultWeaponBonusDmg = { 12, 22, 34, 48, 64, 82, 102, 125 };
+    private static readonly int[] DefaultWeaponPrices = { 75, 130, 200, 280, 370, 470, 590, 720 };
+    private static readonly int[] DefaultWeaponBonusDmg = { 8, 14, 21, 28, 36, 44, 54, 65 };
 
     private static readonly Color[] RarityColors =
     {
-        new Color(0.32f, 0.86f, 0.54f, 1f), // Hiếm (Emerald)
-        new Color(0.24f, 0.72f, 0.98f, 1f), // Sử Thi (Sapphire)
-        new Color(0.76f, 0.48f, 1.00f, 1f), // Huyền Thoại (Amethyst)
-        new Color(1.00f, 0.78f, 0.22f, 1f)  // Thần Thoại (Solar Gold)
+        new Color(0.32f, 0.86f, 0.54f, 1f),
+        new Color(0.24f, 0.72f, 0.98f, 1f),
+        new Color(0.76f, 0.48f, 1.00f, 1f),
+        new Color(1.00f, 0.78f, 0.22f, 1f)
     };
 
     private static readonly string[] RarityLabels = { "HIẾM", "SỬ THI", "HUYỀN THOẠI", "THẦN THOẠI" };
@@ -56,18 +50,16 @@ public class WeaponShopManager : MonoBehaviour
     }
 
     private readonly List<ShopWeaponItem> shopItems = new List<ShopWeaponItem>(8);
-    private readonly Dictionary<GameObject, Texture2D> thumbnailCache = new Dictionary<GameObject, Texture2D>(8);
+    private readonly Dictionary<int, Texture2D> thumbnailCache = new Dictionary<int, Texture2D>(8);
 
     private int equippedItemIndex = -1;
     private int basePlayerDamage = -1;
     private bool isOpen;
 
-    // Cached player components
     private Transform playerTransform;
     private PlayerHealth playerHealth;
     private PlayerAttack playerAttack;
 
-    // Runtime Shop UI
     private GameObject shopOverlayRoot;
     private RectTransform shopCardRect;
     private CanvasGroup shopCanvasGroup;
@@ -78,6 +70,7 @@ public class WeaponShopManager : MonoBehaviour
     private TMP_Text potionButtonText;
     private Coroutine openAnimRoutine;
 
+    // Khởi tạo Singleton và nạp danh sách vũ khí từ cấu hình ScriptableObject
     private void Awake()
     {
         if (Instance != null && Instance != this)
@@ -95,6 +88,7 @@ public class WeaponShopManager : MonoBehaviour
         CacheBasePlayerDamage();
     }
 
+    // Lắng nghe phím B/E/Esc để bật hoặc đóng giao diện cửa hàng
     private void Update()
     {
         if (GameOverManager.IsGameOver)
@@ -131,12 +125,14 @@ public class WeaponShopManager : MonoBehaviour
         }
     }
 
+    // Đóng nếu đang mở hoặc mở giao diện cửa hàng
     public void ToggleShop()
     {
         if (isOpen) CloseShop();
         else OpenShop();
     }
 
+    // Tạm dừng thời gian trận đấu, mở khóa chuột và hiển thị bảng cửa hàng
     public void OpenShop()
     {
         if (isOpen || GameOverManager.IsGameOver) return;
@@ -166,6 +162,7 @@ public class WeaponShopManager : MonoBehaviour
         }
     }
 
+    // Đóng cửa hàng, khôi phục thời gian chạy và khóa lại con trỏ chuột
     public void CloseShop()
     {
         if (!isOpen) return;
@@ -215,8 +212,6 @@ public class WeaponShopManager : MonoBehaviour
         openAnimRoutine = null;
     }
 
-    // ==================== SHARED PLAYER HAND HELPER ====================
-
     public static Transform FindPlayerHandBone(GameObject player, out GameObject equippedWeapon)
     {
         equippedWeapon = null;
@@ -264,8 +259,7 @@ public class WeaponShopManager : MonoBehaviour
         return null;
     }
 
-    // ==================== CATALOG & 3D THUMBNAIL STUDIO ====================
-
+    // Nạp danh sách các mẫu vũ khí nâng cấp kèm giá và chỉ số sát thương
     private void LoadWeaponCatalog()
     {
         shopItems.Clear();
@@ -289,8 +283,9 @@ public class WeaponShopManager : MonoBehaviour
             WeaponUpgradeEntry e = weaponConfig.weapons[i];
             if (e == null || !e.enabled || e.weaponPrefab == null) continue;
 
-            int price = slot < DefaultWeaponPrices.Length ? DefaultWeaponPrices[slot] : 550 + (slot - DefaultWeaponPrices.Length + 1) * 100;
-            int dmg = slot < DefaultWeaponBonusDmg.Length ? DefaultWeaponBonusDmg[slot] : 125 + (slot - DefaultWeaponBonusDmg.Length + 1) * 20;
+            int price = slot < DefaultWeaponPrices.Length ? DefaultWeaponPrices[slot] : 720 + (slot - DefaultWeaponPrices.Length + 1) * 140;
+            int fallbackDmg = slot < DefaultWeaponBonusDmg.Length ? DefaultWeaponBonusDmg[slot] : 65 + (slot - DefaultWeaponBonusDmg.Length + 1) * 12;
+            int dmg = e.bonusDamage > 0 ? e.bonusDamage : fallbackDmg;
             int rarity = Mathf.Clamp(slot / 2, 0, RarityColors.Length - 1);
 
             shopItems.Add(new ShopWeaponItem
@@ -305,13 +300,11 @@ public class WeaponShopManager : MonoBehaviour
                 owned = false
             });
             slot++;
-            if (slot >= 8) break; // Lưới 4x2 gọn gàng cân đối
+            if (slot >= 8) break;
         }
     }
 
-    /// <summary>
-    /// Chụp ảnh chân dung 3D cho tất cả vũ khí chưa có cache bằng DUY NHẤT 1 Studio Camera & RenderTexture 128x128.
-    /// </summary>
+    // Chụp ảnh icon 2D từ model 3D của từng vũ khí bằng camera tạm
     private void RenderAllWeaponThumbnails()
     {
         bool needsRender = false;
@@ -319,7 +312,7 @@ public class WeaponShopManager : MonoBehaviour
         {
             ShopWeaponItem item = shopItems[i];
             if (item.prefab == null) continue;
-            if (thumbnailCache.TryGetValue(item.prefab, out Texture2D cached) && cached != null)
+            if (thumbnailCache.TryGetValue(item.index, out Texture2D cached) && cached != null)
             {
                 item.thumbnail = cached;
             }
@@ -376,7 +369,7 @@ public class WeaponShopManager : MonoBehaviour
             {
                 ShopWeaponItem item = shopItems[i];
                 if (item.prefab == null) continue;
-                if (thumbnailCache.TryGetValue(item.prefab, out Texture2D cached) && cached != null)
+                if (thumbnailCache.TryGetValue(item.index, out Texture2D cached) && cached != null)
                 {
                     item.thumbnail = cached;
                     continue;
@@ -409,7 +402,9 @@ public class WeaponShopManager : MonoBehaviour
                 keyLightObj.transform.position = bounds.center + new Vector3(1.8f, 2.2f, -2.5f);
                 keyLightObj.transform.LookAt(bounds.center);
                 rimLightObj.transform.position = bounds.center + new Vector3(-2.0f, -0.8f, 1.8f);
-                rimLight.color = RarityColors[item.rarityTier];
+                WeaponVfxProfile thumbProfile = WeaponElementalVfx.ResolveProfile(item.prefab.name, item.rarityTier + 1, item.index);
+                rimLight.color = thumbProfile.primaryColor;
+                rimLight.intensity = 9.5f + thumbProfile.tier * 0.8f;
 
                 float maxExtent = Mathf.Max(bounds.extents.x, bounds.extents.y, bounds.extents.z, 0.25f);
                 float dist = (maxExtent / Mathf.Sin(cam.fieldOfView * 0.5f * Mathf.Deg2Rad)) * 1.18f;
@@ -423,10 +418,9 @@ public class WeaponShopManager : MonoBehaviour
                 tex.ReadPixels(new Rect(0, 0, res, res), 0, 0);
                 tex.Apply(false, true);
 
-                thumbnailCache[item.prefab] = tex;
+                thumbnailCache[item.index] = tex;
                 item.thumbnail = tex;
 
-                // Tách khỏi pivot và ẩn ngay để không ảnh hưởng bounds của vũ khí kế tiếp trong cùng frame
                 clone.transform.SetParent(null, false);
                 clone.SetActive(false);
                 Destroy(clone);
@@ -442,8 +436,7 @@ public class WeaponShopManager : MonoBehaviour
         }
     }
 
-    // ==================== PURCHASE & EQUIP LOGIC ====================
-
+    // Xử lý mua bình hồi máu và hồi phục HP cho người chơi
     private void OnBuyPotionClicked()
     {
         ResolvePlayer();
@@ -476,6 +469,7 @@ public class WeaponShopManager : MonoBehaviour
         RefreshShopUi();
     }
 
+    // Xử lý mua mới hoặc trang bị lại vũ khí đã sở hữu
     private void OnWeaponButtonClicked(ShopWeaponItem item)
     {
         if (item == null) return;
@@ -506,6 +500,7 @@ public class WeaponShopManager : MonoBehaviour
         RefreshShopUi();
     }
 
+    // Thay model vũ khí trên tay phải nhân vật và cập nhật sát thương đòn đánh
     private void EquipWeaponItem(ShopWeaponItem item)
     {
         ResolvePlayer();
@@ -531,16 +526,22 @@ public class WeaponShopManager : MonoBehaviour
         GameObject newWeapon = Instantiate(item.prefab, hand);
         newWeapon.name = item.prefab.name;
 
-        if (item.entry != null && item.entry.hasCustomGrip)
+        Animator playerAnim = playerTransform.GetComponentInChildren<Animator>(true);
+        if (!WeaponGripAligner.AlignWeaponToHand(hand, newWeapon.transform, playerAnim))
         {
-            item.entry.ApplyGripToTransform(newWeapon.transform);
+            if (item.entry != null && item.entry.hasCustomGrip)
+            {
+                item.entry.ApplyGripToTransform(newWeapon.transform);
+            }
+            else
+            {
+                newWeapon.transform.localPosition = fallbackLocalPos;
+                newWeapon.transform.localRotation = fallbackLocalRot;
+                newWeapon.transform.localScale = fallbackLocalScale;
+            }
         }
-        else
-        {
-            newWeapon.transform.localPosition = fallbackLocalPos;
-            newWeapon.transform.localRotation = fallbackLocalRot;
-            newWeapon.transform.localScale = fallbackLocalScale;
-        }
+
+        WeaponElementalVfx equippedVfx = WeaponElementalVfx.ApplyToWeapon(newWeapon, item.rarityTier + 1, item.index);
 
         if (playerAttack != null)
         {
@@ -551,12 +552,12 @@ public class WeaponShopManager : MonoBehaviour
 
         equippedItemIndex = item.index;
         Color rarityCol = RarityColors[Mathf.Clamp(item.rarityTier, 0, RarityColors.Length - 1)];
-        CombatVfxManager.SpawnWeaponEquipEffect(playerTransform, rarityCol);
+        Color equipColor = equippedVfx != null ? equippedVfx.Profile.primaryColor : rarityCol;
+        CombatVfxManager.SpawnWeaponEquipEffect(playerTransform, equipColor);
         GameAudioManager.PlayWeaponEquip();
     }
 
-    // ==================== AAA ARMORY SHOP UI ====================
-
+    // Khởi tạo khung giao diện cửa hàng, danh sách nút vũ khí và khu vực mua bình máu
     private void EnsureShopUi()
     {
         if (shopOverlayRoot != null) return;
@@ -568,7 +569,6 @@ public class WeaponShopManager : MonoBehaviour
         Texture2D potionTex = GameAssetPreloader.GetAsset<Texture2D>("UI/icon_potion") ?? Resources.Load<Texture2D>("UI/icon_potion");
         Texture2D goldTex = GameAssetPreloader.GetAsset<Texture2D>("UI/icon_gold") ?? Resources.Load<Texture2D>("UI/icon_gold");
 
-        // 1. Nền phủ tối kèm hạt tàn lửa vàng kim
         shopOverlayRoot = new GameObject("WeaponShopOverlay", typeof(RectTransform), typeof(Image), typeof(CanvasGroup));
         shopOverlayRoot.transform.SetParent(canvas.transform, false);
         FantasyUiThemeHelper.StretchFull(shopOverlayRoot.GetComponent<RectTransform>());
@@ -581,7 +581,6 @@ public class WeaponShopManager : MonoBehaviour
         FloatingEmbersUI embers = embersObj.AddComponent<FloatingEmbersUI>();
         embers.Initialize(20, 0.05f, 0.95f, new Color(1f, 0.78f, 0.25f, 1f), new Color(1f, 0.45f, 0.15f, 1f));
 
-        // 2. Khung Cửa Hàng chính (960 x 655)
         GameObject card = new GameObject("ShopCard", typeof(RectTransform), typeof(Image));
         card.transform.SetParent(shopOverlayRoot.transform, false);
         shopCardRect = card.GetComponent<RectTransform>();
@@ -597,18 +596,16 @@ public class WeaponShopManager : MonoBehaviour
         FantasyUiThemeHelper.CreateAccentLine(card.transform, "BottomGoldBar",
             new Vector2(0f, 0f), new Vector2(1f, 0f), new Vector2(0.5f, 0f), Vector2.zero, new Vector2(0f, 3f), FantasyUiThemeHelper.GoldBorder);
 
-        // 3. Header: Tiêu đề + Ví Vàng (có icon đồng vàng) + Nút đóng
         TMP_Text title = FantasyUiThemeHelper.CreateText(card.transform, "ShopTitle", "LÒ RÈN VANGUARD  •  CỬA HÀNG",
             26f, FontStyles.Bold, FantasyUiThemeHelper.GoldBright, TextAlignmentOptions.Left, font);
         SetTopRect(title.rectTransform, 32f, -18f, 520f, 34f, 0f);
         title.characterSpacing = 3f;
 
         TMP_Text subtitle = FantasyUiThemeHelper.CreateText(card.transform, "ShopSubtitle",
-            "Thu thập Vàng từ Rừng Orc để mua Vũ Khí huyền thoại hoặc Bình Hồi Máu",
+            "Thu thập Vàng khi diệt quái để rèn Vũ Khí huyền thoại hoặc Bình Hồi Máu",
             14f, FontStyles.Normal, FantasyUiThemeHelper.TextMuted, TextAlignmentOptions.Left, font);
         SetTopRect(subtitle.rectTransform, 32f, -52f, 540f, 22f, 0f);
 
-        // Ví vàng có icon đồng vàng
         GameObject walletPill = new GameObject("GoldWalletPill", typeof(RectTransform), typeof(Image));
         walletPill.transform.SetParent(card.transform, false);
         SetTopRect(walletPill.GetComponent<RectTransform>(), -88f, -20f, 210f, 48f, 1f);
@@ -645,7 +642,6 @@ public class WeaponShopManager : MonoBehaviour
         FantasyUiThemeHelper.CreateAccentLine(card.transform, "HeaderDivider",
             new Vector2(0f, 1f), new Vector2(1f, 1f), new Vector2(0.5f, 1f), new Vector2(0f, -84f), new Vector2(-64f, 2f), FantasyUiThemeHelper.GoldBorder);
 
-        // 4. Thẻ Bình Hồi Máu nổi bật
         GameObject potionRow = new GameObject("PotionBanner", typeof(RectTransform), typeof(Image));
         potionRow.transform.SetParent(card.transform, false);
         SetTopCenteredRect(potionRow.GetComponent<RectTransform>(), 0f, -98f, 896f, 88f);
@@ -685,7 +681,7 @@ public class WeaponShopManager : MonoBehaviour
         SetTopRect(pName.rectTransform, 98f, -16f, 520f, 26f, 0f);
 
         playerHpSummaryText = FantasyUiThemeHelper.CreateText(potionRow.transform, "PotionDesc",
-            "Hồi phục tức thì trong giao tranh  •  HP hiện tại: 180 / 180",
+            "Hồi phục tức thì trong giao tranh  •  HP hiện tại: 190 / 190",
             14f, FontStyles.Normal, FantasyUiThemeHelper.TextMuted, TextAlignmentOptions.Left, font);
         SetTopRect(playerHpSummaryText.rectTransform, 98f, -48f, 540f, 24f, 0f);
 
@@ -698,7 +694,6 @@ public class WeaponShopManager : MonoBehaviour
         potionButtonText = potionButton.GetComponentInChildren<TMP_Text>(true);
         potionButton.onClick.AddListener(OnBuyPotionClicked);
 
-        // 5. Chụp toàn bộ thumbnail 3D bằng 1 Studio dùng chung rồi dựng lưới 4x2
         RenderAllWeaponThumbnails();
 
         GameObject gridObj = new GameObject("WeaponsGrid", typeof(RectTransform), typeof(GridLayoutGroup));
@@ -756,8 +751,13 @@ public class WeaponShopManager : MonoBehaviour
             rTag.characterSpacing = 1.5f;
 
             TMP_Text wName = FantasyUiThemeHelper.CreateText(tile.transform, "Name", item.displayName,
-                16f, FontStyles.Bold, Color.white, TextAlignmentOptions.Center, font);
-            SetTopCenteredRect(wName.rectTransform, 0f, -97f, 196f, 22f);
+                15.5f, FontStyles.Bold, Color.white, TextAlignmentOptions.Center, font);
+            SetTopCenteredRect(wName.rectTransform, 0f, -97f, 198f, 22f);
+            wName.textWrappingMode = TextWrappingModes.NoWrap;
+            wName.overflowMode = TextOverflowModes.Truncate;
+            wName.enableAutoSizing = true;
+            wName.fontSizeMin = 11.5f;
+            wName.fontSizeMax = 15.5f;
 
             TMP_Text wDmg = FantasyUiThemeHelper.CreateText(tile.transform, "Damage", $"+{item.bonusDamage} SÁT THƯƠNG",
                 12f, FontStyles.Bold, rarityCol, TextAlignmentOptions.Center, font);
@@ -772,9 +772,8 @@ public class WeaponShopManager : MonoBehaviour
             btn.onClick.AddListener(() => OnWeaponButtonClicked(captured));
         }
 
-        // 6. Dòng thông báo chân cửa hàng
         feedbackText = FantasyUiThemeHelper.CreateText(card.transform, "FeedbackText",
-            "Giết quái Orc để nhặt Vàng văng ra trên bản đồ  •  Nhấn [B] hoặc [Esc] để đóng",
+            "Giết quái để nhặt Vàng văng ra trên bản đồ  •  Nhấn [B] hoặc [Esc] để đóng",
             14f, FontStyles.Bold, FantasyUiThemeHelper.TextMuted, TextAlignmentOptions.Center, font);
         SetTopCenteredRect(feedbackText.rectTransform, 0f, -612f, 896f, 28f);
 

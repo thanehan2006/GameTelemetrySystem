@@ -2,12 +2,7 @@ using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Rendering;
 
-/// <summary>
-/// Điểm lưu Checkpoint tại các Trại Lửa (SM_Campfire).
-/// - Có vòng sáng thánh đường + tàn lửa ấm bay lên xung quanh trại.
-/// - Khi Player bước vào vùng trại lần đầu sẽ bùng trụ sáng vàng, hồi máu + vòng xoáy hồi phục,
-///   thông báo trên HUD và gửi sự kiện "checkpoint_reached".
-/// </summary>
+// Trạm lửa trại Checkpoint hồi máu cho người chơi, ghi nhận telemetry và cho phép mở cửa hàng bằng phím [E]
 public class CampfireCheckpoint : MonoBehaviour
 {
     public static readonly List<CampfireCheckpoint> ActiveCampfires = new List<CampfireCheckpoint>(4);
@@ -25,8 +20,10 @@ public class CampfireCheckpoint : MonoBehaviour
     private PlayerHealth playerHealth;
     private Transform sanctuaryRing;
     private Material ringMatInstance;
+    private ParticleSystem emberPs;
     private bool activated;
 
+    // Đăng ký checkpoint vào danh sách đang hoạt động trong scene
     private void OnEnable()
     {
         if (!ActiveCampfires.Contains(this))
@@ -35,11 +32,13 @@ public class CampfireCheckpoint : MonoBehaviour
         }
     }
 
+    // Hủy đăng ký checkpoint khi đối tượng bị tắt
     private void OnDisable()
     {
         ActiveCampfires.Remove(this);
     }
 
+    // Tìm người chơi và tạo hiệu ứng lửa, khói, ánh sáng ấm quanh trại lửa
     void Start()
     {
         ResolvePlayer();
@@ -51,6 +50,7 @@ public class CampfireCheckpoint : MonoBehaviour
         if (ringMatInstance != null) Destroy(ringMatInstance);
     }
 
+    // Kiểm tra khoảng cách người chơi để kích hoạt hồi máu lần đầu khi chạm trại
     void Update()
     {
         if (GameOverManager.IsGameOver || WeaponShopManager.IsShopOpen) return;
@@ -70,6 +70,19 @@ public class CampfireCheckpoint : MonoBehaviour
             sanctuaryRing.Rotate(Vector3.up, (activated ? 26f : 14f) * Time.deltaTime, Space.World);
         }
 
+        if (emberPs != null)
+        {
+            const float emberCullSqrDist = 34f * 34f;
+            if (sqrDist <= emberCullSqrDist)
+            {
+                if (!emberPs.isPlaying) emberPs.Play(false);
+            }
+            else if (emberPs.isPlaying)
+            {
+                emberPs.Stop(false, ParticleSystemStopBehavior.StopEmitting);
+            }
+        }
+
         if (activated || !playerHealth.IsAlive) return;
 
         if (sqrDist <= activationRadius * activationRadius)
@@ -78,9 +91,10 @@ public class CampfireCheckpoint : MonoBehaviour
         }
     }
 
+    // Tạo hệ thống hạt lửa, tàn bay và điểm sáng lập lòe cho trại lửa
     private void CreateAmbientCampfireVfx()
     {
-        // 1. Vòng sáng vàng dịu trên mặt đất quanh Trại Lửa
+
         if (transform.Find("SanctuaryRing") == null)
         {
             GameObject ring = new GameObject("SanctuaryRing");
@@ -102,14 +116,19 @@ public class CampfireCheckpoint : MonoBehaviour
             sanctuaryRing = ring.transform;
         }
 
-        // 2. Tàn lửa ấm bay lên quanh khu vực Checkpoint
-        if (transform.Find("CampfireEmbers") == null)
+        Transform existingEmbers = transform.Find("CampfireEmbers");
+        if (existingEmbers != null)
+        {
+            emberPs = existingEmbers.GetComponent<ParticleSystem>();
+        }
+        else
         {
             GameObject go = new GameObject("CampfireEmbers");
             go.transform.SetParent(transform, false);
             go.transform.localPosition = Vector3.up * 0.45f;
 
             ParticleSystem ps = go.AddComponent<ParticleSystem>();
+            emberPs = ps;
             ps.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
 
             var main = ps.main;
@@ -151,6 +170,7 @@ public class CampfireCheckpoint : MonoBehaviour
         }
     }
 
+    // Đánh dấu đã qua checkpoint, hồi máu theo phần trăm và gửi sự kiện telemetry
     private void ActivateCheckpoint()
     {
         activated = true;

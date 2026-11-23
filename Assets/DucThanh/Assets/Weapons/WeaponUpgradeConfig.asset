@@ -14,42 +14,42 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::WeaponUpgradeConfigSO
   weapons:
   - enabled: 1
-    displayName: "Ki\u1EBFm 2"
+    displayName: "Ng\xE2n Phong Ki\u1EBFm"
     weaponPrefab: {fileID: 2220497613814394647, guid: ebec99c53d49744418b4b8ed5035fe0b, type: 3}
-    bonusDamage: 10
+    bonusDamage: 8
     minLevel: 1
   - enabled: 1
-    displayName: "Ki\u1EBFm 3"
+    displayName: "Thi\xEAn Lam Ki\u1EBFm"
     weaponPrefab: {fileID: 4417719777104776826, guid: 8a5a7e5c05bccb94f9d4cfaa5f003430, type: 3}
-    bonusDamage: 10
+    bonusDamage: 14
     minLevel: 1
   - enabled: 1
-    displayName: "B\xFAa"
+    displayName: "Nham Th\u1EA1ch Chi\u1EBFn Ch\xF9y"
     weaponPrefab: {fileID: 5882740418562934682, guid: dea89ad487fba0d43998917fd5f30879, type: 3}
-    bonusDamage: 10
+    bonusDamage: 21
     minLevel: 1
   - enabled: 1
-    displayName: "Ki\u1EC3m \u0111\u1ECF"
+    displayName: "Huy\u1EBFt Di\u1EC5m \u0110o\u1EA3n \u0110ao"
     weaponPrefab: {fileID: 2258411484881710256, guid: d2a69bab98638ae41819a23ca7985832, type: 3}
-    bonusDamage: 10
+    bonusDamage: 28
     minLevel: 1
   - enabled: 1
-    displayName: "Ki\u1EBFm xanh"
+    displayName: "H\xE0n Ng\u1ECDc Th\xE1nh Ki\u1EBFm"
     weaponPrefab: {fileID: 2839524829476184550, guid: b31cf3d5ac315214a950e823cb9e2b9f, type: 3}
-    bonusDamage: 10
+    bonusDamage: 36
     minLevel: 1
   - enabled: 1
-    displayName: "Th\u01B0\u01A1ng v\xE0ng"
+    displayName: "L\xF4i Quang Kim Th\u01B0\u01A1ng"
     weaponPrefab: {fileID: 899434540764439098, guid: 11686688da3c381459d55aa299f09bf4, type: 3}
-    bonusDamage: 10
+    bonusDamage: 44
     minLevel: 1
   - enabled: 1
-    displayName: "B\xFAa \u0111\u1ECF"
+    displayName: "L\u01B0\u1EE1i H\xE1i Huy\u1EBFt Nguy\u1EC7t"
     weaponPrefab: {fileID: 5221380844292194378, guid: f0f31d6958f5de143bf9963ec2a41351, type: 3}
-    bonusDamage: 10
+    bonusDamage: 54
     minLevel: 1
   - enabled: 1
-    displayName: Sword5 3 2
+    displayName: "Ph\u01B0\u1EE3ng H\u1ECFa Th\u1EA7n Ki\u1EBFm"
     weaponPrefab: {fileID: 4417719777104776826, guid: 8a5a7e5c05bccb94f9d4cfaa5f003430, type: 3}
-    bonusDamage: 10
+    bonusDamage: 65
     minLevel: 1

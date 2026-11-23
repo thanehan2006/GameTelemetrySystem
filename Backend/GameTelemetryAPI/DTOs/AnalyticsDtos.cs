@@ -1,5 +1,6 @@
 namespace GameTelemetryAPI.DTOs
 {
+    // DTO chứa các chỉ số tổng quan cho dashboard phân tích
     public class OverviewStatsDto
     {
         public int TotalPlayers { get; set; }
@@ -16,12 +17,14 @@ namespace GameTelemetryAPI.DTOs
         public int TotalBossKills { get; set; }
     }
 
+    // DTO lưu số lần xuất hiện theo từng loại sự kiện
     public class EventCountDto
     {
         public string EventType { get; set; } = string.Empty;
         public int Count { get; set; }
     }
 
+    // DTO thống kê lượt chơi, tỷ lệ thắng và thời gian hoàn thành theo từng màn
     public class LevelStatsDto
     {
         public int Level { get; set; }
@@ -35,12 +38,14 @@ namespace GameTelemetryAPI.DTOs
         public int PerfectParries { get; set; }
     }
 
+    // DTO thống kê số phiên chơi theo từng ngày
     public class SessionsByDateDto
     {
         public string Date { get; set; } = string.Empty;
         public int SessionCount { get; set; }
     }
 
+    // DTO thông tin tóm tắt của một phiên chơi gần đây
     public class RecentSessionDto
     {
         public long SessionId { get; set; }
@@ -52,6 +57,7 @@ namespace GameTelemetryAPI.DTOs
         public int TotalEvents { get; set; }
     }
 
+    // DTO thống kê lượt mua và doanh thu vàng theo từng vũ khí
     public class WeaponPurchaseStatDto
     {
         public int Price { get; set; }
@@ -61,6 +67,7 @@ namespace GameTelemetryAPI.DTOs
         public int TotalGoldSpent { get; set; }
     }
 
+    // DTO tổng hợp dòng chảy vàng, bình máu và vật phẩm cửa hàng
     public class EconomyStatsDto
     {
         public int TotalGoldCollected { get; set; }
@@ -76,6 +83,7 @@ namespace GameTelemetryAPI.DTOs
         public List<WeaponPurchaseStatDto> WeaponBreakdown { get; set; } = new();
     }
 
+    // DTO tổng hợp các chỉ số chiến đấu như hạ quái, boss, đỡ đòn và bẫy
     public class CombatStatsDto
     {
         public int TotalEnemyKills { get; set; }
@@ -94,6 +102,7 @@ namespace GameTelemetryAPI.DTOs
         public int CheckpointsReached { get; set; }
     }
 
+    // DTO biểu diễn mốc thời gian chi tiết của một sự kiện trong phiên chơi
     public class SessionEventTimelineDto
     {
         public long EventId { get; set; }

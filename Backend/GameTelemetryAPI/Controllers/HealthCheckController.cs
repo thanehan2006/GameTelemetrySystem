@@ -5,6 +5,7 @@ namespace GameTelemetryAPI.Controllers
 {
     [ApiController]
     [Route("api/[controller]")]
+    // Controller kiểm tra trạng thái kết nối của hệ thống backend
     public class HealthCheckController : ControllerBase
     {
         private readonly GameTelemetryContext _context;
@@ -14,6 +15,7 @@ namespace GameTelemetryAPI.Controllers
             _context = context;
         }
 
+        // Kiểm tra kết nối tới cơ sở dữ liệu SQL Server
         [HttpGet("db")]
         public async Task<IActionResult> CheckDatabaseConnection()
         {

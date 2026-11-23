@@ -4,12 +4,14 @@ using UnityEngine;
 using UnityEngine.AI;
 
 [RequireComponent(typeof(NavMeshAgent))]
+// AI điều khiển kẻ địch truy đuổi bằng NavMesh, né vật cản, vung vũ khí tấn công và chịu choáng khi bị parry
 public class OrcEnemyAI : MonoBehaviour
 {
     private static readonly List<OrcEnemyAI> ActiveEnemies = new List<OrcEnemyAI>();
     private static readonly RaycastHit[] GroundHitBuffer = new RaycastHit[16];
     private const float DestinationUpdateInterval = 0.15f;
     private const float DestinationMoveThresholdSqr = 0.16f;
+    private const float NavMeshSampleRadius = 6f;
 
     [Header("Movement Settings")]
     public float moveSpeed = 3.5f;
@@ -34,11 +36,11 @@ public class OrcEnemyAI : MonoBehaviour
     public float attackCooldown = 1.6f;
     public float playerKnockbackForce = 6.5f;
 
-    [Header("Weapon Hitbox Timing (seconds in Attack animation)")]
+    [Header("Weapon Hitbox Timing")]
     public float hitboxStartDelay = 0.35f;
     public float hitboxDuration = 0.45f;
 
-    [Header("Animation State Names (Orc_Warrior_AC)")]
+    [Header("Animation State Names")]
     public string idleStateName = "Idle1";
     public string runStateName = "Run";
     public string attackStateName = "Attack1";
@@ -64,6 +66,8 @@ public class OrcEnemyAI : MonoBehaviour
     public bool IsParryStunned => parryStunTimer > 0f;
     private float nextDestinationTime;
     private Vector3 lastDestinationTarget;
+    private Vector3 lastProgressPos;
+    private float stuckTimer;
     private WaitForSeconds waitHitboxStart;
     private WaitForSeconds waitHitboxDuration;
     private WaitForSeconds waitAttackTail;
@@ -73,6 +77,7 @@ public class OrcEnemyAI : MonoBehaviour
 
     private bool AgentReady => navAgent != null && navAgent.isActiveAndEnabled && navAgent.isOnNavMesh;
 
+    // Lấy tham chiếu NavMeshAgent, Animator và thiết lập hitbox vũ khí
     void Awake()
     {
         animator = GetComponentInChildren<Animator>();
@@ -81,7 +86,6 @@ public class OrcEnemyAI : MonoBehaviour
         attackStateHash = Animator.StringToHash(attackStateName);
         hitStateHash = string.IsNullOrEmpty(hitStateName) ? 0 : Animator.StringToHash(hitStateName);
 
-        // Đảm bảo collider thân của enemy là collider cứng để Player không đi xuyên qua
         CapsuleCollider bodyCollider = GetComponent<CapsuleCollider>();
         if (bodyCollider != null)
         {
@@ -100,9 +104,12 @@ public class OrcEnemyAI : MonoBehaviour
         }
     }
 
+    // Tìm người chơi và đưa kẻ địch lên đúng điểm NavMesh
     void Start()
     {
         SnapToGround();
+        EnsureOnNavMesh();
+        lastProgressPos = transform.position;
         FindPlayerTarget();
         PlayAnimation(idleStateHash);
     }
@@ -116,28 +123,45 @@ public class OrcEnemyAI : MonoBehaviour
         }
 
         navAgent.speed = moveSpeed;
-        navAgent.stoppingDistance = stoppingDistance;
-        navAgent.radius = 0.5f;
-        navAgent.height = 2.0f;
+        navAgent.stoppingDistance = Mathf.Min(stoppingDistance, Mathf.Max(0.8f, attackRange * 0.82f));
+        if (navAgent.radius < 0.25f) navAgent.radius = 0.48f;
+        if (navAgent.height < 0.8f) navAgent.height = 1.9f;
         navAgent.baseOffset = 0f;
-        navAgent.acceleration = 12f;
-        navAgent.angularSpeed = 360f;
+        navAgent.acceleration = 14f;
+        navAgent.angularSpeed = 420f;
         navAgent.autoBraking = true;
         navAgent.obstacleAvoidanceType = ObstacleAvoidanceType.HighQualityObstacleAvoidance;
         navAgent.avoidancePriority = Random.Range(30, 70);
     }
 
+    // Tìm và neo kẻ địch lên bề mặt NavMesh hợp lệ gần nhất
+    public bool EnsureOnNavMesh(float maxSearchDistance = NavMeshSampleRadius)
+    {
+        if (navAgent == null || !navAgent.isActiveAndEnabled) return false;
+        if (navAgent.isOnNavMesh) return true;
+
+        if (NavMesh.SamplePosition(transform.position, out NavMeshHit hit, maxSearchDistance, NavMesh.AllAreas))
+        {
+            navAgent.Warp(hit.position);
+            return navAgent.isOnNavMesh;
+        }
+        return false;
+    }
+
+    // Cập nhật tốc độ, sát thương, tầm đánh và kháng đẩy lùi cho từng loại quái hoặc boss
     public void ApplyCombatStats(float speed, int damage, float range, float kbResistance, float cooldown)
     {
         moveSpeed = speed;
         attackDamage = damage;
         attackRange = range;
+        stoppingDistance = Mathf.Min(stoppingDistance, Mathf.Max(0.85f, attackRange * 0.80f));
         knockbackResistance = Mathf.Clamp01(kbResistance);
         attackCooldown = cooldown;
 
         if (navAgent != null)
         {
             navAgent.speed = moveSpeed;
+            navAgent.stoppingDistance = Mathf.Min(stoppingDistance, Mathf.Max(0.8f, attackRange * 0.82f));
         }
         if (weaponHitbox != null)
         {
@@ -147,26 +171,10 @@ public class OrcEnemyAI : MonoBehaviour
 
     void SnapToGround()
     {
-        Vector3 origin = transform.position + Vector3.up * 20f;
-        int hitCount = Physics.RaycastNonAlloc(origin, Vector3.down, GroundHitBuffer, 60f, ~0, QueryTriggerInteraction.Ignore);
-
-        float bestY = float.MinValue;
-        bool found = false;
-        for (int i = 0; i < hitCount; i++)
-        {
-            Collider col = GroundHitBuffer[i].collider;
-            if (col == null || col.transform.IsChildOf(transform)) continue;
-            if (GroundHitBuffer[i].point.y > bestY)
-            {
-                bestY = GroundHitBuffer[i].point.y;
-                found = true;
-            }
-        }
-
-        if (found)
+        if (TrySampleWalkableGroundY(transform.position, out float groundY))
         {
             Vector3 pos = transform.position;
-            pos.y = bestY;
+            pos.y = groundY;
             transform.position = pos;
 
             if (AgentReady)
@@ -174,6 +182,60 @@ public class OrcEnemyAI : MonoBehaviour
                 navAgent.Warp(pos);
             }
         }
+    }
+
+    private bool TrySampleWalkableGroundY(Vector3 worldPos, out float groundY)
+    {
+        groundY = worldPos.y;
+        Vector3 origin = new Vector3(worldPos.x, worldPos.y + 18f, worldPos.z);
+        int hitCount = Physics.RaycastNonAlloc(origin, Vector3.down, GroundHitBuffer, 48f, ~0, QueryTriggerInteraction.Ignore);
+
+        float terrainY = float.MinValue;
+        bool hasTerrain = false;
+        float walkableY = float.MinValue;
+        bool hasWalkable = false;
+
+        for (int i = 0; i < hitCount; i++)
+        {
+            Collider col = GroundHitBuffer[i].collider;
+            if (col == null) continue;
+            if (col.transform == transform || col.transform.IsChildOf(transform)) continue;
+
+            if (col is TerrainCollider)
+            {
+                if (GroundHitBuffer[i].point.y > terrainY)
+                {
+                    terrainY = GroundHitBuffer[i].point.y;
+                    hasTerrain = true;
+                }
+                continue;
+            }
+
+            if (col is CharacterController) continue;
+            if (col.GetComponentInParent<OrcEnemyAI>() != null) continue;
+            if (col.GetComponentInParent<PlayerController>() != null) continue;
+
+            float ptY = GroundHitBuffer[i].point.y;
+            if (ptY <= worldPos.y + 1.35f && ptY > walkableY)
+            {
+                walkableY = ptY;
+                hasWalkable = true;
+            }
+        }
+
+        if (hasTerrain)
+        {
+            groundY = hasWalkable ? Mathf.Max(terrainY, walkableY) : terrainY;
+            return true;
+        }
+
+        if (hasWalkable)
+        {
+            groundY = walkableY;
+            return true;
+        }
+
+        return false;
     }
 
     void SetupWeaponHitbox()
@@ -214,6 +276,7 @@ public class OrcEnemyAI : MonoBehaviour
         weaponHitbox.DisableHitbox();
     }
 
+    // Điều phối trạng thái đứng chờ, truy đuổi, tách bầy và ra đòn theo khoảng cách
     void Update()
     {
         if (parryStunTimer > 0f)
@@ -284,6 +347,13 @@ public class OrcEnemyAI : MonoBehaviour
 
         PlayAnimation(runStateHash);
 
+        Vector3 flatDir = toPlayer.sqrMagnitude > 0.0001f ? toPlayer / Mathf.Sqrt(sqrDistance) : transform.forward;
+        if (!AgentReady && Time.time >= nextDestinationTime)
+        {
+            nextDestinationTime = Time.time + 0.75f;
+            EnsureOnNavMesh(6f);
+        }
+
         if (AgentReady)
         {
             if (navAgent.isStopped) navAgent.isStopped = false;
@@ -294,51 +364,107 @@ public class OrcEnemyAI : MonoBehaviour
             {
                 nextDestinationTime = Time.time + DestinationUpdateInterval;
                 lastDestinationTarget = targetPos;
-                navAgent.SetDestination(targetPos);
+
+                Vector3 dest = targetPos;
+                if (NavMesh.SamplePosition(targetPos, out NavMeshHit hit, 6f, NavMesh.AllAreas))
+                {
+                    dest = hit.position;
+                }
+                navAgent.SetDestination(dest);
+            }
+
+            if ((transform.position - lastProgressPos).sqrMagnitude > 0.015f)
+            {
+                lastProgressPos = transform.position;
+                stuckTimer = 0f;
+            }
+            else if (navAgent.hasPath && !navAgent.pathPending && sqrDistance > attackRange * attackRange)
+            {
+                stuckTimer += Time.deltaTime;
+            }
+
+            if (navAgent.pathStatus == NavMeshPathStatus.PathInvalid || stuckTimer > 1.0f)
+            {
+                MoveWithObstacleAvoidance(flatDir, sqrDistance);
+                if (AgentReady)
+                {
+                    navAgent.Warp(transform.position);
+                }
+                stuckTimer = 0f;
             }
             return;
         }
 
-        // Fallback khi NavMesh chưa bake kịp
-        FaceDirection(toPlayer, rotationSpeed);
+        MoveWithObstacleAvoidance(flatDir, sqrDistance);
+    }
+
+    private void MoveWithObstacleAvoidance(Vector3 flatDirToPlayer, float sqrDistance)
+    {
+        Vector3 moveDir = ChooseClearSteeringDirection(flatDirToPlayer);
+        FaceDirection(moveDir, rotationSpeed);
 
         if (sqrDistance > stoppingDistance * stoppingDistance)
         {
-            float dist = Mathf.Sqrt(sqrDistance);
-            transform.position += (toPlayer / dist) * (moveSpeed * Time.deltaTime);
+            transform.position += moveDir * (moveSpeed * Time.deltaTime);
         }
 
-        int groundHitCount = Physics.RaycastNonAlloc(transform.position + Vector3.up * 5f, Vector3.down, GroundHitBuffer, 14f, ~0, QueryTriggerInteraction.Ignore);
-        float highestGroundY = float.MinValue;
-        bool hasGround = false;
-        for (int i = 0; i < groundHitCount; i++)
-        {
-            Collider col = GroundHitBuffer[i].collider;
-            if (col == null || col.transform.IsChildOf(transform)) continue;
-            if (GroundHitBuffer[i].point.y > highestGroundY)
-            {
-                highestGroundY = GroundHitBuffer[i].point.y;
-                hasGround = true;
-            }
-        }
-
-        if (hasGround)
+        if (TrySampleWalkableGroundY(transform.position, out float groundY))
         {
             Vector3 pos = transform.position;
-            pos.y = highestGroundY;
+            pos.y = groundY;
             transform.position = pos;
         }
     }
 
+    // Quét tia các góc lân cận để lái quái vòng qua cây cối hoặc đá tảng
+    private Vector3 ChooseClearSteeringDirection(Vector3 desiredDir)
+    {
+        if (desiredDir.sqrMagnitude < 0.0001f) return transform.forward;
+        Vector3 origin = transform.position + Vector3.up * 0.9f;
+        const float probeDist = 1.65f;
+
+        if (!HasBlockingPropAhead(origin, desiredDir, probeDist))
+        {
+            return desiredDir;
+        }
+
+        float[] angles = { 35f, -35f, 65f, -65f, 95f, -95f };
+        for (int i = 0; i < angles.Length; i++)
+        {
+            Vector3 candidate = (Quaternion.Euler(0f, angles[i], 0f) * desiredDir).normalized;
+            if (!HasBlockingPropAhead(origin, candidate, probeDist))
+            {
+                return candidate;
+            }
+        }
+
+        return desiredDir;
+    }
+
+    private bool HasBlockingPropAhead(Vector3 origin, Vector3 dir, float distance)
+    {
+        int count = Physics.RaycastNonAlloc(origin, dir, GroundHitBuffer, distance, ~0, QueryTriggerInteraction.Ignore);
+        for (int i = 0; i < count; i++)
+        {
+            Collider col = GroundHitBuffer[i].collider;
+            if (col == null) continue;
+            if (col.transform == transform || col.transform.IsChildOf(transform)) continue;
+            if (col is TerrainCollider || col is CharacterController) continue;
+            if (col.GetComponentInParent<OrcEnemyAI>() != null) continue;
+            if (col.GetComponentInParent<PlayerController>() != null) continue;
+            return true;
+        }
+        return false;
+    }
+
+    // Hiệu chỉnh bám sát bề mặt địa hình mỗi khung hình
     void LateUpdate()
     {
         ProcessKnockback();
         EnforceSeparation();
     }
 
-    /// <summary>
-    /// Đẩy lùi Enemy khi bị vũ khí Player đánh trúng hoặc va chạm mạnh.
-    /// </summary>
+    // Đẩy lùi kẻ địch khi trúng đòn dựa theo hệ số kháng đẩy lùi
     public void ApplyKnockback(Vector3 attackerPosition, float force, bool applyHitStun = true)
     {
         float effectiveForce = Mathf.Max(0f, force * (1f - Mathf.Clamp01(knockbackResistance)));
@@ -362,9 +488,7 @@ public class OrcEnemyAI : MonoBehaviour
         }
     }
 
-    /// <summary>
-    /// Làm choáng quái khi Player Parry hoàn hảo: ngắt đòn đang vung, đẩy lùi, phát anim khựng và vòng sao choáng.
-    /// </summary>
+    // Đưa quái vào trạng thái choáng và ngắt đòn khi người chơi Perfect Parry
     public void ApplyParryStun(Vector3 attackerPosition, float knockbackForce, float duration = -1f)
     {
         if (attackRoutine != null)
@@ -427,7 +551,6 @@ public class OrcEnemyAI : MonoBehaviour
         Vector3 separation = Vector3.zero;
         Vector3 pos = transform.position;
 
-        // Tránh đi xuyên qua các enemy khác
         for (int i = 0; i < ActiveEnemies.Count; i++)
         {
             OrcEnemyAI other = ActiveEnemies[i];
@@ -444,7 +567,6 @@ public class OrcEnemyAI : MonoBehaviour
             }
         }
 
-        // Tránh đi xuyên vào Player
         Vector3 hardPush = Vector3.zero;
         if (player != null)
         {
@@ -458,7 +580,7 @@ public class OrcEnemyAI : MonoBehaviour
                 const float hardMinDistance = 1.0f;
                 if (dist < hardMinDistance)
                 {
-                    // Đẩy ngay ra ngoài ngưỡng chạm cứng capsule (0.93m) để không làm kẹt CharacterController
+
                     hardPush = dir * (hardMinDistance - dist);
                 }
                 else
@@ -522,6 +644,7 @@ public class OrcEnemyAI : MonoBehaviour
         }
     }
 
+    // Khởi động chuỗi động tác vung rìu/chùy tấn công người chơi
     void StartAttack()
     {
         nextAttackTime = Time.time + attackCooldown;
@@ -548,6 +671,7 @@ public class OrcEnemyAI : MonoBehaviour
         }
     }
 
+    // Đồng bộ thời điểm bật/tắt hitbox với animation vung đòn
     IEnumerator AttackSequence()
     {
         EnsureAttackWaits();

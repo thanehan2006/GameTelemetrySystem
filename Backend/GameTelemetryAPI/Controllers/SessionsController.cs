@@ -8,6 +8,7 @@ namespace GameTelemetryAPI.Controllers
 {
     [ApiController]
     [Route("api/[controller]")]
+    // Controller quản lý vòng đời phiên chơi từ lúc bắt đầu đến khi kết thúc
     public class SessionsController : ControllerBase
     {
         private readonly GameTelemetryContext _context;
@@ -17,9 +18,7 @@ namespace GameTelemetryAPI.Controllers
             _context = context;
         }
 
-        /// <summary>
-        /// Bắt đầu một phiên chơi mới (gửi từ game khi khởi động/bắt đầu chơi)
-        /// </summary>
+        // Tạo phiên chơi mới khi người chơi bắt đầu vào trận
         [HttpPost("start")]
         public async Task<ActionResult<GameSessionResponseDto>> StartSession([FromBody] StartSessionDto dto)
         {
@@ -28,7 +27,6 @@ namespace GameTelemetryAPI.Controllers
                 return BadRequest(ModelState);
             }
 
-            // Kiểm tra Player có tồn tại không
             var playerExists = await _context.Players.AnyAsync(p => p.PlayerId == dto.PlayerId);
             if (!playerExists)
             {
@@ -56,9 +54,7 @@ namespace GameTelemetryAPI.Controllers
             });
         }
 
-        /// <summary>
-        /// Kết thúc một phiên chơi (cập nhật EndTime và Result)
-        /// </summary>
+        // Cập nhật thời gian kết thúc và kết quả cho phiên chơi
         [HttpPut("{id:long}/end")]
         public async Task<ActionResult<GameSessionResponseDto>> EndSession(long id, [FromBody] EndSessionDto dto)
         {
@@ -86,9 +82,7 @@ namespace GameTelemetryAPI.Controllers
             });
         }
 
-        /// <summary>
-        /// Lấy chi tiết phiên chơi theo ID
-        /// </summary>
+        // Truy vấn thông tin một phiên chơi theo SessionId
         [HttpGet("{id:long}")]
         public async Task<ActionResult<GameSessionResponseDto>> GetSessionById(long id)
         {

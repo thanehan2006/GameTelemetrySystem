@@ -9,6 +9,7 @@ namespace GameTelemetryAPI.Controllers
 {
     [ApiController]
     [Route("api/[controller]")]
+    // Controller xử lý đăng ký, đăng nhập và truy vấn thông tin người chơi
     public class PlayersController : ControllerBase
     {
         private readonly GameTelemetryContext _context;
@@ -18,9 +19,7 @@ namespace GameTelemetryAPI.Controllers
             _context = context;
         }
 
-        /// <summary>
-        /// Đăng ký tài khoản người chơi mới kèm mật khẩu (mã hóa PBKDF2).
-        /// </summary>
+        // Tạo tài khoản người chơi mới và băm mật khẩu lưu vào cơ sở dữ liệu
         [HttpPost("register")]
         public async Task<ActionResult<PlayerResponseDto>> Register([FromBody] RegisterPlayerDto dto)
         {
@@ -54,9 +53,7 @@ namespace GameTelemetryAPI.Controllers
             return CreatedAtAction(nameof(GetPlayerById), new { id = newPlayer.PlayerId }, ToDto(newPlayer));
         }
 
-        /// <summary>
-        /// Đăng nhập người chơi bằng PlayerName + Password.
-        /// </summary>
+        // Xác thực tên đăng nhập và mật khẩu của người chơi
         [HttpPost("login")]
         public async Task<ActionResult<PlayerResponseDto>> Login([FromBody] LoginPlayerDto dto)
         {
@@ -88,9 +85,7 @@ namespace GameTelemetryAPI.Controllers
             return Ok(ToDto(player));
         }
 
-        /// <summary>
-        /// Lấy thông tin người chơi theo ID.
-        /// </summary>
+        // Lấy thông tin chi tiết của một người chơi theo ID
         [HttpGet("{id:int}")]
         public async Task<ActionResult<PlayerResponseDto>> GetPlayerById(int id)
         {
@@ -103,9 +98,7 @@ namespace GameTelemetryAPI.Controllers
             return Ok(ToDto(player));
         }
 
-        /// <summary>
-        /// Lấy danh sách tất cả người chơi.
-        /// </summary>
+        // Lấy danh sách tất cả người chơi kèm tổng số phiên đã tham gia
         [HttpGet]
         public async Task<ActionResult<List<PlayerResponseDto>>> GetAllPlayers()
         {
@@ -124,6 +117,7 @@ namespace GameTelemetryAPI.Controllers
             return Ok(players);
         }
 
+        // Chuyển đổi thực thể Player sang đối tượng DTO trả về cho client
         private static PlayerResponseDto ToDto(Player player) => new PlayerResponseDto
         {
             PlayerId = player.PlayerId,

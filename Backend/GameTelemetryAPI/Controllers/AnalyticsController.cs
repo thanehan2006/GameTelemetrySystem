@@ -7,6 +7,7 @@ namespace GameTelemetryAPI.Controllers
 {
     [ApiController]
     [Route("api/[controller]")]
+    // Controller cung cấp các API tổng hợp dữ liệu phân tích cho dashboard
     public class AnalyticsController : ControllerBase
     {
         private readonly GameTelemetryContext _context;
@@ -35,9 +36,7 @@ namespace GameTelemetryAPI.Controllers
             _context = context;
         }
 
-        /// <summary>
-        /// 1. Lấy các chỉ số tổng quan (Overview) đồng bộ với game Vanguard: Raid of the Orc Woods
-        /// </summary>
+        // Lấy các chỉ số tổng quan như tổng người chơi, phiên chơi, tỷ lệ thắng và thời lượng trung bình
         [HttpGet("overview")]
         public async Task<ActionResult<OverviewStatsDto>> GetOverviewStats()
         {
@@ -98,9 +97,7 @@ namespace GameTelemetryAPI.Controllers
             });
         }
 
-        /// <summary>
-        /// 2. Thống kê theo 3 Màn chơi (Trại Rừng Ngoại Vi, Thung Lũng Bẫy, Đấu Trường Mỏ Vàng)
-        /// </summary>
+        // Thống kê tiến độ, tỷ lệ qua màn và số lượt thất bại theo từng màn
         [HttpGet("levels")]
         public async Task<ActionResult<List<LevelStatsDto>>> GetLevelStats([FromQuery] int? level = null)
         {
@@ -158,9 +155,7 @@ namespace GameTelemetryAPI.Controllers
             return Ok(result);
         }
 
-        /// <summary>
-        /// 3. Thống kê phân bố các loại sự kiện (Event Types)
-        /// </summary>
+        // Thống kê phân bố số lượng theo từng loại sự kiện telemetry
         [HttpGet("events-distribution")]
         public async Task<ActionResult<List<EventCountDto>>> GetEventsDistribution()
         {
@@ -177,9 +172,7 @@ namespace GameTelemetryAPI.Controllers
             return Ok(result);
         }
 
-        /// <summary>
-        /// 4. Thống kê số lượng phiên chơi theo ngày (Sessions by date)
-        /// </summary>
+        // Thống kê lượng phiên chơi theo từng ngày
         [HttpGet("sessions-by-date")]
         public async Task<ActionResult<List<SessionsByDateDto>>> GetSessionsByDate()
         {
@@ -200,9 +193,7 @@ namespace GameTelemetryAPI.Controllers
             return Ok(result);
         }
 
-        /// <summary>
-        /// 5. Danh sách các phiên chơi gần đây
-        /// </summary>
+        // Lấy danh sách các phiên chơi gần nhất kèm số lượng sự kiện
         [HttpGet("recent-sessions")]
         public async Task<ActionResult<List<RecentSessionDto>>> GetRecentSessions([FromQuery] int limit = 15)
         {
@@ -226,9 +217,7 @@ namespace GameTelemetryAPI.Controllers
             return Ok(sessions);
         }
 
-        /// <summary>
-        /// 6. Thống kê Kinh Tế Vàng & Cửa Hàng Vũ Khí (Gold Economy & Weapon Shop Analytics)
-        /// </summary>
+        // Phân tích kinh tế vàng thu thập, chi tiêu nâng cấp vũ khí và mua bình máu
         [HttpGet("economy")]
         public async Task<ActionResult<EconomyStatsDto>> GetEconomyStats()
         {
@@ -298,9 +287,7 @@ namespace GameTelemetryAPI.Controllers
             });
         }
 
-        /// <summary>
-        /// 7. Thống kê Chiến Đấu, Phòng Thủ (Block/Parry), Bẫy Gai & Boss Warlord
-        /// </summary>
+        // Tổng hợp chỉ số chiến đấu gồm hạ quái, hạ boss, đỡ đòn, parry và sát thương bẫy
         [HttpGet("combat")]
         public async Task<ActionResult<CombatStatsDto>> GetCombatStats()
         {
@@ -347,9 +334,7 @@ namespace GameTelemetryAPI.Controllers
             });
         }
 
-        /// <summary>
-        /// 8. Dòng thời gian chi tiết toàn bộ sự kiện trong 1 Phiên chơi (Session Event Timeline)
-        /// </summary>
+        // Truy xuất chuỗi sự kiện theo dòng thời gian của một phiên chơi cụ thể
         [HttpGet("sessions/{sessionId:long}/events")]
         public async Task<ActionResult<List<SessionEventTimelineDto>>> GetSessionEvents(long sessionId)
         {
@@ -382,6 +367,7 @@ namespace GameTelemetryAPI.Controllers
             return Ok(timeline);
         }
 
+        // Kiểm tra kết quả phiên chơi thuộc nhóm thắng
         private static bool IsWinResult(string? result)
         {
             if (string.IsNullOrWhiteSpace(result)) return false;
@@ -389,6 +375,7 @@ namespace GameTelemetryAPI.Controllers
             return r == "win" || r == "victory" || r == "completed" || r == "thắng";
         }
 
+        // Kiểm tra kết quả phiên chơi thuộc nhóm thua
         private static bool IsLoseResult(string? result)
         {
             if (string.IsNullOrWhiteSpace(result)) return false;

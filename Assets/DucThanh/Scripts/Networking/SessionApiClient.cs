@@ -26,10 +26,7 @@ public class EndSessionRequest
     public string result;
 }
 
-/// <summary>
-/// Client kết nối API Sessions (Start session, End session).
-/// Hỗ trợ overload PlayerId test và chống gọi trùng EndSession cho cùng một SessionId.
-/// </summary>
+// Client giao tiếp API quản lý bắt đầu và kết thúc phiên chơi (GameSession)
 public class SessionApiClient : MonoBehaviour
 {
     [Header("Backend API")]
@@ -45,12 +42,14 @@ public class SessionApiClient : MonoBehaviour
         set => baseUrl = value;
     }
 
+    // Bắt đầu phiên chơi mới dựa trên PlayerId đang đăng nhập
     public void StartSession(Action<bool, long, string> callback)
     {
         int playerId = PlayerPrefs.GetInt("PlayerId", 0);
         StartSession(playerId, callback);
     }
 
+    // Bắt đầu phiên chơi mới với PlayerId chỉ định
     public void StartSession(int overridePlayerId, Action<bool, long, string> callback)
     {
         if (overridePlayerId <= 0)
@@ -62,6 +61,7 @@ public class SessionApiClient : MonoBehaviour
         StartCoroutine(StartSessionCoroutine(overridePlayerId, callback));
     }
 
+    // Gửi POST tới /api/Sessions/start để lấy SessionId từ SQL Server
     private IEnumerator StartSessionCoroutine(int playerId, Action<bool, long, string> callback)
     {
         StartSessionRequest requestData = new StartSessionRequest { playerId = playerId };
@@ -106,6 +106,7 @@ public class SessionApiClient : MonoBehaviour
         }
     }
 
+    // Kết thúc phiên chơi hiện tại với kết quả Win, Lose hoặc Quit
     public void EndSession(string result, Action<bool, string> callback = null)
     {
         string sessionId = PlayerPrefs.GetString("SessionId", "");
@@ -125,6 +126,7 @@ public class SessionApiClient : MonoBehaviour
         StartCoroutine(EndSessionCoroutine(sessionId, result, callback));
     }
 
+    // Gửi PUT tới /api/Sessions/{id}/end để đóng phiên chơi trên máy chủ
     private IEnumerator EndSessionCoroutine(string sessionId, string result, Action<bool, string> callback)
     {
         isEndingSession = true;

@@ -36,12 +36,7 @@ public class OfflineEventStore
     public List<CreateGameEventRequest> pendingEvents = new List<CreateGameEventRequest>();
 }
 
-/// <summary>
-/// Quản lý và gửi sự kiện Telemetry lên Backend API (/api/Events & /api/Events/batch).
-/// - Gom nhóm (batching debounce) các sự kiện combat rồi đẩy 1 lần, tránh spam I/O và request mạng.
-/// - Lưu hàng đợi offline xuống đĩa chỉ khi lỗi mạng hoặc thoát/tạm dừng game.
-/// - Chống gửi trùng các sự kiện trạng thái (level_start, level_complete, level_failed, player_dead, game_exit).
-/// </summary>
+// Thu thập sự kiện hành vi người chơi trong trận, gom nhóm gửi theo lô (batch) lên API và lưu hàng đợi offline khi mất mạng
 public class TelemetryManager : MonoBehaviour
 {
     private const int ImmediateBatchSize = 10;
@@ -87,6 +82,7 @@ public class TelemetryManager : MonoBehaviour
         set => baseUrl = value;
     }
 
+    // Khởi tạo Singleton tồn tại xuyên scene và đọc hàng đợi sự kiện offline nếu có
     private void Awake()
     {
         if (Instance != null && Instance != this)
@@ -100,15 +96,13 @@ public class TelemetryManager : MonoBehaviour
         LoadOfflineQueue();
     }
 
+    // Khởi tạo phiên chơi ban đầu khi vào scene gameplay
     private void Start()
     {
         StartNewSession();
     }
 
-    /// <summary>
-    /// Bắt đầu phiên chơi mới: dùng SessionId đã có hoặc gọi Backend tạo Session mới,
-    /// đồng thời gửi game_start và level_start.
-    /// </summary>
+    // Đóng phiên cũ (nếu còn) và tạo phiên chơi mới cho lượt chơi hiện tại
     public void StartNewSession()
     {
         gameEnded = false;
@@ -206,9 +200,7 @@ public class TelemetryManager : MonoBehaviour
         }
     }
 
-    /// <summary>
-    /// Ghi nhận sự kiện telemetry vào hàng đợi và gom nhóm trước khi đẩy lên Backend.
-    /// </summary>
+    // Ghi nhận một sự kiện telemetry vào bộ đệm chờ và tự động gửi khi đủ lô hoặc là sự kiện quan trọng
     public void TrackEvent(string eventType, int eventValue = 0)
     {
         if (string.IsNullOrWhiteSpace(eventType)) return;
@@ -374,6 +366,7 @@ public class TelemetryManager : MonoBehaviour
         }
     }
 
+    // Đẩy toàn bộ sự kiện đang chờ trong bộ đệm qua API batch
     private void FlushPendingEvents()
     {
         if (scheduledFlushRoutine != null)
@@ -397,6 +390,7 @@ public class TelemetryManager : MonoBehaviour
         return false;
     }
 
+    // Gửi lô sự kiện qua /api/Events/batch và tự thử lại hoặc lưu file cục bộ khi lỗi kết nối
     private IEnumerator ProcessPendingEventsCoroutine()
     {
         isSending = true;
@@ -470,7 +464,7 @@ public class TelemetryManager : MonoBehaviour
                 }
                 else if (request.responseCode == 400 || request.responseCode == 404)
                 {
-                    // Dữ liệu lỗi hoặc SessionId không tồn tại -> bỏ khỏi hàng đợi để tránh retry vô hạn
+
                     removeBatch = true;
                     Debug.LogWarning($"[TelemetryManager] Dropped {sendBatch.Count} invalid/orphan event(s) (HTTP {request.responseCode}): {request.downloadHandler?.text}");
                 }
@@ -502,6 +496,7 @@ public class TelemetryManager : MonoBehaviour
         isSending = false;
     }
 
+    // Đọc lại các sự kiện chưa gửi được từ tệp JSON lưu trên thiết bị
     private void LoadOfflineQueue()
     {
         try
@@ -534,6 +529,7 @@ public class TelemetryManager : MonoBehaviour
         }
     }
 
+    // Lưu tạm hàng đợi sự kiện xuống thiết bị để tránh mất dữ liệu khi mất kết nối
     private void SaveOfflineQueue()
     {
         if (string.IsNullOrEmpty(offlineQueuePath)) return;

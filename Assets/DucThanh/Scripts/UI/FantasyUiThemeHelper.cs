@@ -3,10 +3,7 @@ using UnityEngine;
 using UnityEngine.UI;
 using TMPro;
 
-/// <summary>
-/// Bộ công cụ dựng theme Dark Fantasy AAA (Obsidian Glass + Vàng Kim + Hạt Đom Đóm/Tàn Lửa)
-/// dùng chung cho Màn hình Loading và Màn hình Login/Register.
-/// </summary>
+// Bộ hàm tiện ích dựng thành phần UI, nút bấm, ô nhập liệu và sprite gradient dùng chung
 public static class FantasyUiThemeHelper
 {
     public static readonly Color ObsidianCard = new Color(0.045f, 0.065f, 0.11f, 0.90f);
@@ -23,6 +20,7 @@ public static class FantasyUiThemeHelper
     private static Sprite cachedVerticalGradientSprite;
     private static Sprite cachedHorizontalGradientSprite;
 
+    // Cấu hình CanvasScaler tự co giãn theo độ phân giải chuẩn 1920x1080
     public static void ConfigureResponsiveCanvas(Canvas canvas)
     {
         if (canvas == null) return;
@@ -35,6 +33,7 @@ public static class FantasyUiThemeHelper
         scaler.matchWidthOrHeight = 0.5f;
     }
 
+    // Tạo ảnh nền toàn màn hình từ thư mục Resources
     public static RawImage CreateFullscreenKeyArt(Transform parent, string resourcePath, string objName)
     {
         GameObject bgObj = new GameObject(objName, typeof(RectTransform), typeof(RawImage));
@@ -93,6 +92,7 @@ public static class FantasyUiThemeHelper
         return go;
     }
 
+    // Tạo đối tượng văn bản TextMeshPro với font, màu sắc và căn lề chỉ định
     public static TMP_Text CreateText(
         Transform parent,
         string name,
@@ -117,6 +117,7 @@ public static class FantasyUiThemeHelper
         return tmp;
     }
 
+    // Áp dụng khung nền tối và viền vàng cho thẻ giao diện
     public static void StyleCardPanel(GameObject panel, Color bgColor, Color borderColor)
     {
         if (panel == null) return;
@@ -136,6 +137,7 @@ public static class FantasyUiThemeHelper
         shadow.effectDistance = new Vector2(0f, -10f);
     }
 
+    // Trang trí ô nhập liệu và hiệu ứng viền khi focus
     public static void StyleInputField(TMP_InputField input, string placeholderText, float width, float height)
     {
         if (input == null) return;
@@ -190,6 +192,7 @@ public static class FantasyUiThemeHelper
         }
     }
 
+    // Trang trí nút bấm chính/phụ kèm hiệu ứng chuyển màu khi di chuột
     public static void StyleButton(Button btn, string label, bool isPrimary, float width, float height)
     {
         if (btn == null) return;
@@ -289,8 +292,8 @@ public static class FantasyUiThemeHelper
 
         for (int y = 0; y < h; y++)
         {
-            float t = (float)y / (h - 1); // 0 = bottom, 1 = top
-            // Đậm ở đáy (0..0.35) và dịu ở đỉnh (0.8..1.0), trong suốt ở giữa để lộ key art
+            float t = (float)y / (h - 1);
+
             float bottomDark = Mathf.Pow(Mathf.Clamp01(1f - t / 0.45f), 1.6f) * 0.94f;
             float topDark = Mathf.Pow(Mathf.Clamp01((t - 0.72f) / 0.28f), 1.8f) * 0.48f;
             byte a = (byte)(Mathf.Clamp01(bottomDark + topDark) * 255f);
@@ -315,8 +318,8 @@ public static class FantasyUiThemeHelper
 
         for (int x = 0; x < w; x++)
         {
-            float t = (float)x / (w - 1); // 0 = left, 1 = right
-            // Bên trái sáng để lộ hiệp sĩ & lửa trại, bên phải tối dần làm nổi bật bảng Login
+            float t = (float)x / (w - 1);
+
             byte a = (byte)(Mathf.Pow(Mathf.Clamp01((t - 0.35f) / 0.65f), 1.35f) * 0.76f * 255f);
             Color32 c = new Color32(255, 255, 255, a);
             pixels[x] = c;
@@ -329,9 +332,7 @@ public static class FantasyUiThemeHelper
     }
 }
 
-/// <summary>
-/// Tạo hiệu ứng hạt tàn lửa / đom đóm bay nhẹ trên màn hình UI (Loading & Login) để hình nền có sức sống.
-/// </summary>
+// Hiệu ứng đốm lửa bay nhẹ trên nền UI các màn hình menu
 public class FloatingEmbersUI : MonoBehaviour
 {
     private struct Ember

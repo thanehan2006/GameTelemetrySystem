@@ -1,13 +1,8 @@
 using System.Collections.Generic;
 using UnityEngine;
 
-/// <summary>
-/// Quản lý animation cho Player:
-/// - Idle: tự đổi ngẫu nhiên mượt giữa Idle, Idle2 (Standing Idle), Idle3 (Fishing Idle).
-/// - Run: phát animation chạy chuẩn (Run).
-/// - Block (giữ Chuột Phải): phát animation đỡ đòn (Standing Block Idle -> state Block).
-/// </summary>
 [RequireComponent(typeof(CharacterController))]
+// Điều phối chuyển trạng thái animation đứng yên ngẫu nhiên, chạy và đỡ đòn cho nhân vật
 public class PlayerAnimationController : MonoBehaviour
 {
     private static readonly int SpeedHash = Animator.StringToHash("Speed");
@@ -32,6 +27,7 @@ public class PlayerAnimationController : MonoBehaviour
     private bool wasBlocking;
     private float nextIdleSwitchTime;
 
+    // Tìm component Animator gắn trên model nhân vật
     void Awake()
     {
         playerController = GetComponent<PlayerController>();
@@ -39,12 +35,14 @@ public class PlayerAnimationController : MonoBehaviour
         playerAttack = GetComponent<PlayerAttack>();
     }
 
+    // Quét trước các state animation hợp lệ và phát trạng thái chờ
     void Start()
     {
         CacheAvailableStates();
         ScheduleNextIdleSwitch();
     }
 
+    // Theo dõi tốc độ di chuyển và trạng thái đỡ đòn để chuyển animation mượt
     void Update()
     {
         if (animator == null)
@@ -116,6 +114,7 @@ public class PlayerAnimationController : MonoBehaviour
         wasBlocking = false;
     }
 
+    // Đưa nhân vật về trạng thái đứng yên hoặc chạy ngay sau khi kết thúc đòn đánh
     public void ForceReturnToLocomotion()
     {
         if (animator == null) return;
@@ -147,6 +146,7 @@ public class PlayerAnimationController : MonoBehaviour
         wasBlocking = false;
     }
 
+    // Lưu danh sách hash các clip Idle khả dụng trong Animator
     private void CacheAvailableStates()
     {
         availableIdleHashes.Clear();
@@ -164,6 +164,7 @@ public class PlayerAnimationController : MonoBehaviour
         hasBlockState = animator.HasState(0, BlockHash);
     }
 
+    // Chuyển sang một động tác đứng chờ ngẫu nhiên khác lượt trước
     private void PlayRandomIdleAnimation(float fadeDuration)
     {
         if (availableIdleHashes.Count == 0) return;
@@ -173,6 +174,7 @@ public class PlayerAnimationController : MonoBehaviour
         animator.CrossFadeInFixedTime(availableIdleHashes[nextIdx], fadeDuration, 0);
     }
 
+    // Chuyển sang animation chạy với hiệu ứng cross-fade
     private void PlayRunAnimation(float fadeDuration)
     {
         if (!hasRunState) hasRunState = animator.HasState(0, RunHash);
@@ -182,6 +184,7 @@ public class PlayerAnimationController : MonoBehaviour
         }
     }
 
+    // Chuyển sang animation giơ vũ khí đỡ đòn
     private void PlayBlockAnimation()
     {
         if (!hasBlockState) hasBlockState = animator.HasState(0, BlockHash);

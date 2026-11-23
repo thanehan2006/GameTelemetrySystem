@@ -1,32 +1,30 @@
 using UnityEngine;
 using UnityEngine.Rendering;
 
-/// <summary>
-/// Bẫy môi trường (Bẫy gai / Bụi gai ở Màn 2).
-/// - Hiển thị vòng cảnh báo đỏ nhấp nháy trên mặt đất để người chơi dễ quan sát né bẫy.
-/// - Khi Player giẫm vào bán kính bẫy: gây sát thương, tung tia lửa + máu + chữ nổi (-XX HP), đẩy lùi nhẹ và gửi Telemetry "trap_hit".
-/// </summary>
+// Cụm bẫy gai gây sát thương định kỳ khi người chơi bước vào vùng nguy hiểm
 public class TrapHazard : MonoBehaviour
 {
     private static readonly int BaseColorId = Shader.PropertyToID("_BaseColor");
     private static readonly int ColorId = Shader.PropertyToID("_Color");
 
     [Header("Trap Settings")]
-    public int damage = 22;
+    public int damage = 18;
     public float triggerRadius = 1.65f;
-    public float hitCooldown = 1.15f;
+    public float hitCooldown = 1.25f;
     public float knockbackForce = 5.5f;
 
     private Transform playerTransform;
     private PlayerHealth playerHealth;
     private PlayerController playerController;
     private Light childLight;
-    private Material dangerRingMat;
+    private MeshRenderer ringRenderer;
+    private MaterialPropertyBlock ringPropBlock;
     private bool ringHasBaseColor;
     private bool ringHasColor;
     private float nextHitTime;
     private float pulsePhase;
 
+    // Tìm người chơi và dựng vòng cảnh báo phát sáng đỏ quanh bẫy
     void Start()
     {
         pulsePhase = Random.Range(0f, Mathf.PI * 2f);
@@ -41,11 +39,7 @@ public class TrapHazard : MonoBehaviour
         ResolvePlayer();
     }
 
-    private void OnDestroy()
-    {
-        if (dangerRingMat != null) Destroy(dangerRingMat);
-    }
-
+    // Kiểm tra người chơi dẫm vào bán kính bẫy sau mỗi khoảng hồi
     void Update()
     {
         if (GameOverManager.IsGameOver || WeaponShopManager.IsShopOpen) return;
@@ -61,7 +55,6 @@ public class TrapHazard : MonoBehaviour
         diff.y = 0f;
         float horizSqrDist = diff.sqrMagnitude;
 
-        // Distance culling: tắt đèn & ngừng update shader bẫy khi Player ở xa > 30m
         const float activeRadiusSqr = 30f * 30f;
         bool inRange = horizSqrDist <= activeRadiusSqr;
         if (childLight != null && childLight.enabled != inRange)
@@ -72,12 +65,13 @@ public class TrapHazard : MonoBehaviour
 
         float now = Time.time;
 
-        if (dangerRingMat != null)
+        if (ringRenderer != null && ringPropBlock != null)
         {
             float pulse = 0.28f + 0.22f * Mathf.Sin(now * 4.2f + pulsePhase);
             Color c = new Color(2.0f, 0.24f, 0.14f, pulse);
-            if (ringHasBaseColor) dangerRingMat.SetColor(BaseColorId, c);
-            if (ringHasColor) dangerRingMat.SetColor(ColorId, c);
+            if (ringHasBaseColor) ringPropBlock.SetColor(BaseColorId, c);
+            if (ringHasColor) ringPropBlock.SetColor(ColorId, c);
+            ringRenderer.SetPropertyBlock(ringPropBlock);
         }
 
         if (now < nextHitTime) return;
@@ -89,6 +83,7 @@ public class TrapHazard : MonoBehaviour
         }
     }
 
+    // Vẽ vòng tròn phát sáng dưới mặt đất để người chơi nhận biết vùng bẫy
     private void CreateDangerRingVisual()
     {
         if (transform.Find("TrapDangerRing") != null) return;
@@ -103,17 +98,23 @@ public class TrapHazard : MonoBehaviour
         MeshFilter mf = ring.AddComponent<MeshFilter>();
         mf.sharedMesh = CombatVfxManager.GetHorizontalQuadMesh();
         MeshRenderer mr = ring.AddComponent<MeshRenderer>();
-        dangerRingMat = new Material(CombatVfxManager.GetAdditiveRingMaterial());
-        ringHasBaseColor = dangerRingMat.HasProperty(BaseColorId);
-        ringHasColor = dangerRingMat.HasProperty(ColorId);
-        Color c = new Color(2.0f, 0.24f, 0.14f, 0.4f);
-        if (ringHasBaseColor) dangerRingMat.SetColor(BaseColorId, c);
-        if (ringHasColor) dangerRingMat.SetColor(ColorId, c);
-        mr.material = dangerRingMat;
+        Material sharedRingMat = CombatVfxManager.GetAdditiveRingMaterial();
+        mr.sharedMaterial = sharedRingMat;
         mr.shadowCastingMode = ShadowCastingMode.Off;
         mr.receiveShadows = false;
+
+        ringRenderer = mr;
+        ringPropBlock = new MaterialPropertyBlock();
+        ringHasBaseColor = sharedRingMat != null && sharedRingMat.HasProperty(BaseColorId);
+        ringHasColor = sharedRingMat != null && sharedRingMat.HasProperty(ColorId);
+
+        Color c = new Color(2.0f, 0.24f, 0.14f, 0.4f);
+        if (ringHasBaseColor) ringPropBlock.SetColor(BaseColorId, c);
+        if (ringHasColor) ringPropBlock.SetColor(ColorId, c);
+        ringRenderer.SetPropertyBlock(ringPropBlock);
     }
 
+    // Trừ máu người chơi, phát hiệu ứng va chạm bẫy và gửi sự kiện trap_hit
     private void TriggerTrap()
     {
         nextHitTime = Time.time + hitCooldown;

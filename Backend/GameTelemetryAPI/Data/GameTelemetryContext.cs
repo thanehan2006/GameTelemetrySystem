@@ -3,6 +3,7 @@ using GameTelemetryAPI.Models;
 
 namespace GameTelemetryAPI.Data
 {
+    // DbContext quản lý kết nối và ánh xạ các bảng dữ liệu telemetry với SQL Server
     public class GameTelemetryContext : DbContext
     {
         public GameTelemetryContext(DbContextOptions<GameTelemetryContext> options)
@@ -10,15 +11,18 @@ namespace GameTelemetryAPI.Data
         {
         }
 
+        // Bảng lưu tài khoản người chơi
         public DbSet<Player> Players { get; set; } = null!;
+        // Bảng lưu các phiên chơi (session)
         public DbSet<GameSession> GameSessions { get; set; } = null!;
+        // Bảng lưu chi tiết sự kiện trong từng phiên chơi
         public DbSet<GameEvent> GameEvents { get; set; } = null!;
 
+        // Cấu hình khóa chính, ràng buộc dữ liệu và quan hệ giữa Players, GameSessions, GameEvents
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
             base.OnModelCreating(modelBuilder);
 
-            // Cấu hình bảng Players
             modelBuilder.Entity<Player>(entity =>
             {
                 entity.ToTable("Players");
@@ -37,7 +41,6 @@ namespace GameTelemetryAPI.Data
                     .HasDefaultValueSql("SYSDATETIME()");
             });
 
-            // Cấu hình bảng GameSessions
             modelBuilder.Entity<GameSession>(entity =>
             {
                 entity.ToTable("GameSessions");
@@ -56,7 +59,6 @@ namespace GameTelemetryAPI.Data
                     .HasConstraintName("FK_GameSessions_Players");
             });
 
-            // Cấu hình bảng GameEvents
             modelBuilder.Entity<GameEvent>(entity =>
             {
                 entity.ToTable("GameEvents");

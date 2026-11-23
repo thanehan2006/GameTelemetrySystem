@@ -4,14 +4,7 @@ using UnityEngine.Rendering;
 using UnityEditor;
 #endif
 
-/// <summary>
-/// Phần thưởng Vàng (PolyOne Free Rewards):
-/// - Quái thường rơi Đồng Xu Vương Miện (SM_Rewards_CoinCrown) & Đồng Xu Ngôi Sao (SM_Rewards_CoinStar),
-///   với lượng vàng lớn rơi thêm Túi Vàng (SM_Rewards_Bag).
-/// - Boss rơi Rương Vàng Hoàng Kim (SM_Rewards_ChestGold) + Túi Vàng + mưa đồng xu.
-/// - Quỹ đạo bắn parabol nảy xuống Terrain, cột sáng HDR chuyển sắc mượt, hạt sao vàng lấp lánh,
-///   vòng sáng mặt đất và hiệu ứng bùng sao + chữ bay (+XX G) khi nhặt.
-/// </summary>
+// Quản lý đồng vàng rơi ra từ quái/boss với hiệu ứng nảy vật lý, tia sáng phân cấp và tự hút vào người chơi
 public class GoldPickup : MonoBehaviour
 {
     private static readonly int BaseColorId = Shader.PropertyToID("_BaseColor");
@@ -27,7 +20,6 @@ public class GoldPickup : MonoBehaviour
     private static GameObject cachedBagPrefab;
     private static GameObject cachedChestGoldPrefab;
 
-    // Dùng chung Material theo 3 bậc (0=Coin, 1=Bag, 2=Chest) thay vì clone Material mới cho mỗi đồng xu
     private static readonly Material[] SharedBeamMats = new Material[3];
     private static readonly Material[] SharedRingMats = new Material[2];
     private static Gradient cachedSparkleGradient;
@@ -37,6 +29,7 @@ public class GoldPickup : MonoBehaviour
     private Transform visualPivot;
     private Transform groundRingTransform;
     private Light glowLight;
+    private ParticleSystem sparklePs;
 
     private Vector3 velocity;
     private float settledGroundY;
@@ -48,6 +41,7 @@ public class GoldPickup : MonoBehaviour
     private bool collected;
     private float spawnTime;
 
+    // Tung ra nhiều đồng vàng hoặc rương vàng tại vị trí quái vừa bị hạ
     public static void SpawnGoldBurst(Vector3 origin, int totalGold, int coinCount = 3, bool isBossDrop = false)
     {
         if (totalGold <= 0) return;
@@ -72,7 +66,6 @@ public class GoldPickup : MonoBehaviour
             GameObject root = new GameObject(isChest ? "GoldChest_Drop" : isBag ? "GoldBag_Drop" : "GoldCoin_Drop");
             root.transform.position = origin + Vector3.up * 0.95f;
 
-            // 1. Pivot xoay + model 3D PolyOne Free Rewards
             GameObject pivot = new GameObject("VisualPivot");
             pivot.transform.SetParent(root.transform, false);
 
@@ -113,7 +106,7 @@ public class GoldPickup : MonoBehaviour
                 }
                 else
                 {
-                    // Coin FBX nằm phẳng (độ dày theo Y) -> dựng đứng 90° để xoay lấp lánh như đồng xu RPG
+
                     model.transform.localPosition = new Vector3(0f, 0f, -0.03f);
                     model.transform.localRotation = Quaternion.Euler(90f, 0f, 0f);
                     model.transform.localScale = Vector3.one * 2.4f;
@@ -124,7 +117,6 @@ public class GoldPickup : MonoBehaviour
                 CreateFallbackCoinMesh(pivot.transform);
             }
 
-            // 2. Cột sáng vàng HDR mờ dần 2 đầu (dùng chung Shared Material để tối ưu batching & tránh leak)
             GameObject beam = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
             beam.name = "LootBeam";
             beam.transform.SetParent(root.transform, false);
@@ -144,7 +136,6 @@ public class GoldPickup : MonoBehaviour
                 br.receiveShadows = false;
             }
 
-            // 3. Vòng sáng vàng trên mặt đất (Ground Rune Ring)
             GameObject ringObj = new GameObject("GroundRing");
             ringObj.transform.SetParent(root.transform, false);
             ringObj.transform.localPosition = new Vector3(0f, -hoverHeight + 0.08f, 0f);
@@ -158,10 +149,8 @@ public class GoldPickup : MonoBehaviour
             rmr.shadowCastingMode = ShadowCastingMode.Off;
             rmr.receiveShadows = false;
 
-            // 4. Hạt sao vàng lấp lánh bay nhẹ quanh phần thưởng
-            AttachGoldSparkles(root.transform, isChest ? 8f : isBag ? 5f : 2.5f, isChest ? 0.52f : 0.32f);
+            ParticleSystem sparkles = AttachGoldSparkles(root.transform, isChest ? 8f : isBag ? 5f : 2.5f, isChest ? 0.52f : 0.32f);
 
-            // 5. Chỉ gắn Point Light cho Rương/Túi vàng (tránh tạo hàng chục đèn động cho từng đồng xu lẻ gây lag)
             Light l = null;
             float baseInt = isChest ? 3.0f : 2.2f;
             if (isChest || isBag)
@@ -181,6 +170,7 @@ public class GoldPickup : MonoBehaviour
             gp.visualPivot = pivot.transform;
             gp.groundRingTransform = ringObj.transform;
             gp.glowLight = l;
+            gp.sparklePs = sparkles;
             gp.spinSpeed = spin;
             gp.baseLightIntensity = baseInt;
             gp.groundHoverHeight = hoverHeight;
@@ -220,7 +210,7 @@ public class GoldPickup : MonoBehaviour
         return SharedRingMats[tier];
     }
 
-    private static void AttachGoldSparkles(Transform parent, float rate, float radius)
+    private static ParticleSystem AttachGoldSparkles(Transform parent, float rate, float radius)
     {
         GameObject go = new GameObject("GoldSparkles");
         go.transform.SetParent(parent, false);
@@ -262,8 +252,10 @@ public class GoldPickup : MonoBehaviour
         var rend = ps.GetComponent<ParticleSystemRenderer>();
         rend.sharedMaterial = CombatVfxManager.GetAdditiveStarMaterial();
         ps.Play();
+        return ps;
     }
 
+    // Lưu trước prefab vật phẩm vàng đã nạp từ màn hình Loading
     public static void RegisterPreloadedPrefabs(GameObject coinCrown, GameObject coinStar, GameObject bag, GameObject chestGold)
     {
         if (coinCrown != null) cachedCoinCrownPrefab = coinCrown;
@@ -317,6 +309,7 @@ public class GoldPickup : MonoBehaviour
         }
     }
 
+    // Thiết lập hướng văng và lực nảy ban đầu cho đồng xu
     private void InitScatter(Vector3 horizontalDir, float distanceMul)
     {
         spawnTime = Time.time;
@@ -333,6 +326,7 @@ public class GoldPickup : MonoBehaviour
         if (spawnTime == 0f) spawnTime = Time.time;
     }
 
+    // Mô phỏng rơi chạm đất, tự xoay, hút vào người chơi ở tầm gần và nhặt vàng
     private void Update()
     {
         if (collected || GameOverManager.IsGameOver || WeaponShopManager.IsShopOpen) return;
@@ -340,6 +334,27 @@ public class GoldPickup : MonoBehaviour
         float dt = Time.deltaTime;
         float now = Time.time;
         float age = now - spawnTime;
+
+        if (playerTransform == null)
+        {
+            ResolvePlayer();
+        }
+
+        if (landed && playerTransform != null)
+        {
+            const float activeCullSqrDist = 26f * 26f;
+            Vector3 playerTarget = playerTransform.position + Vector3.up * 0.9f;
+            float cullSqrDist = (playerTarget - transform.position).sqrMagnitude;
+            if (cullSqrDist > activeCullSqrDist)
+            {
+                if (glowLight != null && glowLight.enabled) glowLight.enabled = false;
+                if (sparklePs != null && sparklePs.isPlaying) sparklePs.Stop(false, ParticleSystemStopBehavior.StopEmitting);
+                return;
+            }
+
+            if (glowLight != null && !glowLight.enabled) glowLight.enabled = true;
+            if (sparklePs != null && !sparklePs.isPlaying) sparklePs.Play(false);
+        }
 
         if (visualPivot != null)
         {
@@ -351,7 +366,7 @@ public class GoldPickup : MonoBehaviour
             groundRingTransform.Rotate(Vector3.up, -45f * dt, Space.World);
         }
 
-        if (glowLight != null)
+        if (glowLight != null && glowLight.enabled)
         {
             glowLight.intensity = baseLightIntensity * (0.85f + 0.25f * Mathf.Sin(age * 4.5f));
         }
@@ -390,12 +405,7 @@ public class GoldPickup : MonoBehaviour
             transform.position = p;
         }
 
-        if (playerTransform == null)
-        {
-            ResolvePlayer();
-            if (playerTransform == null) return;
-        }
-
+        if (playerTransform == null) return;
         if (!landed && age < 0.72f) return;
 
         Vector3 targetPos = playerTransform.position + Vector3.up * 0.9f;
@@ -415,6 +425,7 @@ public class GoldPickup : MonoBehaviour
         }
     }
 
+    // Cộng vàng vào ScoreManager, phát VFX/âm thanh và gửi sự kiện gold_collected
     private void Collect()
     {
         collected = true;

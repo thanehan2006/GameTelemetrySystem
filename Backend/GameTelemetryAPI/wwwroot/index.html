@@ -3,18 +3,15 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>VANGUARD // Game Telemetry & Balancing Dashboard (Đề 9)</title>
+    <title>VANGUARD // Game Telemetry & Balancing Dashboard</title>
 
-    <!-- Google Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700;800&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
 
-    <!-- Bootstrap 5.3 & Bootstrap Icons -->
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
 
-    <!-- Chart.js -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 
     <style>
@@ -80,7 +77,6 @@
             padding: 1.25rem 1.5rem 3rem;
         }
 
-        /* Top Command Bar */
         .top-header {
             background: linear-gradient(180deg, rgba(20, 27, 43, 0.95) 0%, rgba(12, 17, 28, 0.95) 100%);
             border: 1px solid var(--border-subtle);
@@ -105,7 +101,6 @@
             box-shadow: 0 0 18px rgba(232, 184, 75, 0.22);
         }
 
-        /* Section Filter Bar (1 Unified Page OR Focused View) */
         .section-nav-bar {
             background: rgba(14, 19, 31, 0.92);
             border: 1px solid var(--border-card);
@@ -145,7 +140,6 @@
             box-shadow: 0 2px 12px rgba(232, 184, 75, 0.15);
         }
 
-        /* Cards & Section Headers */
         .hud-card {
             background: var(--bg-panel);
             border: 1px solid var(--border-card);
@@ -192,7 +186,6 @@
             color: var(--text-muted);
         }
 
-        /* KPI Cards */
         .kpi-tile {
             background: linear-gradient(180deg, rgba(19, 27, 43, 0.92) 0%, rgba(13, 18, 30, 0.92) 100%);
             border: 1px solid var(--border-card);
@@ -245,7 +238,6 @@
             font-size: 1.15rem;
         }
 
-        /* Stage Cards */
         .stage-card {
             background: rgba(17, 24, 39, 0.78);
             border: 1px solid rgba(255, 255, 255, 0.08);
@@ -262,7 +254,6 @@
             font-family: 'JetBrains Mono', monospace;
         }
 
-        /* Buttons & Controls */
         .hud-btn {
             background: rgba(255, 255, 255, 0.05);
             border: 1px solid rgba(255, 255, 255, 0.14);
@@ -321,7 +312,6 @@
             box-shadow: 0 0 0 2px rgba(232, 184, 75, 0.18);
         }
 
-        /* Tables */
         .hud-table {
             width: 100%;
             border-collapse: separate;
@@ -355,7 +345,6 @@
             vertical-align: middle;
         }
 
-        /* Result Badges */
         .badge-result {
             display: inline-flex;
             align-items: center;
@@ -391,13 +380,11 @@
             border: 1px solid rgba(56, 189, 248, 0.4);
         }
 
-        /* Rarity Badges */
         .rarity-rare { color: #38bdf8; border-color: rgba(56, 189, 248, 0.4); background: rgba(56, 189, 248, 0.12); }
         .rarity-epic { color: #c084fc; border-color: rgba(192, 132, 252, 0.4); background: rgba(192, 132, 252, 0.12); }
         .rarity-legend { color: #fb923c; border-color: rgba(251, 146, 60, 0.4); background: rgba(251, 146, 60, 0.12); }
         .rarity-mythic { color: #facc15; border-color: rgba(250, 204, 21, 0.45); background: rgba(250, 204, 21, 0.14); }
 
-        /* Balancing Insight Item */
         .insight-item {
             background: rgba(13, 18, 30, 0.85);
             border: 1px solid rgba(255, 255, 255, 0.07);
@@ -411,7 +398,6 @@
         .insight-item.good { border-left-color: var(--emerald); }
         .insight-item.info { border-left-color: var(--cyan); }
 
-        /* Simulator Terminal */
         .terminal-window {
             background: #06090f;
             border: 1px solid rgba(255, 255, 255, 0.1);
@@ -433,7 +419,6 @@
         .term-ev { color: #fcd34d; }
         .term-err { color: #f87171; }
 
-        /* Timeline inside Modal */
         .timeline-list {
             position: relative;
             padding-left: 1.4rem;
@@ -495,7 +480,6 @@
     <canvas id="emberCanvas"></canvas>
 
     <div class="app-shell">
-        <!-- 1. TOP HEADER -->
         <header class="top-header mb-3">
             <div class="d-flex flex-wrap justify-content-between align-items-center gap-3">
                 <div class="d-flex align-items-center gap-3">
@@ -506,7 +490,7 @@
                         <div class="d-flex align-items-center gap-2">
                             <h1 class="h5 mb-0 fw-bold font-fantasy text-white">VANGUARD // TELEMETRY COMMAND</h1>
                             <span class="badge bg-warning bg-opacity-10 text-warning border border-warning border-opacity-25 font-mono" style="font-size: 0.7rem;">
-                                ĐỀ 9 • ACTION ROGUELITE
+                                ACTION ROGUELITE
                             </span>
                         </div>
                         <div class="small text-muted mt-0.5">
@@ -541,7 +525,6 @@
             </div>
         </header>
 
-        <!-- 2. SECTION VIEW MODE BAR (1 Trang Duy Nhất hoặc Lọc Từng Khối Rõ Ý) -->
         <nav class="section-nav-bar mb-3">
             <div class="d-flex flex-wrap gap-1">
                 <button class="filter-pill active" data-section="all" onclick="setSectionFilter('all')">
@@ -570,7 +553,6 @@
             </div>
         </nav>
 
-        <!-- 3. CORE KPI ROW (6 THẺ TỔNG QUAN) -->
         <div class="row g-3 mb-4">
             <div class="col-6 col-md-4 col-xl-2">
                 <div class="kpi-tile" style="--kpi-accent: #38bdf8;">
@@ -651,9 +633,6 @@
             </div>
         </div>
 
-        <!-- =================================================================== -->
-        <!-- KHỐI 1: TIẾN ĐỘ 3 MÀN CHƠI & CÂN BẰNG ĐỘ KHÓ (PROGRESSION)          -->
-        <!-- =================================================================== -->
         <section class="dashboard-section" id="section-progression">
             <div class="section-banner">
                 <h5>
@@ -666,7 +645,6 @@
             </div>
 
             <div class="row g-3">
-                <!-- Left: 3-Stage Funnel Chart + 3 Real Stage Breakdown Cards -->
                 <div class="col-12 col-lg-8">
                     <div class="hud-card p-3 p-md-4 h-100 d-flex flex-column justify-content-between">
                         <div>
@@ -685,14 +663,11 @@
                             </div>
                         </div>
 
-                        <!-- 3 Stage Real Tactical Breakdown Cards (replaces fake 2D lava heatmap) -->
                         <div class="row g-2 mt-3" id="stageBreakdownCards">
-                            <!-- Populated dynamically from /api/Analytics/levels & /api/Analytics/combat -->
                         </div>
                     </div>
                 </div>
 
-                <!-- Right: Automated Game Balancing Engine -->
                 <div class="col-12 col-lg-4">
                     <div class="hud-card hud-card-gold p-3 p-md-4 h-100 d-flex flex-column">
                         <div class="d-flex justify-content-between align-items-center mb-2">
@@ -709,16 +684,12 @@
                         </p>
 
                         <div id="balancingInsightsList" class="flex-grow-1">
-                            <!-- Populated dynamically -->
                         </div>
                     </div>
                 </div>
             </div>
         </section>
 
-        <!-- =================================================================== -->
-        <!-- KHỐI 2: KINH TẾ VÀNG & CỬA HÀNG VŨ KHÍ (ECONOMY & WEAPON SHOP)      -->
-        <!-- =================================================================== -->
         <section class="dashboard-section" id="section-economy">
             <div class="section-banner">
                 <h5>
@@ -730,7 +701,6 @@
                 </span>
             </div>
 
-            <!-- 4 Economy Mini KPIs -->
             <div class="row g-3 mb-3">
                 <div class="col-6 col-lg-3">
                     <div class="hud-card p-3">
@@ -763,7 +733,6 @@
             </div>
 
             <div class="row g-3">
-                <!-- Gold Flow Chart -->
                 <div class="col-12 col-lg-5">
                     <div class="hud-card p-3 p-md-4 h-100">
                         <h6 class="fw-bold text-white mb-1">Dòng Chảy Vàng (Gold Source vs Gold Sink)</h6>
@@ -774,7 +743,6 @@
                     </div>
                 </div>
 
-                <!-- 8 Weapons Popularity Chart & Table -->
                 <div class="col-12 col-lg-7">
                     <div class="hud-card p-3 p-md-4 h-100">
                         <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
@@ -805,7 +773,6 @@
                                             </tr>
                                         </thead>
                                         <tbody id="weaponBreakdownTableBody">
-                                            <!-- Populated dynamically -->
                                         </tbody>
                                     </table>
                                 </div>
@@ -816,9 +783,6 @@
             </div>
         </section>
 
-        <!-- =================================================================== -->
-        <!-- KHỐI 3: CHIẾN ĐẤU, ĐỠ ĐÒN (BLOCK/PARRY) & PHÂN BỐ SỰ KIỆN          -->
-        <!-- =================================================================== -->
         <section class="dashboard-section" id="section-combat">
             <div class="section-banner">
                 <h5>
@@ -830,7 +794,6 @@
                 </span>
             </div>
 
-            <!-- 4 Combat Metrics Cards -->
             <div class="row g-3 mb-3">
                 <div class="col-6 col-lg-3">
                     <div class="hud-card p-3">
@@ -878,7 +841,6 @@
             </div>
 
             <div class="row g-3">
-                <!-- Event Distribution Chart (Vietnamese mapped) -->
                 <div class="col-12 col-lg-6">
                     <div class="hud-card p-3 p-md-4 h-100">
                         <div class="d-flex justify-content-between align-items-center mb-2">
@@ -894,7 +856,6 @@
                     </div>
                 </div>
 
-                <!-- Daily Sessions Trend Chart -->
                 <div class="col-12 col-lg-6">
                     <div class="hud-card p-3 p-md-4 h-100">
                         <div class="d-flex justify-content-between align-items-center mb-2">
@@ -912,9 +873,6 @@
             </div>
         </section>
 
-        <!-- =================================================================== -->
-        <!-- KHỐI 4: NHẬT KÝ PHIÊN CHƠI (CÓ TIMELINE) & GIẢ LẬP BOT CHUẨN GAME    -->
-        <!-- =================================================================== -->
         <section class="dashboard-section" id="section-sessions">
             <div class="section-banner">
                 <h5>
@@ -927,7 +885,6 @@
             </div>
 
             <div class="row g-3">
-                <!-- Recent Sessions Table -->
                 <div class="col-12 col-xl-7">
                     <div class="hud-card p-3 p-md-4 h-100">
                         <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
@@ -969,7 +926,6 @@
                     </div>
                 </div>
 
-                <!-- Live Bot Match Simulator (Synced 100% with real Unity events) -->
                 <div class="col-12 col-xl-5">
                     <div class="hud-card hud-card-gold p-3 p-md-4 h-100 d-flex flex-column justify-content-between">
                         <div>
@@ -983,7 +939,7 @@
                                 </span>
                             </div>
                             <p class="small text-muted mb-3">
-                                Bắn trực tiếp chuỗi sự kiện thật (<code>level_start</code>, <code>enemy_killed</code>, <code>gold_collected</code>, <code>shop_opened</code>, <code>weapon_purchased</code>, <code>block_hit</code>, <code>perfect_parry</code>, <code>trap_hit</code>, <code>boss_killed</code>) vào SQL Server để demo ngay cả khi không bật Unity.
+                                Gửi chuỗi sự kiện mẫu (<code>level_start</code>, <code>enemy_killed</code>, <code>gold_collected</code>, <code>shop_opened</code>, <code>weapon_purchased</code>, <code>block_hit</code>, <code>perfect_parry</code>, <code>trap_hit</code>, <code>boss_killed</code>) vào SQL Server để kiểm thử dashboard.
                             </p>
 
                             <div class="row g-2 mb-3">
@@ -1022,11 +978,10 @@
         </section>
 
         <footer class="mt-4 pt-3 text-center text-muted small border-top border-secondary border-opacity-10 font-mono" style="font-size: 0.75rem;">
-            VANGUARD: RAID OF THE ORC WOODS • GAME TELEMETRY SYSTEM (ĐỀ 9) • ASP.NET CORE &amp; SQL SERVER &amp; UNITY 6
+            VANGUARD: RAID OF THE ORC WOODS • GAME TELEMETRY SYSTEM • ASP.NET CORE &amp; SQL SERVER &amp; UNITY 6
         </footer>
     </div>
 
-    <!-- SESSION TIMELINE MODAL -->
     <div class="modal fade" id="sessionModal" tabindex="-1" aria-hidden="true">
         <div class="modal-dialog modal-lg modal-dialog-centered">
             <div class="modal-content" style="background: #0e1422; border: 1px solid var(--gold-primary); border-radius: 14px;">
@@ -1038,7 +993,6 @@
                     <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
                 </div>
                 <div class="modal-body" id="modalSessionBody">
-                    <!-- Dynamic session info + timeline -->
                 </div>
                 <div class="modal-footer border-top border-secondary border-opacity-25 py-2">
                     <button type="button" class="hud-btn" data-bs-dismiss="modal">Đóng</button>
@@ -1047,13 +1001,10 @@
         </div>
     </div>
 
-    <!-- Bootstrap JS -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 
     <script>
-        // =========================================================================
-        // 1. BẢNG ÁNH XẠ SỰ KIỆN TELEMETRY THỰC TẾ TỪ UNITY SANG TIẾNG VIỆT
-        // =========================================================================
+        // Bảng ánh xạ loại sự kiện telemetry sang tên hiển thị, icon và màu sắc trên dashboard
         const EVENT_CATALOG = {
             level_start:        { label: 'Bắt đầu Màn chơi',        icon: 'bi-flag-fill',             color: '#38bdf8', unit: 'Màn' },
             level_complete:     { label: 'Hoàn thành Màn chơi',     icon: 'bi-check-circle-fill',     color: '#22c55e', unit: 'Màn' },
@@ -1086,6 +1037,7 @@
             550: 'Đại Kiếm Hoàng Kim (Thần Thoại)'
         };
 
+        // Lấy metadata hiển thị tương ứng với mã sự kiện
         function getEventMeta(eventType) {
             return EVENT_CATALOG[eventType] || {
                 label: eventType,
@@ -1095,6 +1047,7 @@
             };
         }
 
+        // Định dạng giá trị chi tiết của sự kiện kèm đơn vị đo
         function formatEventDetailValue(eventType, val) {
             if (val === null || val === undefined) return '';
             if (eventType === 'weapon_purchased') {
@@ -1113,9 +1066,6 @@
             return `${val}`;
         }
 
-        // =========================================================================
-        // 2. HIỆU ỨNG TÀN LỬA TRẠI DARK FANTASY (EMBER CANVAS)
-        // =========================================================================
         const emberCanvas = document.getElementById('emberCanvas');
         const emberCtx = emberCanvas.getContext('2d');
         let embers = [];
@@ -1139,6 +1089,7 @@
             });
         }
 
+        // Vẽ hiệu ứng tàn lửa trôi nền trên canvas
         function animateEmbers() {
             emberCtx.clearRect(0, 0, emberCanvas.width, emberCanvas.height);
             for (const p of embers) {
@@ -1159,9 +1110,6 @@
         }
         animateEmbers();
 
-        // =========================================================================
-        // 3. CHẾ ĐỘ XEM: 1 TRANG DUY NHẤT HOẶC LỌC TỪNG KHỐI RÕ Ý
-        // =========================================================================
         const SECTION_LABELS = {
             all: '1 Trang Tổng Hợp (4 Khối)',
             progression: 'Khối 1: Tiến Độ 3 Màn & Cân Bằng',
@@ -1170,6 +1118,7 @@
             sessions: 'Khối 4: Nhật Ký Phiên & Giả Lập Bot'
         };
 
+        // Chuyển chế độ hiển thị toàn bộ dashboard hoặc lọc từng khối phân tích
         function setSectionFilter(mode) {
             document.querySelectorAll('.filter-pill').forEach(btn => {
                 btn.classList.toggle('active', btn.dataset.section === mode);
@@ -1195,9 +1144,6 @@
             if (simEl) simEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
         }
 
-        // =========================================================================
-        // 4. QUẢN LÝ DỮ LIỆU & BIỂU ĐỒ CHART.JS
-        // =========================================================================
         Chart.defaults.color = '#9ca3af';
         Chart.defaults.font.family = "'Inter', sans-serif";
 
@@ -1218,6 +1164,7 @@
             return await res.json();
         }
 
+        // Tải đồng thời toàn bộ dữ liệu API và cập nhật các biểu đồ, bảng thống kê
         async function loadAllDashboardData(manual = false) {
             const btn = document.getElementById('btnRefresh');
             if (manual && btn) {
@@ -1263,9 +1210,7 @@
             }
         }
 
-        // -------------------------------------------------------------------------
-        // 4.1. Render 6 KPI Tổng Quan
-        // -------------------------------------------------------------------------
+        // Hiển thị 6 thẻ chỉ số tổng quan (KPI) ở đầu trang
         function renderOverviewKpis(ov) {
             if (!ov) return;
             document.getElementById('kpiPlayers').textContent = (ov.totalPlayers ?? 0).toLocaleString('vi-VN');
@@ -1284,9 +1229,7 @@
             document.getElementById('kpiBossKillsSub').textContent = `${ov.totalBossKills ?? 0} lần hạ Đại Tướng Boss`;
         }
 
-        // -------------------------------------------------------------------------
-        // 4.2. Render Khối 1: Tiến Độ 3 Màn & Thẻ Chi Tiết 3 Khu Vực
-        // -------------------------------------------------------------------------
+        // Vẽ biểu đồ và thẻ chi tiết tiến độ hoàn thành theo 3 màn chơi
         function renderProgressionSection(levels, combat) {
             const labels = levels.map(l => l.stageName || `Màn ${l.level}`);
             const starts = levels.map(l => l.starts);
@@ -1340,7 +1283,6 @@
                 }
             });
 
-            // Render 3 Khu Vực Rừng Orc Thực Tế
             const stageMeta = {
                 1: {
                     coords: 'Tọa độ (132, 368) • Bình Minh',
@@ -1393,9 +1335,7 @@
             }).join('');
         }
 
-        // -------------------------------------------------------------------------
-        // 4.3. Hệ Thống Chẩn Đoán & Gợi Ý Cân Bằng Game (Balancing AI)
-        // -------------------------------------------------------------------------
+        // Phân tích số liệu thực tế để đưa ra nhận xét cân bằng độ khó và kinh tế
         function renderBalancingAdvisor(overview, levels, economy, combat) {
             const box = document.getElementById('balancingInsightsList');
             const insights = [];
@@ -1404,7 +1344,6 @@
             const s2 = levels.find(x => x.level === 2);
             const s3 = levels.find(x => x.level === 3);
 
-            // 1. Đánh giá Màn 2 (Thung Lũng Bẫy & Lính Khiên)
             if (s2 && s2.starts > 0) {
                 if (s2.completionRatePercent < 45 || (combat && combat.trapHits >= s2.starts * 2)) {
                     insights.push({
@@ -1421,7 +1360,6 @@
                 }
             }
 
-            // 2. Đánh giá Màn 3 (Boss Đại Tướng Orc Warlord)
             if (s3 && s3.starts > 0) {
                 const bossRate = combat?.bossClearRatePercent ?? s3.completionRatePercent;
                 if (bossRate < 35) {
@@ -1445,7 +1383,6 @@
                 }
             }
 
-            // 3. Đánh giá Kinh Tế Vàng & Cửa Hàng Vũ Khí
             if (economy && economy.totalGoldCollected > 0) {
                 if (economy.spendRatioPercent < 35) {
                     insights.push({
@@ -1462,7 +1399,6 @@
                 }
             }
 
-            // 4. Đánh giá Kỹ năng Block / Perfect Parry
             if (combat && (combat.blockHits + combat.perfectParries) > 0) {
                 insights.push({
                     severity: combat.parryMasteryPercent >= 25 ? 'good' : 'info',
@@ -1487,9 +1423,7 @@
             `).join('');
         }
 
-        // -------------------------------------------------------------------------
-        // 4.4. Render Khối 2: Kinh Tế Vàng & Cửa Hàng Vũ Khí
-        // -------------------------------------------------------------------------
+        // Vẽ biểu đồ dòng tiền vàng và bảng độ phổ biến vũ khí trong cửa hàng
         function renderEconomySection(econ) {
             if (!econ) return;
 
@@ -1503,7 +1437,6 @@
             document.getElementById('econItemsBought').textContent = `${econ.weaponPurchaseCount ?? 0} VK • ${econ.potionPurchaseCount ?? 0} Bình`;
             document.getElementById('econItemsGoldDetail').textContent = `Vũ khí: ${(econ.goldSpentOnWeapons ?? 0).toLocaleString('vi-VN')} G • Bình: ${(econ.goldSpentOnPotions ?? 0).toLocaleString('vi-VN')} G`;
 
-            // Biểu đồ Gold Flow
             const unspentGold = Math.max(0, (econ.totalGoldCollected ?? 0) - (econ.totalGoldSpent ?? 0));
             const goldCtx = document.getElementById('goldFlowChart').getContext('2d');
             if (goldFlowChartInstance) goldFlowChartInstance.destroy();
@@ -1542,7 +1475,6 @@
                 }
             });
 
-            // Biểu đồ & Bảng 8 Vũ khí
             const weapons = econ.weaponBreakdown || [];
             const wpCtx = document.getElementById('weaponPopularityChart').getContext('2d');
             if (weaponPopularityChartInstance) weaponPopularityChartInstance.destroy();
@@ -1593,9 +1525,7 @@
             }).join('');
         }
 
-        // -------------------------------------------------------------------------
-        // 4.5. Render Khối 3: Chiến Đấu, Block/Parry & Phân Bố Sự Kiện
-        // -------------------------------------------------------------------------
+        // Vẽ biểu đồ kỹ năng chiến đấu, phân bố sự kiện và lưu lượng phiên theo ngày
         function renderCombatSection(combat, eventsDist, sessionsByDate) {
             if (combat) {
                 document.getElementById('combatDefenseSummary').textContent = `${combat.blockHits} Block • ${combat.perfectParries} Parry`;
@@ -1607,7 +1537,6 @@
                 document.getElementById('combatBossDetail').textContent = `${combat.bossKills} lần hạ / ${combat.stage3Starts} lần vào Màn 3`;
             }
 
-            // Biểu đồ Phân bố Sự kiện (Tiếng Việt)
             const dist = eventsDist || [];
             document.getElementById('totalEventTypesBadge').textContent = `${dist.length} loại sự kiện`;
 
@@ -1644,7 +1573,6 @@
                 }
             });
 
-            // Biểu đồ Lưu lượng Phiên theo ngày
             const dates = sessionsByDate || [];
             const dtCtx = document.getElementById('sessionsDateChart').getContext('2d');
             if (sessionsDateChartInstance) sessionsDateChartInstance.destroy();
@@ -1677,9 +1605,6 @@
             });
         }
 
-        // -------------------------------------------------------------------------
-        // 4.6. Render Khối 4: Bảng Phiên Chơi (Sửa lỗi badge "Lose") & Modal Timeline
-        // -------------------------------------------------------------------------
         function classifyResult(result) {
             if (!result) return { key: 'other', badgeClass: 'badge-play', icon: 'bi-controller', label: 'Đang chơi' };
             const r = result.trim().toLowerCase();
@@ -1711,6 +1636,7 @@
             renderSessionsTable(filtered);
         }
 
+        // Hiển thị danh sách các phiên chơi gần đây kèm nút xem chi tiết dòng thời gian
         function renderSessionsTable(list) {
             const tbody = document.getElementById('recentSessionsBody');
             if (!list || list.length === 0) {
@@ -1749,6 +1675,7 @@
             }).join('');
         }
 
+        // Truy vấn và mở hộp thoại dòng thời gian sự kiện của một phiên chơi
         async function inspectSession(sessionId) {
             const s = cachedRecentSessions.find(x => x.sessionId === sessionId);
             if (!s) return;
@@ -1835,9 +1762,6 @@
             }
         }
 
-        // =========================================================================
-        // 5. BỘ GIẢ LẬP BOT CHUẨN KỊCH BẢN GAME VANGUARD (LIVE API INGESTION)
-        // =========================================================================
         function logTerm(msg, type = 'info') {
             const term = document.getElementById('simTerminal');
             if (!term) return;
@@ -1877,6 +1801,7 @@
             logTerm(`POST /api/Events -> ${eventType} (${formatEventDetailValue(eventType, value)}) — ${meta.label}`, 'ev');
         }
 
+        // Gửi chuỗi sự kiện mẫu qua các endpoint đăng nhập, tạo phiên và ghi sự kiện
         async function runBotSimulation() {
             const btn = document.getElementById('btnRunSimulation');
             const scenario = document.getElementById('simScenario').value;
@@ -1894,7 +1819,6 @@
             try {
                 logTerm(`Khởi tạo Chiến binh Bot: ${botName} (Kịch bản: ${scenario})`, 'succ');
 
-                // 1. Register or Login
                 const password = 'BotPassword123!';
                 let playerId = null;
 
@@ -1919,7 +1843,6 @@
                     logTerm(`Đăng nhập thành công PlayerId: #${playerId}`, 'succ');
                 }
 
-                // 2. Start Session
                 const startRes = await fetch('/api/Sessions/start', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -1929,7 +1852,6 @@
                 const sessionId = sData.sessionId;
                 logTerm(`Đã mở Session #${sessionId} trên SQL Server`, 'succ');
 
-                // 3. Build Realistic Event Sequence matching Unity TelemetryManager
                 let steps = [];
                 let finalResult = 'Win';
 
@@ -1973,7 +1895,6 @@
                         ['player_dead', 2], ['level_failed', 2], ['game_exit', 2]
                     ];
                 } else {
-                    // master_parry
                     finalResult = 'Win';
                     steps = [
                         ['game_start', 0],
@@ -2004,7 +1925,6 @@
                     await sleep(90);
                 }
 
-                // 4. End Session with exact Unity result ("Win" or "Lose")
                 await fetch(`/api/Sessions/${sessionId}/end`, {
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json' },
@@ -2021,9 +1941,7 @@
             }
         }
 
-        // =========================================================================
-        // 6. XUẤT BÁO CÁO CSV & TIỆN ÍCH
-        // =========================================================================
+        // Xuất bảng nhật ký phiên chơi ra file CSV
         function exportTelemetryCsv() {
             if (!cachedRecentSessions || cachedRecentSessions.length === 0) {
                 alert('Chưa có dữ liệu phiên chơi để xuất CSV.');
@@ -2060,7 +1978,6 @@
                 .replace(/'/g, '&#039;');
         }
 
-        // Khởi chạy lần đầu & tự động làm mới mỗi 12 giây
         document.addEventListener('DOMContentLoaded', () => {
             loadAllDashboardData(false);
             setInterval(() => loadAllDashboardData(false), 12000);

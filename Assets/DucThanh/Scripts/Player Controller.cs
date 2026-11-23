@@ -1,15 +1,9 @@
 using UnityEngine;
 using UnityEngine.AI;
 
-/// <summary>
-/// Điều khiển nhân vật góc nhìn thứ 3 (Third-Person) tối ưu theo phong cách Action AAA (Black Myth: Wukong):
-/// - Phản hồi WASD tức thì 0ms delay, nhả phím là dừng đanh gọn ngay lập tức (không bao giờ bị trôi/trượt quán tính).
-/// - Khóa cứng tâm visualModel vào CharacterController để animation không làm trôi lệch nhân vật.
-/// - Xoay mặt tốc độ cao, đổi hướng dứt khoát.
-/// - Hỗ trợ bước lướt ngắn (Combat Lunge) có kiểm soát từ PlayerAttack, tự dừng khi áp sát mục tiêu.
-/// </summary>
 [RequireComponent(typeof(CharacterController))]
 [DefaultExecutionOrder(-20)]
+// Điều khiển di chuyển, nhảy, giữ chuột phải đỡ đòn, đẩy lùi và khóa con trỏ chuột của người chơi
 public class PlayerController : MonoBehaviour
 {
     public static PlayerController Instance { get; private set; }
@@ -17,17 +11,17 @@ public class PlayerController : MonoBehaviour
     private static readonly int BaseColorId = Shader.PropertyToID("_BaseColor");
     private static readonly int ColorId = Shader.PropertyToID("_Color");
 
-    [Header("Movement Settings (AAA Snappy Locomotion)")]
+    [Header("Movement Settings")]
     public float moveSpeed = 6.5f;
     public float rotationSpeed = 14f;
     public float gravity = -25f;
 
-    [Header("Block / Parry Settings (Giữ Chuột Phải)")]
-    [Range(0f, 1f)] public float blockDamageReduction = 0.8f;
-    [Tooltip("Cửa sổ thời gian (giây) từ lúc bấm Chuột Phải để kích hoạt Đỡ Đòn Hoàn Hảo (0 sát thương + đẩy choáng quái + hồi HP).")]
+    [Header("Block / Parry Settings")]
+    [Range(0f, 1f)] public float blockDamageReduction = 0.72f;
+
     public float perfectParryWindow = 0.28f;
-    [Tooltip("Tỷ lệ HP tối đa được hồi khi Parry hoàn hảo trúng đòn địch (0.05 = 5% Max HP).")]
-    [Range(0f, 1f)] public float perfectParryHealPercent = 0.05f;
+
+    [Range(0f, 1f)] public float perfectParryHealPercent = 0.06f;
 
     [Header("Knockback & Collision")]
     public float knockbackDamping = 36f;
@@ -35,8 +29,14 @@ public class PlayerController : MonoBehaviour
 
     [Header("Camera & Visual")]
     public Transform playerCamera;
-    [Tooltip("Transform chứa visual/model nhân vật (PlayerBody). Nếu null sẽ xoay chính Player root.")]
+
     public Transform visualModel;
+
+    [Header("Ground & Foot Alignment")]
+    [SerializeField] private float targetSkinWidth = 0.04f;
+    [SerializeField] private float footGroundOffset = 0f;
+    [SerializeField] private float maxVisualGroundDrop = 0.35f;
+    [SerializeField] private float visualGroundSmoothSpeed = 22f;
 
     public Vector3 CurrentInputDirection { get; private set; }
     public bool HasMovementInput { get; private set; }
@@ -56,6 +56,20 @@ public class PlayerController : MonoBehaviour
     private Material blockAuraMat;
     private Light blockAuraLight;
 
+    private readonly RaycastHit[] groundHitBuffer = new RaycastHit[16];
+    private Transform cachedVisualModel;
+    private Animator visualAnimator;
+    private Transform leftFootBone;
+    private Transform rightFootBone;
+    private float calibratedIdleFootOffsetY;
+    private bool hasCalibratedIdleFootOffset;
+    private bool hasInitializedVisualGround;
+    private Vector3 lastGroundSamplePos;
+    private float cachedGroundY;
+    private bool cachedHasGround;
+    private float nextGroundSampleTime;
+
+    // Khởi tạo CharacterController và hiệu chỉnh kích thước collider
     void Awake()
     {
         Instance = this;
@@ -63,6 +77,7 @@ public class PlayerController : MonoBehaviour
 
         controller = GetComponent<CharacterController>();
         controller.minMoveDistance = 0f;
+        CalibrateCharacterController();
         playerAttack = GetComponent<PlayerAttack>();
 
         if (visualModel == null)
@@ -73,8 +88,11 @@ public class PlayerController : MonoBehaviour
                 visualModel = body;
             }
         }
+
+        RefreshVisualFootBones();
     }
 
+    // Nạp model nhân vật đã chọn, cập nhật tốc độ và đồng bộ vị trí trên mặt đất
     void Start()
     {
         SnapToGround();
@@ -103,12 +121,14 @@ public class PlayerController : MonoBehaviour
         Cursor.visible = false;
     }
 
+    // Hủy đăng ký trạng thái hoặc sự kiện khi đối tượng bị phá hủy
     void OnDestroy()
     {
         if (blockAuraMat != null) Destroy(blockAuraMat);
         if (Instance == this) Instance = null;
     }
 
+    // Xử lý nhận phím di chuyển, trạng thái đỡ đòn và bụi bước chân
     void Update()
     {
         if (GameOverManager.IsGameOver || WeaponShopManager.IsShopOpen)
@@ -129,22 +149,124 @@ public class PlayerController : MonoBehaviour
         UpdateBlockAuraVisual();
     }
 
+    // Hiệu chỉnh bám mặt đất mượt mà theo khung hình cho nhân vật
     void LateUpdate()
     {
-        // Khóa cứng vị trí local của PlayerBody về (0, 0, 0) để animation không bao giờ làm trôi model lệch khỏi collider
-        if (visualModel != null && visualModel != transform)
+
+        if (visualModel == null || visualModel == transform) return;
+
+        if (visualModel != cachedVisualModel)
         {
-            Vector3 localPos = visualModel.localPosition;
-            if (localPos.x != 0f || localPos.z != 0f)
+            RefreshVisualFootBones();
+        }
+
+        Vector3 curPos = transform.position;
+        if (!controller.isGrounded
+            || !cachedHasGround
+            || (curPos - lastGroundSamplePos).sqrMagnitude > 0.0004f
+            || Time.time >= nextGroundSampleTime)
+        {
+            cachedHasGround = TrySampleGroundHeight(curPos, out cachedGroundY, 1.2f, 4.0f);
+            lastGroundSamplePos = curPos;
+            nextGroundSampleTime = Time.time + 0.15f;
+        }
+
+        bool hasGround = cachedHasGround;
+        float groundY = cachedGroundY;
+        bool nearGround = controller.isGrounded || (hasGround && (curPos.y - groundY) <= maxVisualGroundDrop);
+        float slopeDeltaY = (hasGround && nearGround) ? Mathf.Clamp(groundY - curPos.y, -maxVisualGroundDrop, 0.08f) : 0f;
+
+        float footSoleCorrectionY = 0f;
+        if (visualAnimator != null && visualAnimator.isHuman && leftFootBone != null && rightFootBone != null)
+        {
+            float scaleY = Mathf.Max(0.01f, visualModel.lossyScale.y);
+            float leftSoleRelY = (leftFootBone.position.y - visualModel.position.y) - visualAnimator.leftFeetBottomHeight * scaleY;
+            float rightSoleRelY = (rightFootBone.position.y - visualModel.position.y) - visualAnimator.rightFeetBottomHeight * scaleY;
+            float lowestFootRelY = Mathf.Min(leftSoleRelY, rightSoleRelY);
+
+            bool isRunning = HasMovementInput && !IsBlocking && (playerAttack == null || !playerAttack.IsAttacking);
+            if (!isRunning)
             {
-                visualModel.localPosition = new Vector3(0f, localPos.y, 0f);
+                calibratedIdleFootOffsetY = Mathf.Clamp(-lowestFootRelY, -0.25f, 0.15f);
+                hasCalibratedIdleFootOffset = true;
+                footSoleCorrectionY = calibratedIdleFootOffsetY;
             }
+            else
+            {
+                float baseCorrection = hasCalibratedIdleFootOffset
+                    ? calibratedIdleFootOffsetY
+                    : Mathf.Clamp(-lowestFootRelY, -0.25f, 0.05f);
+
+                float predictedSoleY = lowestFootRelY + baseCorrection;
+                if (predictedSoleY < -0.015f)
+                {
+                    footSoleCorrectionY = -lowestFootRelY;
+                }
+                else if (predictedSoleY > 0.16f)
+                {
+                    footSoleCorrectionY = baseCorrection - (predictedSoleY - 0.16f) * 0.7f;
+                }
+                else
+                {
+                    footSoleCorrectionY = baseCorrection;
+                }
+            }
+        }
+
+        float parentScaleY = Mathf.Max(0.01f, transform.lossyScale.y);
+        float targetLocalY = Mathf.Clamp(
+            (slopeDeltaY + footSoleCorrectionY + footGroundOffset) / parentScaleY,
+            -(maxVisualGroundDrop + 0.25f),
+            0.15f);
+
+        Vector3 localPos = visualModel.localPosition;
+        float newY;
+        if (!hasInitializedVisualGround)
+        {
+            newY = targetLocalY;
+            hasInitializedVisualGround = true;
+        }
+        else
+        {
+            float k = 1f - Mathf.Exp(-visualGroundSmoothSpeed * Time.deltaTime);
+            newY = Mathf.Lerp(localPos.y, targetLocalY, k);
+        }
+
+        visualModel.localPosition = new Vector3(0f, newY, 0f);
+    }
+
+    // Tự động cân chỉnh tâm và chiều cao của CharacterController
+    private void CalibrateCharacterController()
+    {
+        if (controller == null) return;
+        controller.skinWidth = Mathf.Clamp(targetSkinWidth, 0.01f, 0.06f);
+        controller.center = new Vector3(
+            controller.center.x,
+            controller.height * 0.5f + controller.skinWidth,
+            controller.center.z);
+    }
+
+    private void RefreshVisualFootBones()
+    {
+        cachedVisualModel = visualModel;
+        hasCalibratedIdleFootOffset = false;
+        hasInitializedVisualGround = false;
+        calibratedIdleFootOffsetY = 0f;
+        visualAnimator = null;
+        leftFootBone = null;
+        rightFootBone = null;
+
+        if (visualModel == null) return;
+
+        visualAnimator = visualModel.GetComponentInChildren<Animator>();
+        if (visualAnimator != null && visualAnimator.isHuman)
+        {
+            leftFootBone = visualAnimator.GetBoneTransform(HumanBodyBones.LeftFoot);
+            rightFootBone = visualAnimator.GetBoneTransform(HumanBodyBones.RightFoot);
         }
     }
 
-    /// <summary>
-    /// Đọc phím trực tiếp 100% digital (không dùng Input.GetAxis để loại bỏ hoàn toàn độ trễ và hiện tượng trôi khi nhả phím).
-    /// </summary>
+    // Đọc phím di chuyển WASD/mũi tên từ Input System
     private Vector2 ReadDigitalMoveInput()
     {
         if (Input.GetKeyDown(KeyCode.A) || Input.GetKeyDown(KeyCode.LeftArrow)) lastHorizontalDir = -1;
@@ -170,6 +292,7 @@ public class PlayerController : MonoBehaviour
         return new Vector2(x, z);
     }
 
+    // Quy đổi hướng nhập từ bàn phím sang không gian góc nhìn camera
     private Vector3 GetCameraRelativeDirection(Vector3 inputDir)
     {
         if (playerCamera == null)
@@ -189,6 +312,7 @@ public class PlayerController : MonoBehaviour
         return (camForward * inputDir.z + camRight * inputDir.x).normalized;
     }
 
+    // Tính vận tốc chạy, nhảy, trọng lực, đẩy lùi và lực lướt khi đánh
     private void HandleMovement()
     {
         Vector2 rawInput = ReadDigitalMoveInput();
@@ -197,7 +321,6 @@ public class PlayerController : MonoBehaviour
         Vector3 inputDir = HasMovementInput ? new Vector3(rawInput.x, 0f, rawInput.y).normalized : Vector3.zero;
         CurrentInputDirection = HasMovementInput ? GetCameraRelativeDirection(inputDir) : Vector3.zero;
 
-        // Kích hoạt tư thế Đỡ Đòn (Block) khi giữ Chuột Phải
         bool wantsBlock = Cursor.lockState == CursorLockMode.Locked && Input.GetMouseButton(1);
         if (wantsBlock && !IsBlocking)
         {
@@ -220,10 +343,20 @@ public class PlayerController : MonoBehaviour
 
         if (IsBlocking)
         {
-            // Khi đang đỡ đòn: hướng mặt về phía camera nhìn (hoặc hướng phím di chuyển nếu đang giữ)
-            Vector3 guardDir = CurrentInputDirection.sqrMagnitude > 0.01f
-                ? CurrentInputDirection
-                : GetCameraForwardFlat();
+
+            Vector3 guardDir = Vector3.zero;
+            if (PlayerAttack.CurrentLockedTarget != null && !PlayerAttack.CurrentLockedTarget.IsDead)
+            {
+                Vector3 toLocked = PlayerAttack.CurrentLockedTarget.transform.position - transform.position;
+                toLocked.y = 0f;
+                if (toLocked.sqrMagnitude > 0.01f) guardDir = toLocked.normalized;
+            }
+            if (guardDir.sqrMagnitude <= 0.001f)
+            {
+                guardDir = CurrentInputDirection.sqrMagnitude > 0.01f
+                    ? CurrentInputDirection
+                    : GetCameraForwardFlat();
+            }
             if (guardDir.sqrMagnitude > 0.001f)
             {
                 RotateVisualTowards(guardDir, rotationSpeed * 1.1f);
@@ -231,29 +364,28 @@ public class PlayerController : MonoBehaviour
         }
         else if (!isAttacking && CurrentInputDirection.sqrMagnitude > 0.001f)
         {
-            // Khi không tấn công/đỡ: xoay mặt cực nhanh theo hướng di chuyển
+
             RotateVisualTowards(CurrentInputDirection, rotationSpeed);
         }
 
         float dt = Time.deltaTime;
+        Vector3 horizontalVelocity = moveDir * moveSpeed + lungeVelocity + knockbackVelocity;
+        float horizontalSpeed = horizontalVelocity.magnitude;
 
-        if (controller.isGrounded && verticalVelocity < 0f)
+        if (controller.isGrounded)
         {
-            verticalVelocity = -2f;
+            verticalVelocity = -Mathf.Max(6f, horizontalSpeed * 1.15f);
         }
         else
         {
-            verticalVelocity += gravity * dt;
+            verticalVelocity = Mathf.Max(verticalVelocity + gravity * dt, -30f);
         }
 
-        // Tổng hợp vận tốc: khi nhả phím và không có lunge/knockback thì vận tốc ngang = 0 tuyệt đối
-        Vector3 horizontalVelocity = moveDir * moveSpeed + lungeVelocity + knockbackVelocity;
         Vector3 finalDisplacement = horizontalVelocity * dt;
         finalDisplacement.y = verticalVelocity * dt;
 
         controller.Move(finalDisplacement);
 
-        // Tiếng bước chân + bụi chân nhẹ khi chạy trên mặt đất
         if (controller.isGrounded && !isAttacking && !IsBlocking && HasMovementInput)
         {
             footstepTimer -= dt;
@@ -261,7 +393,11 @@ public class PlayerController : MonoBehaviour
             {
                 footstepTimer = 0.36f;
                 GameAudioManager.PlayFootstep();
-                CombatVfxManager.SpawnFootstepDust(transform.position);
+                bool hasDustGround = TrySampleGroundHeight(transform.position, out float dustGroundY, 1.2f, 4f);
+                CombatVfxManager.SpawnFootstepDust(new Vector3(
+                    transform.position.x,
+                    hasDustGround ? dustGroundY : transform.position.y,
+                    transform.position.z));
             }
         }
         else
@@ -269,7 +405,6 @@ public class PlayerController : MonoBehaviour
             footstepTimer = 0.08f;
         }
 
-        // Giảm tốc nhanh để không bao giờ có cảm giác trượt băng
         if (lungeVelocity.sqrMagnitude > 0.001f)
         {
             lungeVelocity = Vector3.MoveTowards(lungeVelocity, Vector3.zero, 45f * dt);
@@ -289,9 +424,7 @@ public class PlayerController : MonoBehaviour
         }
     }
 
-    /// <summary>
-    /// Xoay mặt nhân vật về hướng chỉ định (dùng cho cả di chuyển và Auto-Target khi ra đòn).
-    /// </summary>
+    // Xoay model nhân vật về hướng tấn công hoặc di chuyển mục tiêu
     public void RotateVisualTowards(Vector3 worldDirection, float speed, bool instant = false)
     {
         worldDirection.y = 0f;
@@ -314,6 +447,7 @@ public class PlayerController : MonoBehaviour
         }
     }
 
+    // Lấy hướng mặt hiện tại của model nhân vật
     public Vector3 GetVisualForward()
     {
         Transform t = visualModel != null ? visualModel : transform;
@@ -322,23 +456,20 @@ public class PlayerController : MonoBehaviour
         return fwd.sqrMagnitude > 0.001f ? fwd.normalized : Vector3.forward;
     }
 
-    /// <summary>
-    /// Đặt vận tốc bước lướt ngắn (Combat Lunge) khi vung đòn kiểu Wukong.
-    /// </summary>
+    // Áp dụng xung lực bước tới ngắn khi tung đòn đánh
     public void SetCombatLunge(Vector3 velocity)
     {
         velocity.y = 0f;
         lungeVelocity = velocity;
     }
 
+    // Dừng xung lực lướt khi kết thúc đòn đánh
     public void StopCombatLunge()
     {
         lungeVelocity = Vector3.zero;
     }
 
-    /// <summary>
-    /// Đẩy lùi ngắn khi bị vũ khí của Quái đánh trúng (hãm dừng cực nhanh để không bị trôi).
-    /// </summary>
+    // Áp dụng lực đẩy lùi khi nhân vật trúng đòn
     public void ApplyKnockback(Vector3 attackerPosition, float force)
     {
         if (force <= 0.01f) return;
@@ -354,7 +485,6 @@ public class PlayerController : MonoBehaviour
             dir.Normalize();
         }
 
-        // Giới hạn lực giật và dừng nhanh để Player không bị trượt trôi
         knockbackVelocity = dir * Mathf.Min(force, 6f);
     }
 
@@ -362,7 +492,6 @@ public class PlayerController : MonoBehaviour
     {
         if (hit.collider == null) return;
 
-        // Khi Player chạm vào thân Quái: chỉ đẩy Quái dạt ra, TUYỆT ĐỐI không đẩy ngược làm trôi Player
         OrcEnemyAI enemy = hit.collider.GetComponentInParent<OrcEnemyAI>();
         if (enemy != null)
         {
@@ -384,35 +513,80 @@ public class PlayerController : MonoBehaviour
         return fwd.sqrMagnitude > 0.001f ? fwd.normalized : GetVisualForward();
     }
 
-    private void SnapToGround()
+    private bool TrySampleGroundHeight(Vector3 worldPos, out float groundY, float rayUpOffset, float rayDistance)
     {
-        Vector3 rayOrigin = transform.position + Vector3.up * 20f;
-        RaycastHit[] hits = new RaycastHit[16];
-        int hitCount = Physics.RaycastNonAlloc(rayOrigin, Vector3.down, hits, 100f, ~0, QueryTriggerInteraction.Ignore);
+        float rayTopY = worldPos.y + rayUpOffset;
+        Vector3 rayOrigin = new Vector3(worldPos.x, rayTopY, worldPos.z);
+        int hitCount = Physics.RaycastNonAlloc(rayOrigin, Vector3.down, groundHitBuffer, rayDistance, ~0, QueryTriggerInteraction.Ignore);
 
-        float highestGroundY = float.MinValue;
-        bool foundGround = false;
+        bool foundTerrain = false;
+        float terrainY = float.MinValue;
+        bool foundWalkable = false;
+        float highestWalkableY = float.MinValue;
+
         for (int i = 0; i < hitCount; i++)
         {
-            Collider col = hits[i].collider;
+            RaycastHit hit = groundHitBuffer[i];
+            Collider col = hit.collider;
             if (col == null || col.transform.IsChildOf(transform)) continue;
+            if (col.GetComponentInParent<OrcEnemyAI>() != null || col.GetComponentInParent<EnemyHealth>() != null) continue;
 
-            if (hits[i].point.y > highestGroundY)
+            if (col is TerrainCollider)
             {
-                highestGroundY = hits[i].point.y;
-                foundGround = true;
+                if (!foundTerrain || hit.point.y > terrainY)
+                {
+                    terrainY = hit.point.y;
+                    foundTerrain = true;
+                }
+                continue;
+            }
+
+            if (hit.normal.y >= 0.55f && hit.point.y <= rayTopY - 0.1f)
+            {
+                if (!foundWalkable || hit.point.y > highestWalkableY)
+                {
+                    highestWalkableY = hit.point.y;
+                    foundWalkable = true;
+                }
             }
         }
 
-        if (foundGround)
+        if (foundTerrain)
+        {
+            groundY = terrainY;
+            return true;
+        }
+
+        if (foundWalkable)
+        {
+            groundY = highestWalkableY;
+            return true;
+        }
+
+        Terrain activeTerrain = Terrain.activeTerrain;
+        if (activeTerrain != null)
+        {
+            groundY = activeTerrain.SampleHeight(worldPos) + activeTerrain.transform.position.y;
+            return true;
+        }
+
+        groundY = worldPos.y;
+        return false;
+    }
+
+    // Ép nhân vật hạ xuống đúng bề mặt địa hình bằng raycast
+    private void SnapToGround()
+    {
+        if (TrySampleGroundHeight(transform.position, out float groundY, 5f, 30f))
         {
             bool wasEnabled = controller.enabled;
             controller.enabled = false;
-            transform.position = new Vector3(transform.position.x, highestGroundY + 0.02f, transform.position.z);
+            transform.position = new Vector3(transform.position.x, groundY, transform.position.z);
             controller.enabled = wasEnabled;
         }
     }
 
+    // Bật/tắt khóa con trỏ chuột khi chơi hoặc mở cửa hàng/UI
     private void HandleCursorLock()
     {
         if (Input.GetKeyDown(KeyCode.Escape))
@@ -428,11 +602,7 @@ public class PlayerController : MonoBehaviour
         }
     }
 
-    /// <summary>
-    /// Vòng khiên năng lượng trước mặt khi giữ Chuột Phải:
-    /// - Rực vàng hoàng kim trong cửa sổ Perfect Parry (0.28s đầu) giúp người chơi cảm nhận nhịp Parry.
-    /// - Dịu sang xanh băng khi giữ Block thường.
-    /// </summary>
+    // Hiển thị hiệu ứng khiên năng lượng khi giữ chuột phải đỡ đòn
     private void UpdateBlockAuraVisual()
     {
         if (!IsBlocking)

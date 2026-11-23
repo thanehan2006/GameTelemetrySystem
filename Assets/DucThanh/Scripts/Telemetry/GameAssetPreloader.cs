@@ -3,11 +3,7 @@ using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 
-/// <summary>
-/// Hệ thống tải trước (Preload) và lưu giữ toàn bộ tài nguyên dùng chung của game (UI, âm thanh BGM/SFX,
-/// cấu hình & model 3D nhân vật, prefab phần thưởng, shader) trong bộ nhớ qua DontDestroyOnLoad.
-/// Đảm bảo tài nguyên được tải xong hoàn toàn trong LoadingScene trước khi kích hoạt Scene đích.
-/// </summary>
+// Tải trước prefab, âm thanh và làm ấm shader trong lúc chạy màn hình Loading để tránh giật hình khi vào trận
 public class GameAssetPreloader : MonoBehaviour
 {
     private readonly struct AssetPreloadEntry
@@ -35,25 +31,24 @@ public class GameAssetPreloader : MonoBehaviour
 
     private static readonly AssetPreloadEntry[] CoreManifest =
     {
-        // UI Textures
+
         new AssetPreloadEntry("UI/LoadingBg", typeof(Texture2D), "giao diện & hình ảnh", required: false),
         new AssetPreloadEntry("UI/LoginBg", typeof(Texture2D), "giao diện & hình ảnh", required: true),
         new AssetPreloadEntry("UI/icon_gold", typeof(Texture2D), "giao diện & hình ảnh", required: true),
         new AssetPreloadEntry("UI/icon_potion", typeof(Texture2D), "giao diện & hình ảnh", required: true),
 
-        // Character Roster & Hero 3D Models
         new AssetPreloadEntry("CharacterRosterConfig", typeof(CharacterRosterConfig), "nhân vật & mô hình 3D", required: true),
 
-        // Reward 3D Prefabs
         new AssetPreloadEntry("Rewards/SM_Rewards_Bag", typeof(GameObject), "vật phẩm & phần thưởng 3D", required: true),
         new AssetPreloadEntry("Rewards/SM_Rewards_Bottle", typeof(GameObject), "vật phẩm & phần thưởng 3D", required: true),
         new AssetPreloadEntry("Rewards/SM_Rewards_ChestGold", typeof(GameObject), "vật phẩm & phần thưởng 3D", required: true),
         new AssetPreloadEntry("Rewards/SM_Rewards_CoinCrown", typeof(GameObject), "vật phẩm & phần thưởng 3D", required: true),
         new AssetPreloadEntry("Rewards/SM_Rewards_CoinStar", typeof(GameObject), "vật phẩm & phần thưởng 3D", required: true),
 
-        // Audio Clips (BGM + SFX)
         new AssetPreloadEntry("Audio/bgm_menu", typeof(AudioClip), "âm thanh & nhạc nền", required: true, audioShortName: "bgm_menu"),
         new AssetPreloadEntry("Audio/bgm_forest_combat", typeof(AudioClip), "âm thanh & nhạc nền", required: true, audioShortName: "bgm_forest_combat"),
+        new AssetPreloadEntry("Audio/bgm_frost_combat", typeof(AudioClip), "âm thanh & nhạc nền", required: true, audioShortName: "bgm_frost_combat"),
+        new AssetPreloadEntry("Audio/bgm_inferno_combat", typeof(AudioClip), "âm thanh & nhạc nền", required: true, audioShortName: "bgm_inferno_combat"),
         new AssetPreloadEntry("Audio/bgm_boss", typeof(AudioClip), "âm thanh & nhạc nền", required: true, audioShortName: "bgm_boss"),
         new AssetPreloadEntry("Audio/sfx_boss_roar", typeof(AudioClip), "âm thanh & nhạc nền", required: true, audioShortName: "sfx_boss_roar"),
         new AssetPreloadEntry("Audio/sfx_checkpoint", typeof(AudioClip), "âm thanh & nhạc nền", required: true, audioShortName: "sfx_checkpoint"),
@@ -95,6 +90,7 @@ public class GameAssetPreloader : MonoBehaviour
         instance = null;
     }
 
+    // Tạo hoặc trả về Preloader dùng chung xuyên suốt giữa các scene
     public static GameAssetPreloader EnsureInstance()
     {
         if (instance != null) return instance;
@@ -150,10 +146,7 @@ public class GameAssetPreloader : MonoBehaviour
         }
     }
 
-    /// <summary>
-    /// Nạp bất đồng bộ toàn bộ asset được khai báo trước khi chuyển sang bước tải Scene đích.
-    /// Lưu ý: Phải chạy xong 100% trước khi gọi SceneManager.LoadSceneAsync để tránh kẹt hàng đợi PreloadManager.
-    /// </summary>
+    // Nạp bất đồng bộ tài nguyên từ Resources, đăng ký vào hệ thống cache và báo tiến độ tải
     public IEnumerator PreloadAssetsCoroutine(
         bool includeCoreAssets,
         string[] extraResourcePaths,
@@ -239,7 +232,6 @@ public class GameAssetPreloader : MonoBehaviour
         int totalSteps = 1 + entries.Count + pendingShaders.Count;
         int completedSteps = 0;
 
-        // Bước 1: Tạo sẵn các Sprite UI dùng chung (gradient, soft dot)
         onProgress?.Invoke(0f, "Đang khởi tạo tài nguyên giao diện...");
         FantasyUiThemeHelper.PrewarmUiSprites();
         completedSteps++;
@@ -247,7 +239,6 @@ public class GameAssetPreloader : MonoBehaviour
 
         float frameSliceStart = Time.realtimeSinceStartup;
 
-        // Bước 2: Tải bất đồng bộ từng asset trong danh sách
         for (int i = 0; i < entries.Count; i++)
         {
             AssetPreloadEntry entry = entries[i];
@@ -358,7 +349,6 @@ public class GameAssetPreloader : MonoBehaviour
             }
         }
 
-        // Đồng bộ prefab phần thưởng vào cache của các script gameplay
         GoldPickup.RegisterPreloadedPrefabs(
             GetAsset<GameObject>("Rewards/SM_Rewards_CoinCrown"),
             GetAsset<GameObject>("Rewards/SM_Rewards_CoinStar"),
@@ -366,7 +356,6 @@ public class GameAssetPreloader : MonoBehaviour
             GetAsset<GameObject>("Rewards/SM_Rewards_ChestGold"));
         HealthPickup.RegisterPreloadedPrefab(GetAsset<GameObject>("Rewards/SM_Rewards_Bottle"));
 
-        // Bước 3: Biên dịch ShaderVariantCollection (nếu có cấu hình)
         for (int i = 0; i < pendingShaders.Count; i++)
         {
             ShaderVariantCollection svc = pendingShaders[i];

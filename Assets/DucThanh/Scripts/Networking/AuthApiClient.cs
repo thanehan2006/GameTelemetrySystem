@@ -4,6 +4,7 @@ using System.Text;
 using UnityEngine;
 using UnityEngine.Networking;
 
+// Cung cấp địa chỉ URL máy chủ API và cấu hình SSL cho môi trường localhost
 public static class ApiConfig
 {
     public const string LOCAL_HTTPS_URL = "https://localhost:7013";
@@ -60,10 +61,7 @@ public class PlayerApiError
     public string title;
 }
 
-/// <summary>
-/// Client kết nối API xác thực (Đăng ký / Đăng nhập kèm mật khẩu).
-/// Tối ưu: dùng chung một luồng request, chống gửi trùng khi đang xử lý, tách thông báo lỗi rõ ràng.
-/// </summary>
+// Client gửi yêu cầu HTTP đăng ký và đăng nhập tài khoản tới Backend ASP.NET Core
 public class AuthApiClient : MonoBehaviour
 {
     [Header("Backend API")]
@@ -78,11 +76,13 @@ public class AuthApiClient : MonoBehaviour
         set => baseUrl = value;
     }
 
+    // Gửi request đăng ký người chơi mới qua endpoint /api/Players/register
     public void Register(string playerName, string password, Action<bool, PlayerApiResponse, string> callback)
     {
         SendAuthRequest("/api/Players/register", playerName, password, false, "Đăng ký thành công! Hãy đăng nhập.", callback);
     }
 
+    // Gửi request xác thực tài khoản qua endpoint /api/Players/login
     public void Login(string playerName, string password, Action<bool, PlayerApiResponse, string> callback)
     {
         SendAuthRequest("/api/Players/login", playerName, password, true, "Đăng nhập thành công!", callback);
@@ -111,6 +111,7 @@ public class AuthApiClient : MonoBehaviour
         StartCoroutine(SendAuthRequestCoroutine(endpoint, payload, savePlayerSession, successMessage, callback));
     }
 
+    // Thực thi UnityWebRequest bất đồng bộ và phân tích phản hồi JSON trả về
     private IEnumerator SendAuthRequestCoroutine(
         string endpoint,
         AuthCredentialsRequest payload,
@@ -182,7 +183,7 @@ public class AuthApiClient : MonoBehaviour
             }
             catch
             {
-                // Fallback sang mã trạng thái HTTP
+
             }
         }
 
