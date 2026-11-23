@@ -134,6 +134,12 @@ public class TelemetryManager : MonoBehaviour
             TrackEvent("login", PlayerPrefs.GetInt("PlayerId", 0));
         }
 
+        StageManager stageManager = StageManager.Instance != null ? StageManager.Instance : FindFirstObjectByType<StageManager>();
+        if (stageManager != null)
+        {
+            CurrentLevel = stageManager.MapLevel;
+        }
+
         TrackEvent("game_start");
         TrackLevelStart(CurrentLevel);
         FlushPendingEvents();

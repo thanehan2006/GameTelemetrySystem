@@ -3,14 +3,27 @@ using Microsoft.EntityFrameworkCore;
 using GameTelemetryAPI.Data;
 using GameTelemetryAPI.DTOs;
 using GameTelemetryAPI.Models;
+using GameTelemetryAPI.Services;
 
 namespace GameTelemetryAPI.Controllers
 {
     [ApiController]
     [Route("api/[controller]")]
-    // Controller tiếp nhận và truy vấn các sự kiện gameplay từ Unity client
+    // Controller tiếp nhận sự kiện từ Unity, phân tách cột mốc (GameEvents), giao dịch (ShopPurchases) và tổng hợp (GameSessions)
     public class EventsController : ControllerBase
     {
+        private static readonly HashSet<string> CoreMilestoneEvents = new(StringComparer.OrdinalIgnoreCase)
+        {
+            "login",
+            "game_start",
+            "level_start",
+            "level_complete",
+            "level_failed",
+            "player_dead",
+            "boss_killed",
+            "game_exit"
+        };
+
         private readonly GameTelemetryContext _context;
 
         public EventsController(GameTelemetryContext context)
@@ -18,7 +31,7 @@ namespace GameTelemetryAPI.Controllers
             _context = context;
         }
 
-        // Ghi nhận một sự kiện đơn lẻ vào phiên chơi tương ứng
+        // Ghi nhận một sự kiện đơn lẻ và điều phối vào đúng bảng mục tiêu
         [HttpPost]
         public async Task<ActionResult<GameEventResponseDto>> RecordEvent([FromBody] CreateGameEventDto dto)
         {
@@ -27,34 +40,36 @@ namespace GameTelemetryAPI.Controllers
                 return BadRequest(ModelState);
             }
 
-            var sessionExists = await _context.GameSessions.AnyAsync(s => s.SessionId == dto.SessionId);
-            if (!sessionExists)
+            var session = await _context.GameSessions.FirstOrDefaultAsync(s => s.SessionId == dto.SessionId);
+            if (session == null)
             {
                 return NotFound(new { message = $"Không tìm thấy phiên chơi với SessionId {dto.SessionId}" });
             }
 
-            var gameEvent = new GameEvent
+            string eventType = dto.EventType.Trim();
+            DateTime eventTime = dto.EventTime ?? DateTime.UtcNow;
+
+            var createdEvent = ApplyEventToSession(session, eventType, eventTime, dto.Value);
+            await _context.SaveChangesAsync();
+
+            var responseDto = new GameEventResponseDto
             {
-                SessionId = dto.SessionId,
-                EventType = dto.EventType.Trim(),
-                EventTime = dto.EventTime ?? DateTime.UtcNow,
+                EventId = createdEvent?.EventId ?? 0,
+                SessionId = session.SessionId,
+                EventType = eventType,
+                EventTime = eventTime,
                 Value = dto.Value
             };
 
-            _context.GameEvents.Add(gameEvent);
-            await _context.SaveChangesAsync();
-
-            return CreatedAtAction(nameof(GetEventById), new { id = gameEvent.EventId }, new GameEventResponseDto
+            if (createdEvent != null)
             {
-                EventId = gameEvent.EventId,
-                SessionId = gameEvent.SessionId,
-                EventType = gameEvent.EventType,
-                EventTime = gameEvent.EventTime,
-                Value = gameEvent.Value
-            });
+                return CreatedAtAction(nameof(GetEventById), new { id = createdEvent.EventId }, responseDto);
+            }
+
+            return Ok(responseDto);
         }
 
-        // Ghi nhận đồng loạt nhiều sự kiện trong một lần gọi API
+        // Ghi nhận đồng loạt nhiều sự kiện trong một lần gọi API từ Unity batch
         [HttpPost("batch")]
         public async Task<IActionResult> RecordEventsBatch([FromBody] CreateBatchGameEventsDto dto)
         {
@@ -63,27 +78,26 @@ namespace GameTelemetryAPI.Controllers
                 return BadRequest(ModelState);
             }
 
-            var sessionExists = await _context.GameSessions.AnyAsync(s => s.SessionId == dto.SessionId);
-            if (!sessionExists)
+            var session = await _context.GameSessions.FirstOrDefaultAsync(s => s.SessionId == dto.SessionId);
+            if (session == null)
             {
                 return NotFound(new { message = $"Không tìm thấy phiên chơi với SessionId {dto.SessionId}" });
             }
 
-            var events = dto.Events.Select(e => new GameEvent
+            int processedCount = 0;
+            foreach (var item in dto.Events)
             {
-                SessionId = dto.SessionId,
-                EventType = e.EventType.Trim(),
-                EventTime = e.EventTime ?? DateTime.UtcNow,
-                Value = e.Value
-            }).ToList();
+                if (string.IsNullOrWhiteSpace(item.EventType)) continue;
+                ApplyEventToSession(session, item.EventType.Trim(), item.EventTime ?? DateTime.UtcNow, item.Value);
+                processedCount++;
+            }
 
-            _context.GameEvents.AddRange(events);
             await _context.SaveChangesAsync();
 
-            return Ok(new { message = $"Đã ghi nhận thành công {events.Count} sự kiện", count = events.Count });
+            return Ok(new { message = $"Đã ghi nhận thành công {processedCount} sự kiện", count = processedCount });
         }
 
-        // Lấy thông tin chi tiết của một sự kiện theo EventId
+        // Lấy thông tin chi tiết của một sự kiện cột mốc theo EventId
         [HttpGet("{id:long}")]
         public async Task<ActionResult<GameEventResponseDto>> GetEventById(long id)
         {
@@ -101,6 +115,94 @@ namespace GameTelemetryAPI.Controllers
                 EventTime = gameEvent.EventTime,
                 Value = gameEvent.Value
             });
+        }
+
+        // Điều phối sự kiện: cột mốc vào GameEvents, mua đồ vào ShopPurchases, chỉ số chiến đấu/vàng cộng vào GameSessions
+        private GameEvent? ApplyEventToSession(GameSession session, string eventType, DateTime eventTime, int? value)
+        {
+            string normalized = eventType.Trim().ToLowerInvariant();
+            int safeValue = Math.Max(0, value ?? 0);
+
+            if (CoreMilestoneEvents.Contains(normalized))
+            {
+                if ((normalized == "level_start" || session.LevelId == null)
+                    && (normalized == "level_start" || normalized == "level_complete" || normalized == "level_failed" || normalized == "player_dead")
+                    && value is >= 1 and <= 3)
+                {
+                    session.LevelId = value.Value;
+                }
+
+                if (normalized == "boss_killed")
+                {
+                    session.BossKilled = true;
+                }
+
+                var gameEvent = new GameEvent
+                {
+                    SessionId = session.SessionId,
+                    EventType = normalized,
+                    EventTime = eventTime,
+                    Value = value
+                };
+                _context.GameEvents.Add(gameEvent);
+                return gameEvent;
+            }
+
+            switch (normalized)
+            {
+                case "enemy_killed":
+                    session.EnemiesKilled += 1;
+                    break;
+
+                case "gold_collected":
+                    session.GoldEarned += safeValue;
+                    break;
+
+                case "block_hit":
+                    session.BlockHits += 1;
+                    session.BlockedDamage += safeValue;
+                    break;
+
+                case "perfect_parry":
+                    session.PerfectParries += 1;
+                    break;
+
+                case "trap_hit":
+                    session.TrapHits += 1;
+                    session.TrapDamage += safeValue;
+                    break;
+
+                case "weapon_purchased":
+                {
+                    var (weaponName, rarity) = WeaponCatalog.ResolveByPrice(safeValue);
+                    session.GoldSpent += safeValue;
+                    _context.ShopPurchases.Add(new ShopPurchase
+                    {
+                        SessionId = session.SessionId,
+                        ItemType = "Weapon",
+                        ItemName = weaponName,
+                        Rarity = rarity,
+                        Price = safeValue,
+                        PurchasedAt = eventTime
+                    });
+                    break;
+                }
+
+                case "potion_purchased":
+                    session.GoldSpent += safeValue;
+                    _context.ShopPurchases.Add(new ShopPurchase
+                    {
+                        SessionId = session.SessionId,
+                        ItemType = "Potion",
+                        ItemName = "Bình Hồi Máu Huyết Ngọc",
+                        Rarity = "Tiêu Hao",
+                        Price = safeValue,
+                        PurchasedAt = eventTime
+                    });
+                    break;
+            }
+
+            return null;
         }
     }
 }

@@ -85,6 +85,7 @@ public class StageManager : MonoBehaviour
     public Color bossAuraColor = new Color(1f, 0.18f, 0.12f);
 
     public int CurrentStage { get; private set; } = 1;
+    public int MapLevel => Mathf.Clamp(mapIndex, 1, 3);
 
     private StagePhase phase = StagePhase.Intro;
     private Transform playerTransform;
@@ -269,7 +270,7 @@ public class StageManager : MonoBehaviour
 
         if (TelemetryManager.Instance != null)
         {
-            TelemetryManager.Instance.TrackLevelStart(1);
+            TelemetryManager.Instance.TrackLevelStart(MapLevel);
         }
 
         SetHudStage(stage1Title, "Chuẩn bị chiến đấu...");
@@ -445,10 +446,6 @@ public class StageManager : MonoBehaviour
     private void CompleteStage1()
     {
         phase = StagePhase.TravelToStage2;
-        if (TelemetryManager.Instance != null)
-        {
-            TelemetryManager.Instance.TrackLevelComplete(1);
-        }
 
         ShowBanner(stage1ClearBanner, new Color(0.25f, 0.95f, 0.55f), 3.6f);
         GameAudioManager.PlayStageClear();
@@ -464,11 +461,6 @@ public class StageManager : MonoBehaviour
         CurrentStage = 2;
         HideWaypointBeacon();
         ApplySkybox(skyboxStage2Sunset);
-
-        if (TelemetryManager.Instance != null)
-        {
-            TelemetryManager.Instance.TrackLevelStart(2);
-        }
 
         ShowBanner(stage2Banner, new Color(1f, 0.58f, 0.2f), 3.2f);
 
@@ -512,10 +504,6 @@ public class StageManager : MonoBehaviour
     private void CompleteStage2()
     {
         phase = StagePhase.TravelToStage3;
-        if (TelemetryManager.Instance != null)
-        {
-            TelemetryManager.Instance.TrackLevelComplete(2);
-        }
 
         ShowBanner(stage2ClearBanner, new Color(0.25f, 0.95f, 0.55f), 3.6f);
         GameAudioManager.PlayStageClear();
@@ -532,11 +520,6 @@ public class StageManager : MonoBehaviour
         bossEnraged = false;
         HideWaypointBeacon();
         ApplySkybox(skyboxStage3Lunar);
-
-        if (TelemetryManager.Instance != null)
-        {
-            TelemetryManager.Instance.TrackLevelStart(3);
-        }
 
         ShowBanner(bossIntroBanner, new Color(1f, 0.28f, 0.28f), 3.5f);
         GameAudioManager.PlayBgm(GameAudioManager.BgmTrack.Boss, 1.2f);
@@ -634,7 +617,7 @@ public class StageManager : MonoBehaviour
 
         if (TelemetryManager.Instance != null)
         {
-            TelemetryManager.Instance.TrackLevelComplete(3);
+            TelemetryManager.Instance.TrackLevelComplete(MapLevel);
             TelemetryManager.Instance.TrackGameEnded("Win");
         }
 

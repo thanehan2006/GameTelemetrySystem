@@ -3,194 +3,100 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>VANGUARD // Game Telemetry & Balancing Dashboard</title>
+    <title>VANGUARD // Telemetry Dashboard</title>
 
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700;800&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
-
+    <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
-
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 
     <style>
         :root {
-            --bg-obsidian: #080b11;
-            --bg-panel: rgba(15, 21, 33, 0.88);
-            --bg-panel-solid: #101726;
-            --bg-card-hover: rgba(23, 32, 50, 0.95);
-            --gold-primary: #e8b84b;
+            --bg-obsidian: #080b12;
+            --bg-card: rgba(15, 22, 36, 0.92);
+            --gold: #e8b84b;
             --gold-bright: #ffd978;
-            --gold-dim: rgba(232, 184, 75, 0.25);
             --crimson: #ef4444;
             --emerald: #22c55e;
             --cyan: #38bdf8;
-            --violet: #a855f7;
             --amber: #f59e0b;
             --text-main: #f3f4f6;
             --text-muted: #9ca3af;
-            --border-subtle: rgba(232, 184, 75, 0.18);
             --border-card: rgba(255, 255, 255, 0.08);
+            --border-gold: rgba(232, 184, 75, 0.25);
         }
 
-        * {
-            box-sizing: border-box;
-        }
+        * { box-sizing: border-box; }
 
         body {
             background-color: var(--bg-obsidian);
             background-image:
-                radial-gradient(circle at 12% 8%, rgba(232, 184, 75, 0.10), transparent 32%),
-                radial-gradient(circle at 88% 15%, rgba(239, 68, 68, 0.08), transparent 32%),
-                radial-gradient(circle at 50% 90%, rgba(34, 197, 94, 0.06), transparent 40%);
+                radial-gradient(circle at 12% 6%, rgba(232, 184, 75, 0.07), transparent 34%),
+                radial-gradient(circle at 88% 10%, rgba(56, 189, 248, 0.06), transparent 30%);
             color: var(--text-main);
             font-family: 'Inter', system-ui, -apple-system, sans-serif;
             min-height: 100vh;
-            overflow-x: hidden;
         }
 
-        .font-fantasy {
-            font-family: 'Cinzel', serif;
-            letter-spacing: 0.04em;
-        }
-
-        .font-mono {
-            font-family: 'JetBrains Mono', monospace;
-        }
-
-        #emberCanvas {
-            position: fixed;
-            inset: 0;
-            width: 100vw;
-            height: 100vh;
-            z-index: 0;
-            pointer-events: none;
-            opacity: 0.45;
-        }
+        .font-fantasy { font-family: 'Cinzel', serif; letter-spacing: 0.04em; }
+        .font-mono { font-family: 'JetBrains Mono', monospace; }
 
         .app-shell {
-            position: relative;
-            z-index: 1;
-            max-width: 1580px;
+            max-width: 1460px;
             margin: 0 auto;
-            padding: 1.25rem 1.5rem 3rem;
+            padding: 1.25rem 1.25rem 2.5rem;
         }
 
         .top-header {
-            background: linear-gradient(180deg, rgba(20, 27, 43, 0.95) 0%, rgba(12, 17, 28, 0.95) 100%);
-            border: 1px solid var(--border-subtle);
-            border-top: 2px solid var(--gold-primary);
+            background: linear-gradient(180deg, rgba(20, 28, 45, 0.96), rgba(12, 17, 29, 0.96));
+            border: 1px solid var(--border-gold);
+            border-top: 2px solid var(--gold);
             border-radius: 14px;
-            padding: 1rem 1.35rem;
-            box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55);
-            backdrop-filter: blur(14px);
+            padding: 0.9rem 1.25rem;
+            box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45);
         }
 
         .brand-emblem {
-            width: 46px;
-            height: 46px;
-            border-radius: 11px;
-            background: linear-gradient(135deg, rgba(232, 184, 75, 0.22), rgba(185, 28, 28, 0.25));
-            border: 1px solid var(--gold-primary);
+            width: 42px;
+            height: 42px;
+            border-radius: 10px;
+            background: linear-gradient(135deg, rgba(232, 184, 75, 0.22), rgba(239, 68, 68, 0.18));
+            border: 1px solid var(--gold);
             display: flex;
             align-items: center;
             justify-content: center;
             color: var(--gold-bright);
-            font-size: 1.4rem;
-            box-shadow: 0 0 18px rgba(232, 184, 75, 0.22);
-        }
-
-        .section-nav-bar {
-            background: rgba(14, 19, 31, 0.92);
-            border: 1px solid var(--border-card);
-            border-radius: 12px;
-            padding: 0.45rem;
-            display: flex;
-            flex-wrap: wrap;
-            gap: 0.4rem;
-            align-items: center;
-            justify-content: space-between;
-        }
-
-        .filter-pill {
-            background: transparent;
-            color: var(--text-muted);
-            border: 1px solid transparent;
-            border-radius: 8px;
-            padding: 0.48rem 0.95rem;
-            font-size: 0.84rem;
-            font-weight: 600;
-            display: inline-flex;
-            align-items: center;
-            gap: 0.45rem;
-            transition: all 0.2s ease;
-            cursor: pointer;
-        }
-
-        .filter-pill:hover {
-            color: #fff;
-            background: rgba(255, 255, 255, 0.05);
-        }
-
-        .filter-pill.active {
-            background: linear-gradient(135deg, rgba(232, 184, 75, 0.22), rgba(232, 184, 75, 0.08));
-            color: var(--gold-bright);
-            border-color: rgba(232, 184, 75, 0.45);
-            box-shadow: 0 2px 12px rgba(232, 184, 75, 0.15);
+            font-size: 1.25rem;
         }
 
         .hud-card {
-            background: var(--bg-panel);
+            background: var(--bg-card);
             border: 1px solid var(--border-card);
-            border-radius: 13px;
-            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
-            transition: border-color 0.2s ease, transform 0.2s ease;
+            border-radius: 12px;
+            box-shadow: 0 8px 22px rgba(0, 0, 0, 0.32);
         }
 
-        .hud-card:hover {
-            border-color: rgba(232, 184, 75, 0.24);
+        .kpi-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 0.85rem;
         }
 
-        .hud-card-gold {
-            border-color: var(--border-subtle);
-            border-top: 2px solid var(--gold-primary);
+        @media (min-width: 768px) {
+            .kpi-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
         }
 
-        .section-banner {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            flex-wrap: wrap;
-            gap: 0.75rem;
-            padding: 0.75rem 1.1rem;
-            margin-bottom: 1rem;
-            background: linear-gradient(90deg, rgba(232, 184, 75, 0.12) 0%, rgba(15, 21, 33, 0.4) 100%);
-            border-left: 4px solid var(--gold-primary);
-            border-radius: 0 10px 10px 0;
-        }
-
-        .section-banner h5 {
-            margin: 0;
-            font-size: 1.02rem;
-            font-weight: 700;
-            color: var(--gold-bright);
-            letter-spacing: 0.03em;
-            display: flex;
-            align-items: center;
-            gap: 0.55rem;
-        }
-
-        .section-banner .section-sub {
-            font-size: 0.8rem;
-            color: var(--text-muted);
+        @media (min-width: 1200px) {
+            .kpi-grid { grid-template-columns: repeat(5, minmax(0, 1fr)); }
         }
 
         .kpi-tile {
-            background: linear-gradient(180deg, rgba(19, 27, 43, 0.92) 0%, rgba(13, 18, 30, 0.92) 100%);
+            background: linear-gradient(180deg, rgba(19, 27, 43, 0.94), rgba(13, 18, 30, 0.94));
             border: 1px solid var(--border-card);
             border-radius: 12px;
-            padding: 1rem 1.1rem;
+            padding: 0.95rem 1.05rem;
             height: 100%;
             position: relative;
             overflow: hidden;
@@ -199,16 +105,13 @@
         .kpi-tile::after {
             content: '';
             position: absolute;
-            top: 0;
-            left: 0;
-            right: 0;
+            top: 0; left: 0; right: 0;
             height: 2px;
-            background: var(--kpi-accent, var(--gold-primary));
-            opacity: 0.85;
+            background: var(--kpi-accent, var(--gold));
         }
 
         .kpi-label {
-            font-size: 0.73rem;
+            font-size: 0.71rem;
             text-transform: uppercase;
             letter-spacing: 0.06em;
             color: var(--text-muted);
@@ -216,42 +119,63 @@
         }
 
         .kpi-value {
-            font-size: 1.7rem;
+            font-size: 1.55rem;
             font-weight: 700;
             line-height: 1.2;
             margin: 0.25rem 0;
             font-family: 'JetBrains Mono', monospace;
         }
 
-        .kpi-sub {
-            font-size: 0.76rem;
-            color: var(--text-muted);
-        }
+        .kpi-sub { font-size: 0.76rem; color: var(--text-muted); }
 
         .kpi-icon {
-            width: 38px;
-            height: 38px;
-            border-radius: 9px;
+            width: 32px;
+            height: 32px;
+            border-radius: 8px;
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 1.15rem;
+            font-size: 0.95rem;
         }
 
-        .stage-card {
-            background: rgba(17, 24, 39, 0.78);
-            border: 1px solid rgba(255, 255, 255, 0.08);
-            border-radius: 11px;
-            padding: 1rem;
+        .stage-mini-pill {
+            background: rgba(11, 16, 27, 0.85);
+            border: 1px solid var(--border-card);
+            border-radius: 9px;
+            padding: 0.65rem 0.78rem;
             height: 100%;
         }
 
-        .stage-badge {
-            font-size: 0.72rem;
-            padding: 0.2rem 0.55rem;
-            border-radius: 6px;
-            font-weight: 700;
-            font-family: 'JetBrains Mono', monospace;
+        .stage-mini-pill.hardest {
+            border-color: rgba(239, 68, 68, 0.45);
+            background: rgba(34, 15, 22, 0.65);
+        }
+
+        .combat-row {
+            background: rgba(11, 16, 27, 0.78);
+            border: 1px solid rgba(255, 255, 255, 0.06);
+            border-radius: 10px;
+            padding: 0.85rem 1rem;
+        }
+
+        .filter-chip {
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            color: var(--text-muted);
+            border-radius: 7px;
+            padding: 0.34rem 0.72rem;
+            font-size: 0.78rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+
+        .filter-chip:hover { color: #fff; border-color: rgba(232, 184, 75, 0.45); }
+
+        .filter-chip.active {
+            background: rgba(232, 184, 75, 0.18);
+            border-color: var(--gold);
+            color: var(--gold-bright);
         }
 
         .hud-btn {
@@ -259,31 +183,26 @@
             border: 1px solid rgba(255, 255, 255, 0.14);
             color: var(--text-main);
             border-radius: 8px;
-            padding: 0.45rem 0.9rem;
-            font-size: 0.82rem;
+            padding: 0.4rem 0.82rem;
+            font-size: 0.81rem;
             font-weight: 600;
             display: inline-flex;
             align-items: center;
             gap: 0.4rem;
-            transition: all 0.2s;
+            transition: all 0.18s;
             cursor: pointer;
         }
 
         .hud-btn:hover {
             background: rgba(255, 255, 255, 0.1);
-            border-color: var(--gold-primary);
+            border-color: var(--gold);
             color: #fff;
         }
 
         .hud-btn-gold {
-            background: linear-gradient(135deg, rgba(232, 184, 75, 0.24), rgba(202, 138, 4, 0.15));
+            background: linear-gradient(135deg, rgba(232, 184, 75, 0.24), rgba(202, 138, 4, 0.14));
             border-color: rgba(232, 184, 75, 0.55);
             color: var(--gold-bright);
-        }
-
-        .hud-btn-gold:hover {
-            background: linear-gradient(135deg, rgba(232, 184, 75, 0.35), rgba(202, 138, 4, 0.25));
-            color: #fff;
         }
 
         .hud-btn-emerald {
@@ -292,55 +211,47 @@
             color: #86efac;
         }
 
-        .hud-btn-emerald:hover {
-            background: linear-gradient(135deg, rgba(34, 197, 94, 0.34), rgba(21, 128, 61, 0.26));
-            color: #fff;
-        }
-
         .hud-input {
-            background: rgba(9, 13, 22, 0.85);
+            background: rgba(9, 13, 22, 0.9);
             border: 1px solid rgba(255, 255, 255, 0.14);
             color: #fff;
             border-radius: 8px;
-            padding: 0.42rem 0.75rem;
-            font-size: 0.82rem;
+            padding: 0.36rem 0.7rem;
+            font-size: 0.8rem;
         }
 
         .hud-input:focus {
             outline: none;
-            border-color: var(--gold-primary);
-            box-shadow: 0 0 0 2px rgba(232, 184, 75, 0.18);
+            border-color: var(--gold);
+            box-shadow: 0 0 0 2px rgba(232, 184, 75, 0.16);
         }
 
         .hud-table {
             width: 100%;
             border-collapse: separate;
             border-spacing: 0;
-            font-size: 0.84rem;
+            font-size: 0.83rem;
         }
 
         .hud-table thead th {
-            background: rgba(11, 15, 25, 0.9);
+            background: rgba(10, 14, 24, 0.95);
             color: var(--text-muted);
-            font-size: 0.73rem;
+            font-size: 0.71rem;
             font-weight: 700;
             text-transform: uppercase;
             letter-spacing: 0.05em;
-            padding: 0.7rem 0.85rem;
+            padding: 0.65rem 0.85rem;
             border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+            position: sticky;
+            top: 0;
+            z-index: 1;
         }
 
-        .hud-table tbody tr {
-            transition: background 0.15s;
-            cursor: pointer;
-        }
-
-        .hud-table tbody tr:hover {
-            background: rgba(232, 184, 75, 0.07);
-        }
+        .hud-table tbody tr { transition: background 0.15s; cursor: pointer; }
+        .hud-table tbody tr:hover { background: rgba(232, 184, 75, 0.07); }
 
         .hud-table tbody td {
-            padding: 0.7rem 0.85rem;
+            padding: 0.66rem 0.85rem;
             border-bottom: 1px solid rgba(255, 255, 255, 0.05);
             vertical-align: middle;
         }
@@ -349,89 +260,38 @@
             display: inline-flex;
             align-items: center;
             gap: 0.35rem;
-            padding: 0.25rem 0.65rem;
+            padding: 0.22rem 0.6rem;
             border-radius: 6px;
-            font-size: 0.74rem;
+            font-size: 0.73rem;
             font-weight: 700;
             font-family: 'JetBrains Mono', monospace;
         }
 
-        .badge-win {
-            background: rgba(34, 197, 94, 0.16);
-            color: #4ade80;
-            border: 1px solid rgba(34, 197, 94, 0.4);
+        .badge-win  { background: rgba(34, 197, 94, 0.16); color: #4ade80; border: 1px solid rgba(34, 197, 94, 0.4); }
+        .badge-lose { background: rgba(239, 68, 68, 0.16); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.4); }
+        .badge-quit { background: rgba(245, 158, 11, 0.16); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.4); }
+        .badge-play { background: rgba(56, 189, 248, 0.16); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.4); }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            display: inline-block;
+            background: var(--emerald);
+            box-shadow: 0 0 8px var(--emerald);
         }
-
-        .badge-lose {
-            background: rgba(239, 68, 68, 0.16);
-            color: #f87171;
-            border: 1px solid rgba(239, 68, 68, 0.4);
-        }
-
-        .badge-quit {
-            background: rgba(245, 158, 11, 0.16);
-            color: #fbbf24;
-            border: 1px solid rgba(245, 158, 11, 0.4);
-        }
-
-        .badge-play {
-            background: rgba(56, 189, 248, 0.16);
-            color: #38bdf8;
-            border: 1px solid rgba(56, 189, 248, 0.4);
-        }
-
-        .rarity-rare { color: #38bdf8; border-color: rgba(56, 189, 248, 0.4); background: rgba(56, 189, 248, 0.12); }
-        .rarity-epic { color: #c084fc; border-color: rgba(192, 132, 252, 0.4); background: rgba(192, 132, 252, 0.12); }
-        .rarity-legend { color: #fb923c; border-color: rgba(251, 146, 60, 0.4); background: rgba(251, 146, 60, 0.12); }
-        .rarity-mythic { color: #facc15; border-color: rgba(250, 204, 21, 0.45); background: rgba(250, 204, 21, 0.14); }
-
-        .insight-item {
-            background: rgba(13, 18, 30, 0.85);
-            border: 1px solid rgba(255, 255, 255, 0.07);
-            border-left: 3px solid var(--gold-primary);
-            border-radius: 9px;
-            padding: 0.75rem 0.9rem;
-            margin-bottom: 0.65rem;
-        }
-
-        .insight-item.critical { border-left-color: var(--crimson); }
-        .insight-item.good { border-left-color: var(--emerald); }
-        .insight-item.info { border-left-color: var(--cyan); }
-
-        .terminal-window {
-            background: #06090f;
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            border-radius: 9px;
-            padding: 0.75rem;
-            height: 230px;
-            overflow-y: auto;
-            font-family: 'JetBrains Mono', monospace;
-            font-size: 0.76rem;
-        }
-
-        .terminal-line {
-            margin-bottom: 0.3rem;
-            line-height: 1.45;
-        }
-
-        .term-ts { color: #64748b; }
-        .term-succ { color: #4ade80; }
-        .term-ev { color: #fcd34d; }
-        .term-err { color: #f87171; }
 
         .timeline-list {
             position: relative;
             padding-left: 1.4rem;
-            max-height: 390px;
+            max-height: 370px;
             overflow-y: auto;
         }
 
         .timeline-list::before {
             content: '';
             position: absolute;
-            top: 6px;
-            bottom: 6px;
-            left: 7px;
+            top: 6px; bottom: 6px; left: 7px;
             width: 2px;
             background: rgba(232, 184, 75, 0.28);
         }
@@ -449,37 +309,34 @@
         .timeline-node::before {
             content: '';
             position: absolute;
-            left: -1.18rem;
-            top: 0.75rem;
-            width: 10px;
-            height: 10px;
+            left: -1.18rem; top: 0.75rem;
+            width: 10px; height: 10px;
             border-radius: 50%;
-            background: var(--gold-primary);
+            background: var(--gold);
             border: 2px solid #0b0f18;
         }
 
-        .status-dot {
-            width: 9px;
-            height: 9px;
-            border-radius: 50%;
-            display: inline-block;
-            background: var(--emerald);
-            box-shadow: 0 0 8px var(--emerald);
+        .terminal-window {
+            background: #06090f;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 9px;
+            padding: 0.75rem;
+            height: 220px;
+            overflow-y: auto;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.76rem;
         }
 
-        .dashboard-section {
-            margin-bottom: 1.75rem;
-        }
-
-        .dashboard-section.d-none-filtered {
-            display: none !important;
-        }
+        .terminal-line { margin-bottom: 0.28rem; line-height: 1.45; }
+        .term-ts { color: #64748b; }
+        .term-succ { color: #4ade80; }
+        .term-ev { color: #fcd34d; }
+        .term-err { color: #f87171; }
     </style>
 </head>
 <body>
-    <canvas id="emberCanvas"></canvas>
-
     <div class="app-shell">
+        <!-- Header -->
         <header class="top-header mb-3">
             <div class="d-flex flex-wrap justify-content-between align-items-center gap-3">
                 <div class="d-flex align-items-center gap-3">
@@ -487,14 +344,9 @@
                         <i class="bi bi-shield-shaded"></i>
                     </div>
                     <div>
-                        <div class="d-flex align-items-center gap-2">
-                            <h1 class="h5 mb-0 fw-bold font-fantasy text-white">VANGUARD // TELEMETRY COMMAND</h1>
-                            <span class="badge bg-warning bg-opacity-10 text-warning border border-warning border-opacity-25 font-mono" style="font-size: 0.7rem;">
-                                ACTION ROGUELITE
-                            </span>
-                        </div>
-                        <div class="small text-muted mt-0.5">
-                            Giám sát Hành vi Người chơi, Tiến độ 3 Màn Rừng Orc, Kinh tế Vàng &amp; Cửa hàng Vũ khí, Kỹ năng Block/Parry
+                        <h1 class="h5 mb-0 fw-bold font-fantasy text-white">VANGUARD // TELEMETRY</h1>
+                        <div class="small text-muted">
+                            1 Map = 1 Level (Lv 1–3) • Chiến Đấu &amp; Cửa Hàng Lò Rèn
                         </div>
                     </div>
                 </div>
@@ -507,9 +359,9 @@
                         <span id="lastSyncTime" class="text-muted">--:--:--</span>
                     </div>
 
-                    <button class="hud-btn hud-btn-gold" onclick="focusSimulator()">
+                    <button class="hud-btn hud-btn-gold" onclick="openSimulatorModal()">
                         <i class="bi bi-robot"></i>
-                        <span>Giả Lập Trận Đấu</span>
+                        <span>Giả lập</span>
                     </button>
 
                     <button class="hud-btn" onclick="exportTelemetryCsv()">
@@ -525,466 +377,249 @@
             </div>
         </header>
 
-        <nav class="section-nav-bar mb-3">
-            <div class="d-flex flex-wrap gap-1">
-                <button class="filter-pill active" data-section="all" onclick="setSectionFilter('all')">
-                    <i class="bi bi-grid-1x2-fill"></i>
-                    <span>Tất Cả Trên 1 Trang</span>
-                </button>
-                <button class="filter-pill" data-section="progression" onclick="setSectionFilter('progression')">
-                    <i class="bi bi-signpost-split-fill"></i>
-                    <span>1. Tiến Độ 3 Màn &amp; Cân Bằng</span>
-                </button>
-                <button class="filter-pill" data-section="economy" onclick="setSectionFilter('economy')">
-                    <i class="bi bi-coin"></i>
-                    <span>2. Kinh Tế Vàng &amp; Cửa Hàng</span>
-                </button>
-                <button class="filter-pill" data-section="combat" onclick="setSectionFilter('combat')">
-                    <i class="bi bi-shield-fill-check"></i>
-                    <span>3. Chiến Đấu &amp; Block/Parry</span>
-                </button>
-                <button class="filter-pill" data-section="sessions" onclick="setSectionFilter('sessions')">
-                    <i class="bi bi-clock-history"></i>
-                    <span>4. Nhật Ký Phiên &amp; Giả Lập Bot</span>
-                </button>
-            </div>
-            <div class="small text-muted font-mono pe-2 d-none d-xl-block">
-                Chế độ: <span id="currentViewModeLabel" class="text-warning">1 Trang Tổng Hợp (4 Khối)</span>
-            </div>
-        </nav>
-
-        <div class="row g-3 mb-4">
-            <div class="col-6 col-md-4 col-xl-2">
-                <div class="kpi-tile" style="--kpi-accent: #38bdf8;">
-                    <div class="d-flex justify-content-between align-items-start">
-                        <span class="kpi-label">Người Chơi</span>
-                        <div class="kpi-icon" style="background: rgba(56,189,248,0.12); color:#38bdf8;">
-                            <i class="bi bi-people-fill"></i>
-                        </div>
+        <!-- Compact Filter Bar (Time + Level) -->
+        <div class="hud-card p-2.5 px-3 mb-3">
+            <div class="d-flex flex-wrap align-items-center justify-content-between gap-2">
+                <div class="d-flex flex-wrap align-items-center gap-2">
+                    <span class="small text-muted font-mono"><i class="bi bi-funnel-fill text-warning me-1"></i>Lọc:</span>
+                    <div class="d-flex flex-wrap gap-1" id="timePresetGroup">
+                        <button type="button" class="filter-chip active" data-preset="all" onclick="setTimePreset('all')">Tất cả</button>
+                        <button type="button" class="filter-chip" data-preset="today" onclick="setTimePreset('today')">Hôm nay</button>
+                        <button type="button" class="filter-chip" data-preset="7d" onclick="setTimePreset('7d')">7 ngày</button>
+                        <button type="button" class="filter-chip" data-preset="30d" onclick="setTimePreset('30d')">30 ngày</button>
                     </div>
-                    <div class="kpi-value text-white" id="kpiPlayers">0</div>
-                    <div class="kpi-sub">Tài khoản đã đăng ký</div>
+                    <div class="d-flex align-items-center gap-1">
+                        <input type="date" id="filterFromDate" class="hud-input font-mono" aria-label="Từ ngày" onchange="onCustomDateChanged()">
+                        <span class="text-muted small">–</span>
+                        <input type="date" id="filterToDate" class="hud-input font-mono" aria-label="Đến ngày" onchange="onCustomDateChanged()">
+                    </div>
                 </div>
-            </div>
 
-            <div class="col-6 col-md-4 col-xl-2">
-                <div class="kpi-tile" style="--kpi-accent: #a855f7;">
-                    <div class="d-flex justify-content-between align-items-start">
-                        <span class="kpi-label">Tổng Phiên Chơi</span>
-                        <div class="kpi-icon" style="background: rgba(168,85,247,0.12); color:#c084fc;">
-                            <i class="bi bi-controller"></i>
-                        </div>
-                    </div>
-                    <div class="kpi-value text-white" id="kpiSessions">0</div>
-                    <div class="kpi-sub" id="kpiEventsSub">0 sự kiện đã ghi</div>
-                </div>
-            </div>
-
-            <div class="col-6 col-md-4 col-xl-2">
-                <div class="kpi-tile" style="--kpi-accent: #22c55e;">
-                    <div class="d-flex justify-content-between align-items-start">
-                        <span class="kpi-label">Tỷ Lệ Chiến Thắng</span>
-                        <div class="kpi-icon" style="background: rgba(34,197,94,0.12); color:#4ade80;">
-                            <i class="bi bi-trophy-fill"></i>
-                        </div>
-                    </div>
-                    <div class="kpi-value text-success" id="kpiWinRate">0%</div>
-                    <div class="kpi-sub" id="kpiWinLossSub">0 Thắng • 0 Thua</div>
-                </div>
-            </div>
-
-            <div class="col-6 col-md-4 col-xl-2">
-                <div class="kpi-tile" style="--kpi-accent: #f59e0b;">
-                    <div class="d-flex justify-content-between align-items-start">
-                        <span class="kpi-label">Thời Lượng TB</span>
-                        <div class="kpi-icon" style="background: rgba(245,158,11,0.12); color:#fbbf24;">
-                            <i class="bi bi-hourglass-split"></i>
-                        </div>
-                    </div>
-                    <div class="kpi-value text-white" id="kpiAvgDuration">0m</div>
-                    <div class="kpi-sub">Mỗi phiên hoàn tất</div>
-                </div>
-            </div>
-
-            <div class="col-6 col-md-4 col-xl-2">
-                <div class="kpi-tile" style="--kpi-accent: #e8b84b;">
-                    <div class="d-flex justify-content-between align-items-start">
-                        <span class="kpi-label">Vàng Thu Thập</span>
-                        <div class="kpi-icon" style="background: rgba(232,184,75,0.16); color:#ffd978;">
-                            <i class="bi bi-coin"></i>
-                        </div>
-                    </div>
-                    <div class="kpi-value" style="color: var(--gold-bright);" id="kpiGoldEarned">0 G</div>
-                    <div class="kpi-sub" id="kpiGoldSpentSub">Đã tiêu Shop: 0 G</div>
-                </div>
-            </div>
-
-            <div class="col-6 col-md-4 col-xl-2">
-                <div class="kpi-tile" style="--kpi-accent: #ef4444;">
-                    <div class="d-flex justify-content-between align-items-start">
-                        <span class="kpi-label">Orc &amp; Boss Hạ Gục</span>
-                        <div class="kpi-icon" style="background: rgba(239,68,68,0.14); color:#f87171;">
-                            <i class="bi bi-fire"></i>
-                        </div>
-                    </div>
-                    <div class="kpi-value text-danger" id="kpiEnemiesKilled">0</div>
-                    <div class="kpi-sub" id="kpiBossKillsSub">0 lần hạ Đại Tướng Boss</div>
+                <div class="d-flex flex-wrap align-items-center gap-2">
+                    <select id="filterLevelSelect" class="hud-input font-mono" aria-label="Lọc theo Level" onchange="loadAllDashboardData(false)">
+                        <option value="">Tất cả Level (3 Map)</option>
+                        <option value="1">Level 1: Rừng Orc &amp; Mỏ Vàng</option>
+                        <option value="2">Level 2: Cao Nguyên Băng Tuyết</option>
+                        <option value="3">Level 3: Pháo Đài Dung Nham</option>
+                    </select>
+                    <button type="button" class="hud-btn" onclick="resetFilters()">
+                        <i class="bi bi-x-circle"></i>
+                        <span>Đặt lại</span>
+                    </button>
                 </div>
             </div>
         </div>
 
-        <section class="dashboard-section" id="section-progression">
-            <div class="section-banner">
-                <h5>
-                    <i class="bi bi-signpost-split-fill"></i>
-                    <span>KHỐI 1 // TIẾN ĐỘ 3 MÀN RỪNG ORC &amp; ĐÁNH GIÁ CÂN BẰNG ĐỘ KHÓ</span>
-                </h5>
-                <span class="section-sub font-mono">
-                    Dữ liệu từ sự kiện: <code>level_start</code> • <code>level_complete</code> • <code>player_dead</code> • <code>checkpoint_reached</code>
-                </span>
+        <!-- Band 1: 5 Core KPI Cards -->
+        <div class="kpi-grid mb-3">
+            <div class="kpi-tile" style="--kpi-accent: #38bdf8;">
+                <div class="d-flex justify-content-between align-items-start">
+                    <span class="kpi-label">Phiên Chơi</span>
+                    <div class="kpi-icon" style="background: rgba(56,189,248,0.12); color:#38bdf8;">
+                        <i class="bi bi-controller"></i>
+                    </div>
+                </div>
+                <div class="kpi-value text-white" id="kpiSessions">0</div>
+                <div class="kpi-sub" id="kpiSessionsSub">0 tài khoản</div>
             </div>
 
-            <div class="row g-3">
-                <div class="col-12 col-lg-8">
-                    <div class="hud-card p-3 p-md-4 h-100 d-flex flex-column justify-content-between">
-                        <div>
-                            <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
-                                <div>
-                                    <h6 class="fw-bold text-white mb-0">Phễu Vượt Ải 3 Khu Vực (Stage Progression Funnel)</h6>
-                                    <div class="small text-muted">So sánh lượt Bắt đầu, Hoàn thành và Tử trận tại từng khu vực trong Scene <code>Lv1</code></div>
-                                </div>
-                                <span class="badge bg-dark border border-secondary border-opacity-25 font-mono text-warning">
-                                    Terrain 3 Zones
-                                </span>
-                            </div>
+            <div class="kpi-tile" style="--kpi-accent: #a855f7;">
+                <div class="d-flex justify-content-between align-items-start">
+                    <span class="kpi-label">Thời Lượng TB</span>
+                    <div class="kpi-icon" style="background: rgba(168,85,247,0.12); color:#c084fc;">
+                        <i class="bi bi-hourglass-split"></i>
+                    </div>
+                </div>
+                <div class="kpi-value text-white" id="kpiAvgDuration">0 phút</div>
+                <div class="kpi-sub">Mỗi phiên hoàn tất</div>
+            </div>
 
-                            <div style="height: 255px; position: relative;">
-                                <canvas id="levelFunnelChart"></canvas>
+            <div class="kpi-tile" style="--kpi-accent: #22c55e;">
+                <div class="d-flex justify-content-between align-items-start">
+                    <span class="kpi-label">Tỷ Lệ Thắng</span>
+                    <div class="kpi-icon" style="background: rgba(34,197,94,0.12); color:#4ade80;">
+                        <i class="bi bi-trophy-fill"></i>
+                    </div>
+                </div>
+                <div class="kpi-value text-success" id="kpiWinRate">0%</div>
+                <div class="kpi-sub" id="kpiWinLossSub">0 Thắng • 0 Thua</div>
+            </div>
+
+            <div class="kpi-tile" style="--kpi-accent: #ef4444;">
+                <div class="d-flex justify-content-between align-items-start">
+                    <span class="kpi-label">Level Hay Thất Bại</span>
+                    <div class="kpi-icon" style="background: rgba(239,68,68,0.14); color:#f87171;">
+                        <i class="bi bi-skull-fill"></i>
+                    </div>
+                </div>
+                <div class="kpi-value text-danger" id="kpiHardestLevel">--</div>
+                <div class="kpi-sub" id="kpiHardestLevelSub">Chưa có lượt tử trận</div>
+            </div>
+
+            <div class="kpi-tile" style="--kpi-accent: #e8b84b;">
+                <div class="d-flex justify-content-between align-items-start">
+                    <span class="kpi-label">Kinh Tế Vàng</span>
+                    <div class="kpi-icon" style="background: rgba(232,184,75,0.15); color:#ffd978;">
+                        <i class="bi bi-coin"></i>
+                    </div>
+                </div>
+                <div class="kpi-value" style="color: var(--gold-bright);" id="kpiSpendRatio">0% đã tiêu</div>
+                <div class="kpi-sub" id="kpiGoldSub">Tiêu 0 / 0 G</div>
+            </div>
+        </div>
+
+        <!-- Band 2: Hoàn Thành & Thất Bại Theo Level + Phiên Chơi Theo Ngày -->
+        <div class="row g-3 mb-3">
+            <div class="col-12 col-lg-7">
+                <div class="hud-card p-3 p-md-4 h-100 d-flex flex-column justify-content-between">
+                    <div>
+                        <div class="d-flex justify-content-between align-items-center mb-2">
+                            <div>
+                                <h6 class="fw-bold text-white mb-0">Tỷ Lệ Hoàn Thành &amp; Thất Bại Theo Level (1 Map = 1 Level)</h6>
+                                <div class="small text-muted">So sánh lượt Bắt đầu, Hoàn thành và Thất bại trên 3 bản đồ</div>
                             </div>
                         </div>
+                        <div style="height: 230px; position: relative;">
+                            <canvas id="levelFunnelChart"></canvas>
+                        </div>
+                    </div>
 
-                        <div class="row g-2 mt-3" id="stageBreakdownCards">
+                    <div class="row g-2 mt-3" id="stageBreakdownCards"></div>
+                </div>
+            </div>
+
+            <div class="col-12 col-lg-5">
+                <div class="hud-card p-3 p-md-4 h-100 d-flex flex-column">
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <div>
+                            <h6 class="fw-bold text-white mb-0">Phiên Chơi Theo Ngày</h6>
+                            <div class="small text-muted">Xu hướng số lượt chơi theo thời gian</div>
+                        </div>
+                        <span class="badge bg-info bg-opacity-10 text-info border border-info border-opacity-25 font-mono">TREND</span>
+                    </div>
+                    <div class="flex-grow-1" style="min-height: 290px; position: relative;">
+                        <canvas id="sessionsDateChart"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Band 3: Chiến Đấu Cốt Lõi & Cửa Hàng Lò Rèn -->
+        <div class="row g-3 mb-3">
+            <div class="col-12 col-lg-5">
+                <div class="hud-card p-3 p-md-4 h-100 d-flex flex-column justify-content-between">
+                    <div class="mb-3">
+                        <h6 class="fw-bold text-white mb-0">Chiến Đấu Cốt Lõi</h6>
+                        <div class="small text-muted">Hạ quái/Boss, phòng thủ Chuột Phải và sát thương Bẫy Gai</div>
+                    </div>
+
+                    <div class="d-flex flex-column gap-3 flex-grow-1 justify-content-center">
+                        <div class="combat-row">
+                            <div class="d-flex justify-content-between align-items-center">
+                                <span class="small fw-semibold text-white">
+                                    <i class="bi bi-fire text-warning me-1"></i>Quái &amp; Boss Hạ Gục
+                                </span>
+                                <span class="font-mono fw-bold text-warning h5 mb-0" id="combatKillsSummary">0 quái • 0 Boss</span>
+                            </div>
+                            <div class="small text-muted mt-1" id="combatBossRateSub">Tỷ lệ hạ Boss: 0% (0/0 lượt)</div>
+                        </div>
+
+                        <div class="combat-row">
+                            <div class="d-flex justify-content-between align-items-center mb-1">
+                                <span class="small fw-semibold text-white">
+                                    <i class="bi bi-shield-shaded text-info me-1"></i>Phòng Thủ (Block &amp; Parry)
+                                </span>
+                                <span class="font-mono fw-bold text-warning small" id="combatParryBadge">Parry Rate 0%</span>
+                            </div>
+                            <div class="h5 fw-bold font-mono text-white mb-1" id="combatDefenseSummary">0 Block • 0 Parry</div>
+                            <div class="progress mb-2" style="height: 6px; background: rgba(255,255,255,0.08);">
+                                <div class="progress-bar bg-warning" id="combatParryBar" role="progressbar" style="width: 0%;"></div>
+                            </div>
+                            <div class="small text-muted" id="combatBlockedDmgSub">Chặn 0 sát thương</div>
+                        </div>
+
+                        <div class="combat-row">
+                            <div class="d-flex justify-content-between align-items-center">
+                                <span class="small fw-semibold text-white">
+                                    <i class="bi bi-exclamation-triangle-fill text-danger me-1"></i>Bẫy Gai (18 HP/lần)
+                                </span>
+                                <span class="font-mono fw-bold text-danger h5 mb-0" id="combatTrapHits">0 lần dính</span>
+                            </div>
+                            <div class="small text-muted mt-1" id="combatTrapDmgSub">Mất tổng 0 HP</div>
                         </div>
                     </div>
                 </div>
+            </div>
 
-                <div class="col-12 col-lg-4">
-                    <div class="hud-card hud-card-gold p-3 p-md-4 h-100 d-flex flex-column">
-                        <div class="d-flex justify-content-between align-items-center mb-2">
-                            <h6 class="fw-bold text-white mb-0 d-flex align-items-center gap-2">
-                                <i class="bi bi-cpu-fill text-warning"></i>
-                                <span>TRợ LÝ CÂN BẰNG GAME (BALANCING AI)</span>
-                            </h6>
-                            <span class="badge bg-warning bg-opacity-10 text-warning border border-warning border-opacity-25 font-mono">
-                                LIVE RULES
+            <div class="col-12 col-lg-7">
+                <div class="hud-card p-3 p-md-4 h-100 d-flex flex-column">
+                    <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+                        <div>
+                            <h6 class="fw-bold text-white mb-0">Cửa Hàng Lò Rèn ([B] / [E])</h6>
+                            <div class="small text-muted">Lượt mua 8 vũ khí (75–720 G) theo bậc phẩm chất</div>
+                        </div>
+                        <div class="d-flex flex-wrap gap-2 font-mono" style="font-size: 0.78rem;">
+                            <span class="badge bg-dark border border-warning border-opacity-50 text-warning px-2.5 py-1.5" id="econWeaponPill">
+                                Vũ khí: 0 (0 G)
+                            </span>
+                            <span class="badge bg-dark border border-danger border-opacity-50 text-light px-2.5 py-1.5" id="econPotionPill">
+                                Bình máu 65G: 0 (0 G)
                             </span>
                         </div>
-                        <p class="small text-muted mb-3">
-                            Tự động chẩn đoán điểm nghẽn độ khó từ tỷ lệ tử trận, Bẫy gai Màn 2, sức mua Shop và tỷ lệ hạ Boss Warlord.
-                        </p>
+                    </div>
 
-                        <div id="balancingInsightsList" class="flex-grow-1">
-                        </div>
+                    <div class="flex-grow-1" style="min-height: 270px; position: relative;">
+                        <canvas id="weaponPopularityChart"></canvas>
                     </div>
                 </div>
             </div>
-        </section>
+        </div>
 
-        <section class="dashboard-section" id="section-economy">
-            <div class="section-banner">
-                <h5>
-                    <i class="bi bi-coin"></i>
-                    <span>KHỐI 2 // KINH TẾ VÀNG &amp; CỬA HÀNG VŨ KHÍ (PHÍM [B] / LỬA TRẠI [E])</span>
-                </h5>
-                <span class="section-sub font-mono">
-                    Dữ liệu từ sự kiện: <code>gold_collected</code> • <code>shop_opened</code> • <code>weapon_purchased</code> • <code>potion_purchased</code>
-                </span>
-            </div>
-
-            <div class="row g-3 mb-3">
-                <div class="col-6 col-lg-3">
-                    <div class="hud-card p-3">
-                        <div class="kpi-label">Vàng Nhặt TB / Phiên</div>
-                        <div class="h4 fw-bold font-mono mt-1 mb-0" style="color: var(--gold-bright);" id="econAvgGold">0 G</div>
-                        <div class="small text-muted mt-1">Từ túi vàng rơi khi diệt Orc</div>
-                    </div>
+        <!-- Band 4: Nhật Ký Phiên Chơi Gần Đây -->
+        <div class="hud-card p-3 p-md-4">
+            <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+                <div>
+                    <h6 class="fw-bold text-white mb-0">Nhật Ký Phiên Chơi Gần Đây</h6>
+                    <div class="small text-muted">Bấm vào một phiên để xem dòng thời gian sự kiện chi tiết</div>
                 </div>
-                <div class="col-6 col-lg-3">
-                    <div class="hud-card p-3">
-                        <div class="kpi-label">Tỷ Lệ Tiêu Vàng (Sink/Source)</div>
-                        <div class="h4 fw-bold font-mono text-info mt-1 mb-0" id="econSpendRatio">0%</div>
-                        <div class="small text-muted mt-1" id="econSpendDetail">0 G đã chi / 0 G thu thập</div>
-                    </div>
-                </div>
-                <div class="col-6 col-lg-3">
-                    <div class="hud-card p-3">
-                        <div class="kpi-label">Lượt Mở Shop &amp; Mua Đồ</div>
-                        <div class="h4 fw-bold font-mono text-white mt-1 mb-0" id="econShopOpens">0 lần</div>
-                        <div class="small text-muted mt-1" id="econShopConversion">Tỷ lệ giao dịch: 0%</div>
-                    </div>
-                </div>
-                <div class="col-6 col-lg-3">
-                    <div class="hud-card p-3">
-                        <div class="kpi-label">Vũ Khí vs Bình Máu (50 G)</div>
-                        <div class="h4 fw-bold font-mono text-success mt-1 mb-0" id="econItemsBought">0 VK • 0 Bình</div>
-                        <div class="small text-muted mt-1" id="econItemsGoldDetail">Vũ khí: 0 G • Bình máu: 0 G</div>
-                    </div>
+                <div class="d-flex flex-wrap align-items-center gap-2">
+                    <input type="text" id="sessionSearchInput" class="hud-input font-mono" placeholder="Tìm tên / #ID..." oninput="filterSessionsTable()">
+                    <select id="sessionStatusFilter" class="hud-input font-mono" onchange="filterSessionsTable()">
+                        <option value="all">Tất cả kết quả</option>
+                        <option value="win">Thắng (Win)</option>
+                        <option value="lose">Thua (Lose)</option>
+                        <option value="other">Khác (Đang chơi / Thoát)</option>
+                    </select>
                 </div>
             </div>
 
-            <div class="row g-3">
-                <div class="col-12 col-lg-5">
-                    <div class="hud-card p-3 p-md-4 h-100">
-                        <h6 class="fw-bold text-white mb-1">Dòng Chảy Vàng (Gold Source vs Gold Sink)</h6>
-                        <p class="small text-muted mb-3">So sánh lượng Vàng rơi ra từ Orc với Vàng chi mua Vũ khí, Bình Hồi Máu và Vàng còn dư</p>
-                        <div style="height: 260px; position: relative;">
-                            <canvas id="goldFlowChart"></canvas>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="col-12 col-lg-7">
-                    <div class="hud-card p-3 p-md-4 h-100">
-                        <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
-                            <div>
-                                <h6 class="fw-bold text-white mb-0">Thống Kê Mua Sắm 8 Vũ Khí Trong Shop (60 G → 550 G)</h6>
-                                <div class="small text-muted">Ánh xạ trực tiếp theo giá vũ khí trong <code>WeaponUpgradeConfig.asset</code></div>
-                            </div>
-                            <span class="badge bg-warning bg-opacity-10 text-warning border border-warning border-opacity-25 font-mono">
-                                4 Bậc Phẩm Chất
-                            </span>
-                        </div>
-
-                        <div class="row g-3 align-items-center">
-                            <div class="col-12 col-md-6">
-                                <div style="height: 235px; position: relative;">
-                                    <canvas id="weaponPopularityChart"></canvas>
-                                </div>
-                            </div>
-                            <div class="col-12 col-md-6">
-                                <div class="table-responsive" style="max-height: 245px;">
-                                    <table class="hud-table">
-                                        <thead>
-                                            <tr>
-                                                <th>Vũ Khí</th>
-                                                <th>Bậc</th>
-                                                <th class="text-end">Giá</th>
-                                                <th class="text-end">Đã Mua</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody id="weaponBreakdownTableBody">
-                                        </tbody>
-                                    </table>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
+            <div class="table-responsive" style="max-height: 360px;">
+                <table class="hud-table">
+                    <thead>
+                        <tr>
+                            <th>#ID</th>
+                            <th>Người Chơi</th>
+                            <th>Level</th>
+                            <th>Bắt Đầu</th>
+                            <th>Thời Lượng</th>
+                            <th>Kết Quả</th>
+                            <th class="text-end">Sự Kiện</th>
+                        </tr>
+                    </thead>
+                    <tbody id="recentSessionsBody">
+                        <tr>
+                            <td colspan="7" class="text-center text-muted py-4 font-mono">Đang tải dữ liệu phiên chơi...</td>
+                        </tr>
+                    </tbody>
+                </table>
             </div>
-        </section>
-
-        <section class="dashboard-section" id="section-combat">
-            <div class="section-banner">
-                <h5>
-                    <i class="bi bi-shield-fill-check"></i>
-                    <span>KHỐI 3 // PHÂN TÍCH CHIẾN ĐẤU, KỸ NĂNG ĐỠ ĐÒN (CHUỘT PHẢI) &amp; PHÂN BỐ SỰ KIỆN</span>
-                </h5>
-                <span class="section-sub font-mono">
-                    Dữ liệu từ sự kiện: <code>enemy_killed</code> • <code>boss_killed</code> • <code>block_hit</code> • <code>perfect_parry</code> • <code>trap_hit</code> • <code>item_pickup</code>
-                </span>
-            </div>
-
-            <div class="row g-3 mb-3">
-                <div class="col-6 col-lg-3">
-                    <div class="hud-card p-3">
-                        <div class="d-flex justify-content-between">
-                            <span class="kpi-label">Kỹ Năng Phòng Thủ (Chuột Phải)</span>
-                            <i class="bi bi-shield-shaded text-info"></i>
-                        </div>
-                        <div class="h4 fw-bold font-mono text-white mt-1 mb-0" id="combatDefenseSummary">0 Block • 0 Parry</div>
-                        <div class="small text-info mt-1" id="combatBlockedDmgSub">Chặn tổng 0 sát thương từ Orc</div>
-                    </div>
-                </div>
-
-                <div class="col-6 col-lg-3">
-                    <div class="hud-card p-3">
-                        <div class="d-flex justify-content-between">
-                            <span class="kpi-label">Tỷ Lệ Perfect Parry (0.28s)</span>
-                            <i class="bi bi-lightning-charge-fill text-warning"></i>
-                        </div>
-                        <div class="h4 fw-bold font-mono text-warning mt-1 mb-0" id="combatParryRate">0%</div>
-                        <div class="small text-muted mt-1">Phản đòn 0 DMG &amp; làm choáng Orc</div>
-                    </div>
-                </div>
-
-                <div class="col-6 col-lg-3">
-                    <div class="hud-card p-3">
-                        <div class="d-flex justify-content-between">
-                            <span class="kpi-label">Sát Thương Bẫy Gai (Màn 2)</span>
-                            <i class="bi bi-exclamation-triangle-fill text-danger"></i>
-                        </div>
-                        <div class="h4 fw-bold font-mono text-danger mt-1 mb-0" id="combatTrapHits">0 lần dính</div>
-                        <div class="small text-muted mt-1" id="combatTrapDmgSub">Mất tổng 0 HP từ 6 Bẫy Gai</div>
-                    </div>
-                </div>
-
-                <div class="col-6 col-lg-3">
-                    <div class="hud-card p-3">
-                        <div class="d-flex justify-content-between">
-                            <span class="kpi-label">Tỷ Lệ Hạ Boss Orc Warlord</span>
-                            <i class="bi bi-skull-fill text-success"></i>
-                        </div>
-                        <div class="h4 fw-bold font-mono text-success mt-1 mb-0" id="combatBossRate">0%</div>
-                        <div class="small text-muted mt-1" id="combatBossDetail">0 lần hạ / 0 lần vào Màn 3</div>
-                    </div>
-                </div>
-            </div>
-
-            <div class="row g-3">
-                <div class="col-12 col-lg-6">
-                    <div class="hud-card p-3 p-md-4 h-100">
-                        <div class="d-flex justify-content-between align-items-center mb-2">
-                            <div>
-                                <h6 class="fw-bold text-white mb-0">Phân Bố Tần Suất Sự Kiện Telemetry</h6>
-                                <div class="small text-muted">Tất cả EventType gửi từ Unity về SQL Server</div>
-                            </div>
-                            <span class="badge bg-secondary bg-opacity-25 text-light font-mono" id="totalEventTypesBadge">0 loại</span>
-                        </div>
-                        <div style="height: 270px; position: relative;">
-                            <canvas id="eventsDistChart"></canvas>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="col-12 col-lg-6">
-                    <div class="hud-card p-3 p-md-4 h-100">
-                        <div class="d-flex justify-content-between align-items-center mb-2">
-                            <div>
-                                <h6 class="fw-bold text-white mb-0">Lưu Lượng Phiên Chơi Theo Ngày</h6>
-                                <div class="small text-muted">Thống kê tần suất mở Session theo mốc thời gian</div>
-                            </div>
-                            <span class="badge bg-info bg-opacity-10 text-info border border-info border-opacity-25 font-mono">TIME SERIES</span>
-                        </div>
-                        <div style="height: 270px; position: relative;">
-                            <canvas id="sessionsDateChart"></canvas>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </section>
-
-        <section class="dashboard-section" id="section-sessions">
-            <div class="section-banner">
-                <h5>
-                    <i class="bi bi-clock-history"></i>
-                    <span>KHỐI 4 // NHẬT KÝ PHIÊN CHƠI GẦN ĐÂY &amp; BỘ GIẢ LẬP BOT KIỂM THỬ</span>
-                </h5>
-                <span class="section-sub font-mono">
-                    Bấm vào một phiên bất kỳ để xem <strong>Dòng thời gian sự kiện (Event Timeline)</strong> chi tiết từng giây
-                </span>
-            </div>
-
-            <div class="row g-3">
-                <div class="col-12 col-xl-7">
-                    <div class="hud-card p-3 p-md-4 h-100">
-                        <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
-                            <div>
-                                <h6 class="fw-bold text-white mb-0">Danh Sách Phiên Chơi Gần Đây</h6>
-                                <div class="small text-muted">Click vào dòng để mở Nhật ký Timeline chi tiết của phiên đó</div>
-                            </div>
-
-                            <div class="d-flex flex-wrap align-items-center gap-2">
-                                <input type="text" id="sessionSearchInput" class="hud-input font-mono" placeholder="Tìm tên / #ID..." oninput="filterSessionsTable()">
-                                <select id="sessionStatusFilter" class="hud-input font-mono" onchange="filterSessionsTable()">
-                                    <option value="all">Tất cả kết quả</option>
-                                    <option value="win">Chiến Thắng (Win)</option>
-                                    <option value="lose">Thất Bại (Lose)</option>
-                                    <option value="other">Đang chơi / Thoát</option>
-                                </select>
-                            </div>
-                        </div>
-
-                        <div class="table-responsive" style="max-height: 390px;">
-                            <table class="hud-table">
-                                <thead>
-                                    <tr>
-                                        <th>Session</th>
-                                        <th>Chiến Binh</th>
-                                        <th>Bắt Đầu</th>
-                                        <th>Thời Lượng</th>
-                                        <th>Kết Quả</th>
-                                        <th class="text-end">Sự Kiện</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="recentSessionsBody">
-                                    <tr>
-                                        <td colspan="6" class="text-center text-muted py-4 font-mono">Đang tải dữ liệu phiên chơi...</td>
-                                    </tr>
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="col-12 col-xl-5">
-                    <div class="hud-card hud-card-gold p-3 p-md-4 h-100 d-flex flex-column justify-content-between">
-                        <div>
-                            <div class="d-flex justify-content-between align-items-center mb-2">
-                                <h6 class="fw-bold text-white mb-0 d-flex align-items-center gap-2">
-                                    <i class="bi bi-robot text-warning"></i>
-                                    <span>GIẢ LẬP TRẬN ĐẤU CHUẨN GAME (BOT SIMULATOR)</span>
-                                </h6>
-                                <span class="badge bg-success bg-opacity-10 text-success border border-success border-opacity-25 font-mono">
-                                    REAL API POST
-                                </span>
-                            </div>
-                            <p class="small text-muted mb-3">
-                                Gửi chuỗi sự kiện mẫu (<code>level_start</code>, <code>enemy_killed</code>, <code>gold_collected</code>, <code>shop_opened</code>, <code>weapon_purchased</code>, <code>block_hit</code>, <code>perfect_parry</code>, <code>trap_hit</code>, <code>boss_killed</code>) vào SQL Server để kiểm thử dashboard.
-                            </p>
-
-                            <div class="row g-2 mb-3">
-                                <div class="col-12 col-md-7">
-                                    <label class="small text-muted font-mono mb-1">KỊCH BẢN TRẬN ĐẤU</label>
-                                    <select id="simScenario" class="hud-input w-100 font-mono">
-                                        <option value="balanced">1. Chiến Binh Cân Bằng (Mua Vũ Khí, Parry, Hạ Boss Màn 3 - Win)</option>
-                                        <option value="trap_defeat">2. Tử Trận Thung Lũng Bẫy (Dính Bẫy Gai Màn 2, Chưa Nâng Đồ - Lose)</option>
-                                        <option value="master_parry">3. Cao Thủ Perfect Parry (Farm Vàng, Mua Vũ Khí Thần Thoại - Win)</option>
-                                    </select>
-                                </div>
-                                <div class="col-12 col-md-5">
-                                    <label class="small text-muted font-mono mb-1">TÊN CHIẾN BINH BOT</label>
-                                    <input type="text" id="simBotName" class="hud-input w-100 font-mono" placeholder="Ngẫu nhiên (Vd: Vanguard_Ares)">
-                                </div>
-                            </div>
-
-                            <div class="d-flex gap-2 mb-3">
-                                <button class="hud-btn hud-btn-emerald flex-grow-1 justify-content-center py-2" id="btnRunSimulation" onclick="runBotSimulation()">
-                                    <i class="bi bi-play-circle-fill"></i>
-                                    <span>CHẠY MÔ PHỎNG &amp; GỬI TELEMETRY</span>
-                                </button>
-                                <button class="hud-btn py-2" onclick="clearTerminal()">
-                                    <i class="bi bi-trash"></i>
-                                    <span>Xóa Log</span>
-                                </button>
-                            </div>
-                        </div>
-
-                        <div class="terminal-window" id="simTerminal">
-                            <div class="terminal-line"><span class="term-ts">[READY]</span> Vanguard Telemetry Simulator sẵn sàng. Chọn kịch bản và bấm Chạy mô phỏng...</div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </section>
-
-        <footer class="mt-4 pt-3 text-center text-muted small border-top border-secondary border-opacity-10 font-mono" style="font-size: 0.75rem;">
-            VANGUARD: RAID OF THE ORC WOODS • GAME TELEMETRY SYSTEM • ASP.NET CORE &amp; SQL SERVER &amp; UNITY 6
-        </footer>
+        </div>
     </div>
 
+    <!-- Modal Chi Tiết Phiên Chơi -->
     <div class="modal fade" id="sessionModal" tabindex="-1" aria-hidden="true">
         <div class="modal-dialog modal-lg modal-dialog-centered">
-            <div class="modal-content" style="background: #0e1422; border: 1px solid var(--gold-primary); border-radius: 14px;">
+            <div class="modal-content" style="background: #0e1422; border: 1px solid var(--gold); border-radius: 14px;">
                 <div class="modal-header border-bottom border-secondary border-opacity-25">
                     <h6 class="modal-title fw-bold font-fantasy text-warning d-flex align-items-center gap-2">
                         <i class="bi bi-journal-code"></i>
@@ -992,7 +627,58 @@
                     </h6>
                     <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
                 </div>
-                <div class="modal-body" id="modalSessionBody">
+                <div class="modal-body" id="modalSessionBody"></div>
+                <div class="modal-footer border-top border-secondary border-opacity-25 py-2">
+                    <button type="button" class="hud-btn" data-bs-dismiss="modal">Đóng</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal Giả Lập Bot Kiểm Thử -->
+    <div class="modal fade" id="simulatorModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-lg modal-dialog-centered">
+            <div class="modal-content" style="background: #0e1422; border: 1px solid var(--gold); border-radius: 14px;">
+                <div class="modal-header border-bottom border-secondary border-opacity-25">
+                    <h6 class="modal-title fw-bold font-fantasy text-warning d-flex align-items-center gap-2">
+                        <i class="bi bi-robot"></i>
+                        <span>GIẢ LẬP TRẬN ĐẤU KIỂM THỬ TELEMETRY</span>
+                    </h6>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <p class="small text-muted mb-3">
+                        Gửi một phiên mẫu chuẩn quy ước <strong>1 Map = 1 Level</strong> (bẫy gai 18 HP, bình máu 65 G, vũ khí 75–720 G) lên SQL Server.
+                    </p>
+                    <div class="row g-2 mb-3">
+                        <div class="col-12 col-md-7">
+                            <label class="small text-muted font-mono mb-1">KỊCH BẢN TRẬN ĐẤU</label>
+                            <select id="simScenario" class="hud-input w-100 font-mono">
+                                <option value="level1_win">Level 1 • Rừng Orc &amp; Mỏ Vàng (Thắng)</option>
+                                <option value="level2_lose">Level 2 • Cao Nguyên Băng Tuyết (Thua vì Bẫy Gai)</option>
+                                <option value="level3_win">Level 3 • Pháo Đài Dung Nham (Cao Thủ Parry - Thắng)</option>
+                            </select>
+                        </div>
+                        <div class="col-12 col-md-5">
+                            <label class="small text-muted font-mono mb-1">TÊN NGƯỜI CHƠI BOT</label>
+                            <input type="text" id="simBotName" class="hud-input w-100 font-mono" placeholder="Ngẫu nhiên (Vd: Vanguard_Ares)">
+                        </div>
+                    </div>
+
+                    <div class="d-flex gap-2 mb-3">
+                        <button class="hud-btn hud-btn-emerald flex-grow-1 justify-content-center py-2" id="btnRunSimulation" onclick="runBotSimulation()">
+                            <i class="bi bi-play-circle-fill"></i>
+                            <span>CHẠY MÔ PHỎNG &amp; GỬI TELEMETRY</span>
+                        </button>
+                        <button class="hud-btn py-2" onclick="clearTerminal()">
+                            <i class="bi bi-trash"></i>
+                            <span>Xóa Log</span>
+                        </button>
+                    </div>
+
+                    <div class="terminal-window" id="simTerminal">
+                        <div class="terminal-line"><span class="term-ts">[READY]</span> Sẵn sàng gửi phiên giả lập về API...</div>
+                    </div>
                 </div>
                 <div class="modal-footer border-top border-secondary border-opacity-25 py-2">
                     <button type="button" class="hud-btn" data-bs-dismiss="modal">Đóng</button>
@@ -1002,161 +688,83 @@
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
-
     <script>
-        // Bảng ánh xạ loại sự kiện telemetry sang tên hiển thị, icon và màu sắc trên dashboard
         const EVENT_CATALOG = {
-            level_start:        { label: 'Bắt đầu Màn chơi',        icon: 'bi-flag-fill',             color: '#38bdf8', unit: 'Màn' },
-            level_complete:     { label: 'Hoàn thành Màn chơi',     icon: 'bi-check-circle-fill',     color: '#22c55e', unit: 'Màn' },
-            level_failed:       { label: 'Thất bại Màn chơi',       icon: 'bi-x-octagon-fill',        color: '#ef4444', unit: 'Màn' },
-            player_dead:        { label: 'Người chơi Tử trận',      icon: 'bi-skull-fill',            color: '#f43f5e', unit: 'Tại Màn' },
-            enemy_killed:       { label: 'Tiêu diệt Quái Orc',      icon: 'bi-crosshair',             color: '#fb923c', unit: 'Điểm' },
-            boss_killed:        { label: 'Hạ Đại Tướng Boss Orc',   icon: 'bi-trophy-fill',           color: '#facc15', unit: 'Màn' },
-            gold_collected:     { label: 'Nhặt Vàng rơi ra',        icon: 'bi-coin',                  color: '#e8b84b', unit: 'Gold' },
-            shop_opened:        { label: 'Mở Cửa Hàng Vũ Khí',      icon: 'bi-shop',                  color: '#c084fc', unit: 'Tại Màn' },
-            weapon_purchased:   { label: 'Mua Vũ Khí mới',          icon: 'bi-hammer',                color: '#a855f7', unit: 'Gold' },
-            potion_purchased:   { label: 'Mua Bình Hồi Máu (+80HP)',icon: 'bi-heart-pulse-fill',      color: '#ec4899', unit: 'Gold' },
-            block_hit:          { label: 'Đỡ Đòn Chuột Phải (Block)',icon: 'bi-shield-shaded',        color: '#60a5fa', unit: 'DMG chặn' },
-            perfect_parry:      { label: 'Phản Đòn Hoàn Hảo (Parry)',icon: 'bi-lightning-charge-fill',color: '#fde047', unit: 'Tại Màn' },
-            trap_hit:           { label: 'Dính Bẫy Gai Màn 2',      icon: 'bi-exclamation-triangle-fill', color: '#dc2626', unit: 'DMG bẫy' },
-            checkpoint_reached: { label: 'Kích hoạt Lửa Trại',      icon: 'bi-fire',                  color: '#f97316', unit: 'Trại Màn' },
-            item_pickup:        { label: 'Ăn Nấm Rừng Hồi Máu',     icon: 'bi-bandaid-fill',          color: '#34d399', unit: '+HP' },
-            game_start:         { label: 'Khởi động Trận đấu',      icon: 'bi-play-fill',             color: '#94a3b8', unit: '' },
-            game_exit:          { label: 'Kết thúc / Thoát Trận',   icon: 'bi-box-arrow-right',       color: '#64748b', unit: 'Tại Màn' },
-            login:              { label: 'Đăng nhập Tài khoản',     icon: 'bi-person-check-fill',     color: '#818cf8', unit: 'PlayerID' }
+            level_start:        { label: 'Bắt đầu Level',           icon: 'bi-flag-fill',                 color: '#38bdf8' },
+            level_complete:     { label: 'Hoàn thành Level',        icon: 'bi-check-circle-fill',         color: '#22c55e' },
+            level_failed:       { label: 'Thất bại Level',          icon: 'bi-x-octagon-fill',            color: '#ef4444' },
+            player_dead:        { label: 'Người chơi Tử trận',      icon: 'bi-skull-fill',                color: '#f43f5e' },
+            enemy_killed:       { label: 'Tiêu diệt Quái',          icon: 'bi-crosshair',                 color: '#fb923c' },
+            boss_killed:        { label: 'Hạ Boss Cuối Map',        icon: 'bi-trophy-fill',               color: '#facc15' },
+            gold_collected:     { label: 'Nhặt Vàng',               icon: 'bi-coin',                      color: '#e8b84b' },
+            shop_opened:        { label: 'Mở Cửa Hàng Lò Rèn',      icon: 'bi-shop',                      color: '#c084fc' },
+            weapon_purchased:   { label: 'Mua Vũ Khí',              icon: 'bi-hammer',                    color: '#a855f7' },
+            potion_purchased:   { label: 'Mua Bình Hồi Máu',        icon: 'bi-heart-pulse-fill',          color: '#ec4899' },
+            block_hit:          { label: 'Đỡ Đòn (Block)',          icon: 'bi-shield-shaded',             color: '#60a5fa' },
+            perfect_parry:      { label: 'Phản Đòn (Perfect Parry)',icon: 'bi-lightning-charge-fill',     color: '#fde047' },
+            trap_hit:           { label: 'Dính Bẫy Gai',            icon: 'bi-exclamation-triangle-fill', color: '#dc2626' },
+            checkpoint_reached: { label: 'Kích hoạt Lửa Trại',      icon: 'bi-fire',                      color: '#f97316' },
+            item_pickup:        { label: 'Nhặt Bình Hồi Máu',       icon: 'bi-bandaid-fill',              color: '#34d399' },
+            game_start:         { label: 'Khởi động Trận đấu',      icon: 'bi-play-fill',                 color: '#94a3b8' },
+            game_exit:          { label: 'Kết thúc / Thoát Trận',   icon: 'bi-box-arrow-right',           color: '#64748b' },
+            login:              { label: 'Đăng nhập Tài khoản',     icon: 'bi-person-check-fill',         color: '#818cf8' }
         };
 
         const WEAPON_BY_PRICE = {
-            60:  'Kiếm 2 (Hiếm)',
-            100: 'Kiếm 3 (Hiếm)',
-            150: 'Búa Chiến (Sử Thi)',
-            210: 'Kiếm Đỏ (Sử Thi)',
-            280: 'Kiếm Xanh (Huyền Thoại)',
-            360: 'Thương Vàng (Huyền Thoại)',
-            450: 'Búa Đỏ (Thần Thoại)',
-            550: 'Đại Kiếm Hoàng Kim (Thần Thoại)'
+            75:  'Ngân Phong Kiếm (+8 DMG)',
+            130: 'Thiên Lam Kiếm (+14 DMG)',
+            200: 'Nham Thạch Chiến Chùy (+21 DMG)',
+            280: 'Huyết Diễm Đoản Đao (+28 DMG)',
+            370: 'Hàn Ngọc Thánh Kiếm (+36 DMG)',
+            470: 'Lôi Quang Kim Thương (+44 DMG)',
+            590: 'Lưỡi Hái Huyết Nguyệt (+54 DMG)',
+            720: 'Phượng Hỏa Thần Kiếm (+65 DMG)'
         };
 
-        // Lấy metadata hiển thị tương ứng với mã sự kiện
+        const RARITY_COLOR_MAP = {
+            'Hiếm': '#38bdf8',
+            'Sử Thi': '#c084fc',
+            'Huyền Thoại': '#fb923c',
+            'Thần Thoại': '#facc15',
+            'Cũ': '#64748b'
+        };
+
         function getEventMeta(eventType) {
             return EVENT_CATALOG[eventType] || {
                 label: eventType,
                 icon: 'bi-record-circle',
-                color: '#9ca3af',
-                unit: ''
+                color: '#9ca3af'
             };
         }
 
-        // Định dạng giá trị chi tiết của sự kiện kèm đơn vị đo
         function formatEventDetailValue(eventType, val) {
             if (val === null || val === undefined) return '';
             if (eventType === 'weapon_purchased') {
                 const wName = WEAPON_BY_PRICE[val] || 'Vũ khí';
                 return `${wName} • ${val} G`;
             }
-            if (eventType === 'potion_purchased') return `Bình Hồi Máu • ${val} G`;
-            if (eventType === 'gold_collected') return `+${val} Gold`;
+            if (eventType === 'potion_purchased') return `Bình Hồi Máu (+75 HP) • ${val} G`;
+            if (eventType === 'gold_collected') return `+${val} G`;
             if (eventType === 'enemy_killed') return `+${val} Điểm`;
             if (eventType === 'block_hit') return `Chặn ${val} DMG`;
             if (eventType === 'trap_hit') return `-${val} HP`;
             if (eventType === 'item_pickup') return `+${val} HP`;
-            if (['level_start', 'level_complete', 'level_failed', 'player_dead', 'checkpoint_reached', 'shop_opened', 'perfect_parry', 'boss_killed', 'game_exit'].includes(eventType)) {
-                return `Màn ${val}`;
+            if (eventType === 'checkpoint_reached') return `Lửa trại Lv ${val}`;
+            if (eventType === 'login') return `Player #${val}`;
+            if (['level_start', 'level_complete', 'level_failed', 'player_dead', 'shop_opened', 'perfect_parry', 'boss_killed', 'game_exit'].includes(eventType)) {
+                return `Level ${val}`;
             }
             return `${val}`;
-        }
-
-        const emberCanvas = document.getElementById('emberCanvas');
-        const emberCtx = emberCanvas.getContext('2d');
-        let embers = [];
-
-        function resizeEmberCanvas() {
-            emberCanvas.width = window.innerWidth;
-            emberCanvas.height = window.innerHeight;
-        }
-        window.addEventListener('resize', resizeEmberCanvas);
-        resizeEmberCanvas();
-
-        for (let i = 0; i < 38; i++) {
-            embers.push({
-                x: Math.random() * emberCanvas.width,
-                y: Math.random() * emberCanvas.height,
-                vy: -(Math.random() * 0.45 + 0.15),
-                vx: (Math.random() - 0.5) * 0.3,
-                r: Math.random() * 2 + 0.8,
-                alpha: Math.random() * 0.55 + 0.15,
-                gold: Math.random() > 0.35
-            });
-        }
-
-        // Vẽ hiệu ứng tàn lửa trôi nền trên canvas
-        function animateEmbers() {
-            emberCtx.clearRect(0, 0, emberCanvas.width, emberCanvas.height);
-            for (const p of embers) {
-                p.x += p.vx;
-                p.y += p.vy;
-                if (p.y < -10) {
-                    p.y = emberCanvas.height + 10;
-                    p.x = Math.random() * emberCanvas.width;
-                }
-                emberCtx.beginPath();
-                emberCtx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
-                emberCtx.fillStyle = p.gold
-                    ? `rgba(232, 184, 75, ${p.alpha})`
-                    : `rgba(239, 68, 68, ${p.alpha * 0.8})`;
-                emberCtx.fill();
-            }
-            requestAnimationFrame(animateEmbers);
-        }
-        animateEmbers();
-
-        const SECTION_LABELS = {
-            all: '1 Trang Tổng Hợp (4 Khối)',
-            progression: 'Khối 1: Tiến Độ 3 Màn & Cân Bằng',
-            economy: 'Khối 2: Kinh Tế Vàng & Cửa Hàng',
-            combat: 'Khối 3: Chiến Đấu & Block/Parry',
-            sessions: 'Khối 4: Nhật Ký Phiên & Giả Lập Bot'
-        };
-
-        // Chuyển chế độ hiển thị toàn bộ dashboard hoặc lọc từng khối phân tích
-        function setSectionFilter(mode) {
-            document.querySelectorAll('.filter-pill').forEach(btn => {
-                btn.classList.toggle('active', btn.dataset.section === mode);
-            });
-            const labelEl = document.getElementById('currentViewModeLabel');
-            if (labelEl) labelEl.textContent = SECTION_LABELS[mode] || SECTION_LABELS.all;
-
-            const sections = ['progression', 'economy', 'combat', 'sessions'];
-            sections.forEach(sec => {
-                const el = document.getElementById(`section-${sec}`);
-                if (!el) return;
-                if (mode === 'all' || mode === sec) {
-                    el.classList.remove('d-none-filtered');
-                } else {
-                    el.classList.add('d-none-filtered');
-                }
-            });
-        }
-
-        function focusSimulator() {
-            setSectionFilter('all');
-            const simEl = document.getElementById('section-sessions');
-            if (simEl) simEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
         }
 
         Chart.defaults.color = '#9ca3af';
         Chart.defaults.font.family = "'Inter', sans-serif";
 
         let levelFunnelChartInstance = null;
-        let goldFlowChartInstance = null;
-        let weaponPopularityChartInstance = null;
-        let eventsDistChartInstance = null;
         let sessionsDateChartInstance = null;
-
+        let weaponPopularityChartInstance = null;
+        let simulatorModalInstance = null;
         let cachedRecentSessions = [];
-        let cachedLevels = [];
-        let cachedEconomy = null;
-        let cachedCombat = null;
 
         async function fetchJson(url) {
             const res = await fetch(url);
@@ -1164,7 +772,65 @@
             return await res.json();
         }
 
-        // Tải đồng thời toàn bộ dữ liệu API và cập nhật các biểu đồ, bảng thống kê
+        function openSimulatorModal() {
+            const modalEl = document.getElementById('simulatorModal');
+            if (!simulatorModalInstance) {
+                simulatorModalInstance = bootstrap.Modal.getOrCreateInstance(modalEl);
+            }
+            simulatorModalInstance.show();
+        }
+
+        function setTimePreset(preset) {
+            document.querySelectorAll('#timePresetGroup .filter-chip').forEach(btn => {
+                btn.classList.toggle('active', btn.dataset.preset === preset);
+            });
+
+            const fromEl = document.getElementById('filterFromDate');
+            const toEl = document.getElementById('filterToDate');
+
+            if (preset === 'all') {
+                fromEl.value = '';
+                toEl.value = '';
+            } else {
+                const now = new Date();
+                const toStr = now.toISOString().slice(0, 10);
+                const start = new Date(now);
+                if (preset === '7d') start.setUTCDate(start.getUTCDate() - 6);
+                else if (preset === '30d') start.setUTCDate(start.getUTCDate() - 29);
+                fromEl.value = start.toISOString().slice(0, 10);
+                toEl.value = toStr;
+            }
+
+            loadAllDashboardData(false);
+        }
+
+        function onCustomDateChanged() {
+            document.querySelectorAll('#timePresetGroup .filter-chip').forEach(btn => {
+                btn.classList.remove('active');
+            });
+            loadAllDashboardData(false);
+        }
+
+        function resetFilters() {
+            document.getElementById('filterLevelSelect').value = '';
+            setTimePreset('all');
+        }
+
+        function buildFilterQuery(extraParams = {}) {
+            const params = new URLSearchParams();
+            for (const [k, v] of Object.entries(extraParams)) {
+                if (v !== null && v !== undefined && v !== '') params.set(k, String(v));
+            }
+            const fromVal = document.getElementById('filterFromDate')?.value;
+            const toVal = document.getElementById('filterToDate')?.value;
+            const levelVal = document.getElementById('filterLevelSelect')?.value;
+            if (fromVal) params.set('from', fromVal);
+            if (toVal) params.set('to', toVal);
+            if (levelVal) params.set('level', levelVal);
+            const qs = params.toString();
+            return qs ? `?${qs}` : '';
+        }
+
         async function loadAllDashboardData(manual = false) {
             const btn = document.getElementById('btnRefresh');
             if (manual && btn) {
@@ -1172,27 +838,26 @@
                 btn.innerHTML = `<span class="spinner-border spinner-border-sm"></span><span>Đang tải...</span>`;
             }
 
+            const commonQs = buildFilterQuery();
+            const recentQs = buildFilterQuery({ limit: 25 });
+
             try {
-                const [overview, levels, economy, combat, eventsDist, sessionsByDate, recentSessions] = await Promise.all([
-                    fetchJson('/api/Analytics/overview'),
-                    fetchJson('/api/Analytics/levels'),
-                    fetchJson('/api/Analytics/economy'),
-                    fetchJson('/api/Analytics/combat'),
-                    fetchJson('/api/Analytics/events-distribution'),
-                    fetchJson('/api/Analytics/sessions-by-date'),
-                    fetchJson('/api/Analytics/recent-sessions?limit=25')
+                const [overview, levels, economy, combat, sessionsByDate, recentSessions] = await Promise.all([
+                    fetchJson(`/api/Analytics/overview${commonQs}`),
+                    fetchJson(`/api/Analytics/levels${commonQs}`),
+                    fetchJson(`/api/Analytics/economy${commonQs}`),
+                    fetchJson(`/api/Analytics/combat${commonQs}`),
+                    fetchJson(`/api/Analytics/sessions-by-date${commonQs}`),
+                    fetchJson(`/api/Analytics/recent-sessions${recentQs}`)
                 ]);
 
-                cachedLevels = levels || [];
-                cachedEconomy = economy;
-                cachedCombat = combat;
                 cachedRecentSessions = recentSessions || [];
 
-                renderOverviewKpis(overview);
-                renderProgressionSection(cachedLevels, cachedCombat);
-                renderBalancingAdvisor(overview, cachedLevels, cachedEconomy, cachedCombat);
-                renderEconomySection(cachedEconomy);
-                renderCombatSection(cachedCombat, eventsDist, sessionsByDate);
+                renderCoreKpis(overview, economy, levels || []);
+                renderLevelStats(levels || []);
+                renderSessionsTrend(sessionsByDate || []);
+                renderCombatSection(combat);
+                renderEconomySection(economy);
                 filterSessionsTable();
 
                 document.getElementById('apiStatusDot').style.background = '#22c55e';
@@ -1210,31 +875,46 @@
             }
         }
 
-        // Hiển thị 6 thẻ chỉ số tổng quan (KPI) ở đầu trang
-        function renderOverviewKpis(ov) {
-            if (!ov) return;
-            document.getElementById('kpiPlayers').textContent = (ov.totalPlayers ?? 0).toLocaleString('vi-VN');
-            document.getElementById('kpiSessions').textContent = (ov.totalSessions ?? 0).toLocaleString('vi-VN');
-            document.getElementById('kpiEventsSub').textContent = `${(ov.totalEvents ?? 0).toLocaleString('vi-VN')} sự kiện đã ghi`;
-
-            document.getElementById('kpiWinRate').textContent = `${ov.winRatePercent ?? 0}%`;
-            document.getElementById('kpiWinLossSub').textContent = `${ov.totalWins ?? 0} Thắng • ${ov.totalLosses ?? 0} Thua`;
-
-            document.getElementById('kpiAvgDuration').textContent = `${ov.averageSessionDurationMinutes ?? 0}m`;
-
-            document.getElementById('kpiGoldEarned').textContent = `${(ov.totalGoldEarned ?? 0).toLocaleString('vi-VN')} G`;
-            document.getElementById('kpiGoldSpentSub').textContent = `Đã tiêu Shop: ${(ov.totalGoldSpent ?? 0).toLocaleString('vi-VN')} G`;
-
-            document.getElementById('kpiEnemiesKilled').textContent = (ov.totalEnemiesKilled ?? 0).toLocaleString('vi-VN');
-            document.getElementById('kpiBossKillsSub').textContent = `${ov.totalBossKills ?? 0} lần hạ Đại Tướng Boss`;
+        function findHardestLevel(levels) {
+            const candidates = (levels || []).filter(l => (l.deaths ?? 0) > 0);
+            if (candidates.length === 0) return null;
+            return candidates.slice().sort((a, b) => {
+                if ((b.deaths ?? 0) !== (a.deaths ?? 0)) return (b.deaths ?? 0) - (a.deaths ?? 0);
+                return (a.completionRatePercent ?? 0) - (b.completionRatePercent ?? 0);
+            })[0];
         }
 
-        // Vẽ biểu đồ và thẻ chi tiết tiến độ hoàn thành theo 3 màn chơi
-        function renderProgressionSection(levels, combat) {
-            const labels = levels.map(l => l.stageName || `Màn ${l.level}`);
-            const starts = levels.map(l => l.starts);
-            const completions = levels.map(l => l.completions);
-            const deaths = levels.map(l => l.deaths);
+        function renderCoreKpis(ov, econ, levels) {
+            if (!ov) return;
+
+            document.getElementById('kpiSessions').textContent = (ov.totalSessions ?? 0).toLocaleString('vi-VN');
+            document.getElementById('kpiSessionsSub').textContent = `${(ov.totalPlayers ?? 0).toLocaleString('vi-VN')} tài khoản`;
+
+            document.getElementById('kpiAvgDuration').textContent = `${ov.averageSessionDurationMinutes ?? 0} phút`;
+
+            document.getElementById('kpiWinRate').textContent = `${ov.winRatePercent ?? 0}%`;
+            document.getElementById('kpiWinLossSub').textContent =
+                `${(ov.totalWins ?? 0).toLocaleString('vi-VN')} Thắng • ${(ov.totalLosses ?? 0).toLocaleString('vi-VN')} Thua`;
+
+            const hardest = findHardestLevel(levels);
+            if (hardest) {
+                document.getElementById('kpiHardestLevel').textContent = `Level ${hardest.level}`;
+                document.getElementById('kpiHardestLevelSub').textContent =
+                    `${hardest.deaths} tử trận • ${hardest.completionRatePercent}% qua`;
+            } else {
+                document.getElementById('kpiHardestLevel').textContent = '--';
+                document.getElementById('kpiHardestLevelSub').textContent = 'Chưa có lượt tử trận';
+            }
+
+            const spendRatio = econ?.spendRatioPercent ?? 0;
+            document.getElementById('kpiSpendRatio').textContent = `${spendRatio}% đã tiêu`;
+            document.getElementById('kpiGoldSub').textContent =
+                `Tiêu ${(ov.totalGoldSpent ?? 0).toLocaleString('vi-VN')} / ${(ov.totalGoldEarned ?? 0).toLocaleString('vi-VN')} G`;
+        }
+
+        function renderLevelStats(levels) {
+            const list = levels || [];
+            const labels = list.map(l => l.stageName || `Level ${l.level}`);
 
             const ctx = document.getElementById('levelFunnelChart').getContext('2d');
             if (levelFunnelChartInstance) levelFunnelChartInstance.destroy();
@@ -1245,25 +925,25 @@
                     labels,
                     datasets: [
                         {
-                            label: 'Bắt đầu màn (level_start)',
-                            data: starts,
-                            backgroundColor: 'rgba(56, 189, 248, 0.75)',
+                            label: 'Bắt đầu',
+                            data: list.map(l => l.starts),
+                            backgroundColor: 'rgba(56, 189, 248, 0.78)',
                             borderColor: '#38bdf8',
                             borderWidth: 1,
                             borderRadius: 6
                         },
                         {
-                            label: 'Qua màn (level_complete)',
-                            data: completions,
-                            backgroundColor: 'rgba(34, 197, 94, 0.78)',
+                            label: 'Hoàn thành',
+                            data: list.map(l => l.completions),
+                            backgroundColor: 'rgba(34, 197, 94, 0.80)',
                             borderColor: '#22c55e',
                             borderWidth: 1,
                             borderRadius: 6
                         },
                         {
-                            label: 'Tử trận (player_dead)',
-                            data: deaths,
-                            backgroundColor: 'rgba(239, 68, 68, 0.78)',
+                            label: 'Thất bại',
+                            data: list.map(l => l.deaths),
+                            backgroundColor: 'rgba(239, 68, 68, 0.80)',
                             borderColor: '#ef4444',
                             borderWidth: 1,
                             borderRadius: 6
@@ -1273,61 +953,31 @@
                 options: {
                     responsive: true,
                     maintainAspectRatio: false,
-                    plugins: {
-                        legend: { position: 'top', labels: { boxWidth: 12 } }
-                    },
+                    plugins: { legend: { position: 'top', labels: { boxWidth: 12 } } },
                     scales: {
                         x: { grid: { color: 'rgba(255,255,255,0.04)' } },
-                        y: { beginAtZero: true, grid: { color: 'rgba(255,255,255,0.06)' } }
+                        y: { beginAtZero: true, ticks: { precision: 0 }, grid: { color: 'rgba(255,255,255,0.06)' } }
                     }
                 }
             });
 
-            const stageMeta = {
-                1: {
-                    coords: 'Tọa độ (132, 368) • Bình Minh',
-                    desc: '2 Đợt Orc Trinh Sát • Đá Rune Cổ • Nấm Hồi Máu • Lửa Trại 1',
-                    accent: '#38bdf8'
-                },
-                2: {
-                    coords: 'Tọa độ (298, 296) • Hoàng Hôn',
-                    desc: '6 Bẫy Gai (SM_Spikes_01) • Orc Khiên & Orc Rìu • Lửa Trại 2',
-                    accent: '#f59e0b'
-                },
-                3: {
-                    coords: 'Tọa độ (230, 240) • Đêm Trăng',
-                    desc: 'Mỏ Vàng • Boss Đại Tướng Orc Warlord (560 HP, Phase 2 Cuồng Nộ)',
-                    accent: '#ef4444'
-                }
-            };
-
+            const hardest = findHardestLevel(list);
+            const colClass = list.length === 1 ? 'col-12' : 'col-12 col-md-4';
             const container = document.getElementById('stageBreakdownCards');
-            const top3 = levels.filter(l => l.level >= 1 && l.level <= 3);
-            container.innerHTML = top3.map(l => {
-                const m = stageMeta[l.level] || { coords: '', desc: '', accent: '#e8b84b' };
-                const rateColor = l.completionRatePercent >= 65 ? 'text-success' : (l.completionRatePercent >= 40 ? 'text-warning' : 'text-danger');
-                const extraMetric = l.level === 2
-                    ? `<span class="text-danger"><i class="bi bi-exclamation-triangle-fill"></i> Bẫy gai: ${combat?.trapHits ?? 0} lần</span>`
-                    : (l.level === 3
-                        ? `<span class="text-warning"><i class="bi bi-trophy-fill"></i> Hạ Boss: ${combat?.bossKills ?? 0} lần</span>`
-                        : `<span class="text-info"><i class="bi bi-fire"></i> Lửa trại: ${l.checkpointsReached ?? 0}</span>`);
 
+            container.innerHTML = list.map(l => {
+                const isHardest = hardest && hardest.level === l.level;
+                const rateColor = l.completionRatePercent >= 65 ? 'text-success' : (l.completionRatePercent >= 40 ? 'text-warning' : 'text-danger');
                 return `
-                    <div class="col-12 col-md-4">
-                        <div class="stage-card" style="border-top: 2px solid ${m.accent};">
-                            <div class="d-flex justify-content-between align-items-center mb-1">
-                                <span class="fw-bold text-white small">${escapeHtml(l.stageName)}</span>
-                                <span class="stage-badge ${rateColor}" style="background: rgba(255,255,255,0.06);">
-                                    ${l.completionRatePercent}% Clear
-                                </span>
+                    <div class="${colClass}">
+                        <div class="stage-mini-pill ${isHardest ? 'hardest' : ''}">
+                            <div class="d-flex justify-content-between align-items-center mb-1 gap-1">
+                                <span class="fw-semibold text-white small">Level ${l.level}</span>
+                                <span class="font-mono fw-bold small ${rateColor}">${l.completionRatePercent}% Qua màn</span>
                             </div>
-                            <div class="font-mono text-muted mb-1" style="font-size: 0.7rem;">${escapeHtml(m.coords)}</div>
-                            <div class="small text-muted mb-2" style="font-size: 0.75rem;">${escapeHtml(m.desc)}</div>
-                            <div class="d-flex flex-wrap justify-content-between gap-1 pt-2 border-top border-secondary border-opacity-25 font-mono" style="font-size: 0.73rem;">
-                                <span><i class="bi bi-play-fill text-info"></i> ${l.starts} vào</span>
-                                <span><i class="bi bi-skull-fill text-danger"></i> ${l.deaths} chết</span>
-                                <span><i class="bi bi-shop text-warning"></i> ${l.shopOpens} shop</span>
-                                ${extraMetric}
+                            <div class="d-flex justify-content-between align-items-center gap-1">
+                                <span class="font-mono text-muted" style="font-size: 0.74rem;">${l.starts} vào • ${l.deaths} tử trận</span>
+                                ${isHardest ? `<span class="badge bg-danger bg-opacity-25 text-danger border border-danger border-opacity-50" style="font-size: 0.65rem;">Hay thất bại nhất</span>` : ''}
                             </div>
                         </div>
                     </div>
@@ -1335,249 +985,11 @@
             }).join('');
         }
 
-        // Phân tích số liệu thực tế để đưa ra nhận xét cân bằng độ khó và kinh tế
-        function renderBalancingAdvisor(overview, levels, economy, combat) {
-            const box = document.getElementById('balancingInsightsList');
-            const insights = [];
-
-            const s1 = levels.find(x => x.level === 1);
-            const s2 = levels.find(x => x.level === 2);
-            const s3 = levels.find(x => x.level === 3);
-
-            if (s2 && s2.starts > 0) {
-                if (s2.completionRatePercent < 45 || (combat && combat.trapHits >= s2.starts * 2)) {
-                    insights.push({
-                        severity: 'critical',
-                        title: 'Cảnh báo Màn 2: Thung Lũng Bẫy có tỷ lệ tử trận cao',
-                        detail: `Tỷ lệ qua Màn 2 đạt ${s2.completionRatePercent}% (${s2.deaths} lần chết, ${combat?.trapHits ?? 0} lần dính Bẫy Gai). Gợi ý: Giảm sát thương TrapHazard từ 22 xuống 16 HP hoặc đặt thêm 1 Nấm Hồi Máu gần cụm 6 Bẫy Gai.`
-                    });
-                } else {
-                    insights.push({
-                        severity: 'good',
-                        title: 'Màn 2 (Thung Lũng Bẫy) có độ khó hợp lý',
-                        detail: `Tỷ lệ vượt Màn 2 đạt ${s2.completionRatePercent}%, người chơi kết hợp tốt giữa di chuyển né 6 Bẫy Gai và hạ Lính Khiên.`
-                    });
-                }
-            }
-
-            if (s3 && s3.starts > 0) {
-                const bossRate = combat?.bossClearRatePercent ?? s3.completionRatePercent;
-                if (bossRate < 35) {
-                    insights.push({
-                        severity: 'critical',
-                        title: 'Đấu Trường Mỏ Vàng (Màn 3): Boss Orc Warlord quá khắc nghiệt',
-                        detail: `Chỉ ${bossRate}% lượt vào Màn 3 hạ được Boss (${combat?.bossKills ?? 0}/${s3.starts}). Gợi ý: Giảm nhẹ HP Boss (560 → 480 HP) hoặc giảm số lính Orc hộ vệ khi Boss vào Phase 2 (<50% HP).`
-                    });
-                } else if (bossRate > 85 && s3.starts >= 3) {
-                    insights.push({
-                        severity: 'info',
-                        title: 'Boss Đại Tướng Orc Warlord đang hơi dễ với người chơi',
-                        detail: `Tỷ lệ hạ Boss đạt tới ${bossRate}%. Có thể tăng tốc độ ra đòn của Boss ở Phase 2 để tăng tính thử thách.`
-                    });
-                } else {
-                    insights.push({
-                        severity: 'good',
-                        title: 'Trận Boss Màn 3 cân bằng tốt',
-                        detail: `Tỷ lệ hạ Đại Tướng Orc Warlord đạt ${bossRate}% (${combat?.bossKills ?? 0} lần chiến thắng).`
-                    });
-                }
-            }
-
-            if (economy && economy.totalGoldCollected > 0) {
-                if (economy.spendRatioPercent < 35) {
-                    insights.push({
-                        severity: 'info',
-                        title: 'Kinh tế Vàng: Người chơi tích trữ nhiều nhưng ít mua Vũ khí',
-                        detail: `Mới chỉ ${economy.spendRatioPercent}% lượng Vàng (${economy.totalGoldSpent}/${economy.totalGoldCollected} G) được tiêu tại Shop. Gợi ý: Làm nổi bật thông báo nhấn [B] Mở Cửa Hàng khi người chơi đủ 60–150 G.`
-                    });
-                } else {
-                    insights.push({
-                        severity: 'good',
-                        title: 'Vòng lặp Kinh tế Vàng & Cửa hàng hoạt động hiệu quả',
-                        detail: `Người chơi đã chi ${economy.spendRatioPercent}% tổng Vàng vào ${economy.weaponPurchaseCount} Vũ khí và ${economy.potionPurchaseCount} Bình Hồi Máu.`
-                    });
-                }
-            }
-
-            if (combat && (combat.blockHits + combat.perfectParries) > 0) {
-                insights.push({
-                    severity: combat.parryMasteryPercent >= 25 ? 'good' : 'info',
-                    title: `Cơ chế Chuột Phải Đỡ Đòn: ${combat.parryMasteryPercent}% Perfect Parry`,
-                    detail: `Ghi nhận ${combat.blockHits} lần Block thường (chặn ${combat.totalBlockedDamage} DMG) và ${combat.perfectParries} pha Perfect Parry (cửa sổ 0.28s).`
-                });
-            }
-
-            if (insights.length === 0) {
-                insights.push({
-                    severity: 'info',
-                    title: 'Chưa có đủ dữ liệu phiên chơi để phân tích sâu',
-                    detail: 'Hãy chơi thử trong Unity hoặc bấm nút "Chạy Mô Phỏng & Gửi Telemetry" ở Khối 4 để nạp dữ liệu thực tế.'
-                });
-            }
-
-            box.innerHTML = insights.map(item => `
-                <div class="insight-item ${item.severity}">
-                    <div class="fw-bold text-white small mb-1">${escapeHtml(item.title)}</div>
-                    <div class="text-muted" style="font-size: 0.78rem; line-height: 1.45;">${escapeHtml(item.detail)}</div>
-                </div>
-            `).join('');
-        }
-
-        // Vẽ biểu đồ dòng tiền vàng và bảng độ phổ biến vũ khí trong cửa hàng
-        function renderEconomySection(econ) {
-            if (!econ) return;
-
-            document.getElementById('econAvgGold').textContent = `${(econ.avgGoldPerSession ?? 0).toLocaleString('vi-VN')} G`;
-            document.getElementById('econSpendRatio').textContent = `${econ.spendRatioPercent ?? 0}%`;
-            document.getElementById('econSpendDetail').textContent = `${(econ.totalGoldSpent ?? 0).toLocaleString('vi-VN')} G đã chi / ${(econ.totalGoldCollected ?? 0).toLocaleString('vi-VN')} G nhặt`;
-
-            document.getElementById('econShopOpens').textContent = `${econ.shopOpenCount ?? 0} lần mở`;
-            document.getElementById('econShopConversion').textContent = `Tỷ lệ chốt mua: ${econ.shopConversionPercent ?? 0}%`;
-
-            document.getElementById('econItemsBought').textContent = `${econ.weaponPurchaseCount ?? 0} VK • ${econ.potionPurchaseCount ?? 0} Bình`;
-            document.getElementById('econItemsGoldDetail').textContent = `Vũ khí: ${(econ.goldSpentOnWeapons ?? 0).toLocaleString('vi-VN')} G • Bình: ${(econ.goldSpentOnPotions ?? 0).toLocaleString('vi-VN')} G`;
-
-            const unspentGold = Math.max(0, (econ.totalGoldCollected ?? 0) - (econ.totalGoldSpent ?? 0));
-            const goldCtx = document.getElementById('goldFlowChart').getContext('2d');
-            if (goldFlowChartInstance) goldFlowChartInstance.destroy();
-
-            goldFlowChartInstance = new Chart(goldCtx, {
-                type: 'bar',
-                data: {
-                    labels: ['Tổng Vàng Nhặt', 'Chi Mua Vũ Khí', 'Chi Mua Bình Máu', 'Vàng Tồn Trong Ví'],
-                    datasets: [{
-                        label: 'Lượng Vàng (Gold)',
-                        data: [
-                            econ.totalGoldCollected ?? 0,
-                            econ.goldSpentOnWeapons ?? 0,
-                            econ.goldSpentOnPotions ?? 0,
-                            unspentGold
-                        ],
-                        backgroundColor: [
-                            'rgba(232, 184, 75, 0.82)',
-                            'rgba(168, 85, 247, 0.82)',
-                            'rgba(236, 72, 153, 0.82)',
-                            'rgba(56, 189, 248, 0.72)'
-                        ],
-                        borderColor: ['#e8b84b', '#a855f7', '#ec4899', '#38bdf8'],
-                        borderWidth: 1,
-                        borderRadius: 6
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    plugins: { legend: { display: false } },
-                    scales: {
-                        x: { grid: { display: false } },
-                        y: { beginAtZero: true, grid: { color: 'rgba(255,255,255,0.06)' } }
-                    }
-                }
-            });
-
-            const weapons = econ.weaponBreakdown || [];
-            const wpCtx = document.getElementById('weaponPopularityChart').getContext('2d');
-            if (weaponPopularityChartInstance) weaponPopularityChartInstance.destroy();
-
-            weaponPopularityChartInstance = new Chart(wpCtx, {
-                type: 'bar',
-                data: {
-                    labels: weapons.map(w => `${w.weaponName} (${w.price}G)`),
-                    datasets: [{
-                        label: 'Số lượt mua',
-                        data: weapons.map(w => w.purchaseCount),
-                        backgroundColor: [
-                            '#38bdf8', '#38bdf8',
-                            '#c084fc', '#c084fc',
-                            '#fb923c', '#fb923c',
-                            '#facc15', '#facc15'
-                        ],
-                        borderRadius: 5
-                    }]
-                },
-                options: {
-                    indexAxis: 'y',
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    plugins: { legend: { display: false } },
-                    scales: {
-                        x: { beginAtZero: true, ticks: { precision: 0 }, grid: { color: 'rgba(255,255,255,0.05)' } },
-                        y: { grid: { display: false }, ticks: { font: { size: 11 } } }
-                    }
-                }
-            });
-
-            const tbody = document.getElementById('weaponBreakdownTableBody');
-            tbody.innerHTML = weapons.map(w => {
-                let rarityCls = 'rarity-rare';
-                if (w.rarity === 'Sử Thi') rarityCls = 'rarity-epic';
-                else if (w.rarity === 'Huyền Thoại') rarityCls = 'rarity-legend';
-                else if (w.rarity === 'Thần Thoại') rarityCls = 'rarity-mythic';
-
-                return `
-                    <tr>
-                        <td class="fw-semibold text-white">${escapeHtml(w.weaponName)}</td>
-                        <td><span class="badge border ${rarityCls}" style="font-size:0.68rem;">${escapeHtml(w.rarity)}</span></td>
-                        <td class="text-end font-mono text-warning">${w.price} G</td>
-                        <td class="text-end font-mono fw-bold text-white">${w.purchaseCount}</td>
-                    </tr>
-                `;
-            }).join('');
-        }
-
-        // Vẽ biểu đồ kỹ năng chiến đấu, phân bố sự kiện và lưu lượng phiên theo ngày
-        function renderCombatSection(combat, eventsDist, sessionsByDate) {
-            if (combat) {
-                document.getElementById('combatDefenseSummary').textContent = `${combat.blockHits} Block • ${combat.perfectParries} Parry`;
-                document.getElementById('combatBlockedDmgSub').textContent = `Chặn tổng ${combat.totalBlockedDamage} sát thương từ Orc`;
-                document.getElementById('combatParryRate').textContent = `${combat.parryMasteryPercent}%`;
-                document.getElementById('combatTrapHits').textContent = `${combat.trapHits} lần dính`;
-                document.getElementById('combatTrapDmgSub').textContent = `Mất tổng ${combat.totalTrapDamage} HP từ 6 Bẫy Gai`;
-                document.getElementById('combatBossRate').textContent = `${combat.bossClearRatePercent}%`;
-                document.getElementById('combatBossDetail').textContent = `${combat.bossKills} lần hạ / ${combat.stage3Starts} lần vào Màn 3`;
-            }
-
-            const dist = eventsDist || [];
-            document.getElementById('totalEventTypesBadge').textContent = `${dist.length} loại sự kiện`;
-
-            const evCtx = document.getElementById('eventsDistChart').getContext('2d');
-            if (eventsDistChartInstance) eventsDistChartInstance.destroy();
-
-            eventsDistChartInstance = new Chart(evCtx, {
-                type: 'bar',
-                data: {
-                    labels: dist.map(e => getEventMeta(e.eventType).label),
-                    datasets: [{
-                        label: 'Số lần ghi nhận',
-                        data: dist.map(e => e.count),
-                        backgroundColor: dist.map(e => getEventMeta(e.eventType).color),
-                        borderRadius: 5
-                    }]
-                },
-                options: {
-                    indexAxis: 'y',
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    plugins: {
-                        legend: { display: false },
-                        tooltip: {
-                            callbacks: {
-                                afterLabel: (ctx) => `Mã gốc: ${dist[ctx.dataIndex]?.eventType}`
-                            }
-                        }
-                    },
-                    scales: {
-                        x: { beginAtZero: true, grid: { color: 'rgba(255,255,255,0.06)' } },
-                        y: { grid: { display: false }, ticks: { font: { size: 11 } } }
-                    }
-                }
-            });
-
-            const dates = sessionsByDate || [];
-            const dtCtx = document.getElementById('sessionsDateChart').getContext('2d');
+        function renderSessionsTrend(dates) {
+            const ctx = document.getElementById('sessionsDateChart').getContext('2d');
             if (sessionsDateChartInstance) sessionsDateChartInstance.destroy();
 
-            sessionsDateChartInstance = new Chart(dtCtx, {
+            sessionsDateChartInstance = new Chart(ctx, {
                 type: 'line',
                 data: {
                     labels: dates.map(d => d.date),
@@ -1585,10 +997,10 @@
                         label: 'Số phiên chơi',
                         data: dates.map(d => d.sessionCount),
                         borderColor: '#e8b84b',
-                        backgroundColor: 'rgba(232, 184, 75, 0.16)',
-                        borderWidth: 2.5,
+                        backgroundColor: 'rgba(232, 184, 75, 0.15)',
+                        borderWidth: 2.2,
                         pointBackgroundColor: '#ffd978',
-                        pointRadius: 4,
+                        pointRadius: 3.5,
                         tension: 0.3,
                         fill: true
                     }]
@@ -1605,14 +1017,87 @@
             });
         }
 
+        function renderCombatSection(combat) {
+            if (!combat) return;
+            const parryPct = Math.min(100, Math.max(0, combat.parryMasteryPercent ?? 0));
+
+            document.getElementById('combatKillsSummary').textContent =
+                `${(combat.totalEnemyKills ?? 0).toLocaleString('vi-VN')} quái • ${(combat.bossKills ?? 0).toLocaleString('vi-VN')} Boss`;
+            document.getElementById('combatBossRateSub').textContent =
+                `Tỷ lệ hạ Boss: ${combat.bossClearRatePercent ?? 0}% (${combat.bossKills ?? 0}/${combat.stage3Starts ?? 0} lượt)`;
+
+            document.getElementById('combatDefenseSummary').textContent =
+                `${(combat.blockHits ?? 0).toLocaleString('vi-VN')} Block • ${(combat.perfectParries ?? 0).toLocaleString('vi-VN')} Parry`;
+            document.getElementById('combatParryBadge').textContent = `Parry Rate ${parryPct}%`;
+            document.getElementById('combatParryBar').style.width = `${parryPct}%`;
+            document.getElementById('combatBlockedDmgSub').textContent =
+                `Chặn ${(combat.totalBlockedDamage ?? 0).toLocaleString('vi-VN')} sát thương`;
+
+            document.getElementById('combatTrapHits').textContent =
+                `${(combat.trapHits ?? 0).toLocaleString('vi-VN')} lần dính`;
+            document.getElementById('combatTrapDmgSub').textContent =
+                `Mất tổng ${(combat.totalTrapDamage ?? 0).toLocaleString('vi-VN')} HP`;
+        }
+
+        function renderEconomySection(econ) {
+            if (!econ) return;
+
+            document.getElementById('econWeaponPill').textContent =
+                `Vũ khí: ${econ.weaponPurchaseCount ?? 0} (${(econ.goldSpentOnWeapons ?? 0).toLocaleString('vi-VN')} G)`;
+            document.getElementById('econPotionPill').textContent =
+                `Bình máu 65G: ${econ.potionPurchaseCount ?? 0} (${(econ.goldSpentOnPotions ?? 0).toLocaleString('vi-VN')} G)`;
+
+            const weapons = (econ.weaponBreakdown || []).filter(w => w.price > 0 || w.purchaseCount > 0);
+            const wpCtx = document.getElementById('weaponPopularityChart').getContext('2d');
+            if (weaponPopularityChartInstance) weaponPopularityChartInstance.destroy();
+
+            weaponPopularityChartInstance = new Chart(wpCtx, {
+                type: 'bar',
+                data: {
+                    labels: weapons.map(w => w.price > 0 ? `${w.weaponName} (${w.price}G)` : w.weaponName),
+                    datasets: [{
+                        label: 'Lượt mua',
+                        data: weapons.map(w => w.purchaseCount),
+                        backgroundColor: weapons.map(w => RARITY_COLOR_MAP[w.rarity] || '#94a3b8'),
+                        borderRadius: 5
+                    }]
+                },
+                options: {
+                    indexAxis: 'y',
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            callbacks: {
+                                label: (ctx) => {
+                                    const w = weapons[ctx.dataIndex];
+                                    if (!w) return '';
+                                    const parts = [`Bậc: ${w.rarity}`];
+                                    if (w.bonusDamage > 0) parts.push(`+${w.bonusDamage} DMG`);
+                                    parts.push(`Đã mua: ${w.purchaseCount} lần`);
+                                    parts.push(`Tổng chi: ${(w.totalGoldSpent ?? 0).toLocaleString('vi-VN')} G`);
+                                    return parts.join(' • ');
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        x: { beginAtZero: true, ticks: { precision: 0 }, grid: { color: 'rgba(255,255,255,0.06)' } },
+                        y: { grid: { display: false }, ticks: { font: { size: 11 } } }
+                    }
+                }
+            });
+        }
+
         function classifyResult(result) {
             if (!result) return { key: 'other', badgeClass: 'badge-play', icon: 'bi-controller', label: 'Đang chơi' };
             const r = result.trim().toLowerCase();
             if (r === 'win' || r === 'victory' || r === 'completed' || r === 'thắng') {
-                return { key: 'win', badgeClass: 'badge-win', icon: 'bi-trophy-fill', label: 'Chiến Thắng (Win)' };
+                return { key: 'win', badgeClass: 'badge-win', icon: 'bi-trophy-fill', label: 'Thắng (Win)' };
             }
             if (r === 'lose' || r === 'loss' || r === 'defeat' || r === 'dead' || r === 'thua') {
-                return { key: 'lose', badgeClass: 'badge-lose', icon: 'bi-skull-fill', label: 'Thất Bại (Lose)' };
+                return { key: 'lose', badgeClass: 'badge-lose', icon: 'bi-skull-fill', label: 'Thua (Lose)' };
             }
             if (r === 'quit' || r === 'exit' || r === 'abandoned') {
                 return { key: 'other', badgeClass: 'badge-quit', icon: 'bi-door-open-fill', label: 'Thoát (Quit)' };
@@ -1636,11 +1121,10 @@
             renderSessionsTable(filtered);
         }
 
-        // Hiển thị danh sách các phiên chơi gần đây kèm nút xem chi tiết dòng thời gian
         function renderSessionsTable(list) {
             const tbody = document.getElementById('recentSessionsBody');
             if (!list || list.length === 0) {
-                tbody.innerHTML = `<tr><td colspan="6" class="text-center text-muted py-4 font-mono">Không có phiên chơi nào khớp bộ lọc.</td></tr>`;
+                tbody.innerHTML = `<tr><td colspan="7" class="text-center text-muted py-4 font-mono">Không có phiên chơi nào khớp bộ lọc.</td></tr>`;
                 return;
             }
 
@@ -1650,6 +1134,9 @@
                 const timeStr = dt.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }) + ' ' +
                                 dt.toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit' });
                 const duration = s.durationMinutes != null ? `${s.durationMinutes}m` : '--';
+                const lvlBadge = s.level != null
+                    ? `<span class="badge bg-info bg-opacity-10 text-info border border-info border-opacity-25 font-mono">Lv ${s.level}</span>`
+                    : `<span class="text-muted font-mono">--</span>`;
 
                 return `
                     <tr onclick="inspectSession(${s.sessionId})">
@@ -1657,6 +1144,7 @@
                         <td class="fw-semibold text-white">
                             <i class="bi bi-person-fill text-info me-1"></i>${escapeHtml(s.playerName)}
                         </td>
+                        <td>${lvlBadge}</td>
                         <td class="font-mono text-muted small">${timeStr}</td>
                         <td class="font-mono text-light">${duration}</td>
                         <td>
@@ -1675,13 +1163,13 @@
             }).join('');
         }
 
-        // Truy vấn và mở hộp thoại dòng thời gian sự kiện của một phiên chơi
         async function inspectSession(sessionId) {
             const s = cachedRecentSessions.find(x => x.sessionId === sessionId);
             if (!s) return;
 
             const info = classifyResult(s.result);
-            document.getElementById('modalSessionTitle').textContent = `PHIÊN CHƠI #${s.sessionId} • ${s.playerName}`;
+            const lvlText = s.level != null ? ` • Level ${s.level}` : '';
+            document.getElementById('modalSessionTitle').textContent = `PHIÊN CHƠI #${s.sessionId} • ${s.playerName}${lvlText}`;
 
             const modalBody = document.getElementById('modalSessionBody');
             modalBody.innerHTML = `
@@ -1691,15 +1179,15 @@
                 </div>
             `;
 
-            const modal = new bootstrap.Modal(document.getElementById('sessionModal'));
+            const modal = bootstrap.Modal.getOrCreateInstance(document.getElementById('sessionModal'));
             modal.show();
 
             try {
                 const events = await fetchJson(`/api/Analytics/sessions/${sessionId}/events`);
-                const goldEarned = events.filter(e => e.eventType === 'gold_collected').reduce((acc, e) => acc + (e.value || 0), 0);
-                const goldSpent = events.filter(e => e.eventType === 'weapon_purchased' || e.eventType === 'potion_purchased').reduce((acc, e) => acc + (e.value || 0), 0);
-                const orcKills = events.filter(e => e.eventType === 'enemy_killed').length;
-                const parries = events.filter(e => e.eventType === 'perfect_parry').length;
+                const goldEarned = s.goldEarned ?? 0;
+                const goldSpent = s.goldSpent ?? 0;
+                const kills = s.enemiesKilled ?? 0;
+                const parries = s.perfectParries ?? 0;
 
                 const timelineHtml = events.length === 0
                     ? `<div class="text-muted font-mono small py-3">Phiên này chưa có sự kiện nào được ghi nhận.</div>`
@@ -1708,12 +1196,11 @@
                             const meta = getEventMeta(ev.eventType);
                             const valText = formatEventDetailValue(ev.eventType, ev.value);
                             return `
-                                <div class="timeline-node d-flex justify-content-between align-items-center">
+                                <div class="timeline-node d-flex justify-content-between align-items-center gap-2">
                                     <div class="d-flex align-items-center gap-2">
-                                        <span class="font-mono text-muted" style="min-width: 58px;">+${ev.offsetSeconds}s</span>
+                                        <span class="font-mono text-muted" style="min-width: 56px;">+${ev.offsetSeconds}s</span>
                                         <i class="bi ${meta.icon}" style="color: ${meta.color};"></i>
                                         <span class="fw-semibold text-white">${escapeHtml(meta.label)}</span>
-                                        <code class="small text-muted">(${escapeHtml(ev.eventType)})</code>
                                     </div>
                                     <span class="badge bg-dark border border-secondary border-opacity-50 font-mono" style="color:${meta.color};">
                                         ${escapeHtml(valText || '--')}
@@ -1739,8 +1226,8 @@
                         </div>
                         <div class="col-6 col-md-3">
                             <div class="p-2.5 rounded-3 border border-secondary border-opacity-25 bg-dark">
-                                <div class="kpi-label">Orc Hạ Gục</div>
-                                <div class="font-mono fw-bold text-danger mt-1">${orcKills} Orc</div>
+                                <div class="kpi-label">Quái Hạ Gục</div>
+                                <div class="font-mono fw-bold text-danger mt-1">${kills} quái</div>
                             </div>
                         </div>
                         <div class="col-6 col-md-3">
@@ -1752,7 +1239,7 @@
                     </div>
 
                     <div class="d-flex justify-content-between align-items-center mb-2">
-                        <span class="small fw-bold font-mono text-warning">DÒNG THỜI GIAN SỰ KIỆN (${events.length} EVENTS)</span>
+                        <span class="small fw-bold font-mono text-warning">DÒNG THỜI GIAN (${events.length} SỰ KIỆN)</span>
                         <span class="small text-muted font-mono">Thời lượng: ${s.durationMinutes != null ? s.durationMinutes + ' phút' : 'Đang diễn ra'}</span>
                     </div>
                     ${timelineHtml}
@@ -1798,17 +1285,16 @@
             });
             if (!res.ok) throw new Error(`Gửi event ${eventType} thất bại`);
             const meta = getEventMeta(eventType);
-            logTerm(`POST /api/Events -> ${eventType} (${formatEventDetailValue(eventType, value)}) — ${meta.label}`, 'ev');
+            logTerm(`${meta.label}: ${formatEventDetailValue(eventType, value)}`, 'ev');
         }
 
-        // Gửi chuỗi sự kiện mẫu qua các endpoint đăng nhập, tạo phiên và ghi sự kiện
         async function runBotSimulation() {
             const btn = document.getElementById('btnRunSimulation');
             const scenario = document.getElementById('simScenario').value;
             let botName = document.getElementById('simBotName').value.trim();
 
             if (!botName) {
-                const prefixes = ['Vanguard', 'Knight', 'Paladin', 'Berserker', 'Warden', 'Slayer'];
+                const prefixes = ['Vanguard', 'Maria', 'Vampire', 'Maw'];
                 const names = ['Ares', 'Orion', 'Kael', 'Thorne', 'Draven', 'Valen'];
                 botName = `${prefixes[Math.floor(Math.random() * prefixes.length)]}_${names[Math.floor(Math.random() * names.length)]}_${Math.floor(10 + Math.random() * 89)}`;
             }
@@ -1817,7 +1303,7 @@
             btn.innerHTML = `<span class="spinner-border spinner-border-sm"></span><span>Đang gửi chuỗi sự kiện...</span>`;
 
             try {
-                logTerm(`Khởi tạo Chiến binh Bot: ${botName} (Kịch bản: ${scenario})`, 'succ');
+                logTerm(`Khởi tạo Bot: ${botName} (${scenario})`, 'succ');
 
                 const password = 'BotPassword123!';
                 let playerId = null;
@@ -1831,16 +1317,17 @@
                 if (authRes.ok) {
                     const p = await authRes.json();
                     playerId = p.playerId;
-                    logTerm(`Đã đăng ký Player mới: ${botName} (PlayerId: #${playerId})`, 'succ');
+                    logTerm(`Đăng ký Player mới: ${botName} (#${playerId})`, 'succ');
                 } else {
                     authRes = await fetch('/api/Players/login', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ playerName: botName, password })
                     });
+                    if (!authRes.ok) throw new Error(`Đăng nhập Bot thất bại (${authRes.status})`);
                     const p = await authRes.json();
                     playerId = p.playerId;
-                    logTerm(`Đăng nhập thành công PlayerId: #${playerId}`, 'succ');
+                    logTerm(`Đăng nhập Player #${playerId}`, 'succ');
                 }
 
                 const startRes = await fetch('/api/Sessions/start', {
@@ -1848,109 +1335,92 @@
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ playerId })
                 });
+                if (!startRes.ok) throw new Error(`Mở Session thất bại (${startRes.status})`);
                 const sData = await startRes.json();
                 const sessionId = sData.sessionId;
-                logTerm(`Đã mở Session #${sessionId} trên SQL Server`, 'succ');
+                logTerm(`Đã mở Session #${sessionId}`, 'succ');
 
                 let steps = [];
                 let finalResult = 'Win';
 
-                if (scenario === 'balanced') {
+                if (scenario === 'level1_win') {
                     finalResult = 'Win';
                     steps = [
                         ['game_start', 0],
                         ['level_start', 1],
-                        ['enemy_killed', 25], ['gold_collected', 20],
-                        ['block_hit', 14], ['enemy_killed', 25], ['gold_collected', 25],
-                        ['checkpoint_reached', 1], ['enemy_killed', 30], ['gold_collected', 30],
-                        ['shop_opened', 1], ['weapon_purchased', 60],
-                        ['level_complete', 1],
-                        ['level_start', 2],
-                        ['trap_hit', 22], ['item_pickup', 35],
-                        ['perfect_parry', 2], ['enemy_killed', 40], ['gold_collected', 45],
-                        ['block_hit', 18], ['enemy_killed', 45], ['gold_collected', 55],
-                        ['checkpoint_reached', 2],
-                        ['shop_opened', 2], ['weapon_purchased', 150], ['potion_purchased', 50],
-                        ['level_complete', 2],
-                        ['level_start', 3],
-                        ['checkpoint_reached', 3],
-                        ['perfect_parry', 3], ['block_hit', 24],
-                        ['enemy_killed', 50], ['gold_collected', 60],
-                        ['boss_killed', 3], ['gold_collected', 120],
-                        ['level_complete', 3], ['game_exit', 3]
+                        ['enemy_killed', 100], ['gold_collected', 30],
+                        ['block_hit', 14], ['enemy_killed', 120], ['gold_collected', 36],
+                        ['checkpoint_reached', 1],
+                        ['shop_opened', 1], ['weapon_purchased', 75],
+                        ['trap_hit', 18], ['item_pickup', 35],
+                        ['perfect_parry', 1], ['enemy_killed', 160], ['gold_collected', 48],
+                        ['shop_opened', 1], ['weapon_purchased', 200], ['potion_purchased', 65],
+                        ['enemy_killed', 500], ['boss_killed', 1], ['gold_collected', 220],
+                        ['level_complete', 1], ['game_exit', 1]
                     ];
-                } else if (scenario === 'trap_defeat') {
+                } else if (scenario === 'level2_lose') {
                     finalResult = 'Lose';
                     steps = [
                         ['game_start', 0],
-                        ['level_start', 1],
-                        ['enemy_killed', 25], ['gold_collected', 18],
-                        ['enemy_killed', 25], ['gold_collected', 22],
-                        ['checkpoint_reached', 1],
-                        ['level_complete', 1],
                         ['level_start', 2],
-                        ['trap_hit', 22], ['trap_hit', 22],
-                        ['block_hit', 16], ['enemy_killed', 35], ['gold_collected', 30],
-                        ['trap_hit', 22],
+                        ['enemy_killed', 100], ['gold_collected', 35],
+                        ['checkpoint_reached', 2],
+                        ['trap_hit', 18], ['trap_hit', 18],
+                        ['block_hit', 16], ['enemy_killed', 140], ['gold_collected', 45],
+                        ['trap_hit', 18],
                         ['player_dead', 2], ['level_failed', 2], ['game_exit', 2]
                     ];
                 } else {
                     finalResult = 'Win';
                     steps = [
                         ['game_start', 0],
-                        ['level_start', 1],
-                        ['perfect_parry', 1], ['enemy_killed', 30], ['gold_collected', 40],
-                        ['perfect_parry', 1], ['enemy_killed', 35], ['gold_collected', 65],
-                        ['checkpoint_reached', 1],
-                        ['shop_opened', 1], ['weapon_purchased', 100],
-                        ['level_complete', 1],
-                        ['level_start', 2],
-                        ['perfect_parry', 2], ['enemy_killed', 45], ['gold_collected', 110],
-                        ['perfect_parry', 2], ['enemy_killed', 50], ['gold_collected', 140],
-                        ['checkpoint_reached', 2],
-                        ['shop_opened', 2], ['weapon_purchased', 360],
-                        ['level_complete', 2],
                         ['level_start', 3],
+                        ['perfect_parry', 3], ['enemy_killed', 140], ['gold_collected', 55],
+                        ['perfect_parry', 3], ['enemy_killed', 160], ['gold_collected', 60],
                         ['checkpoint_reached', 3],
-                        ['perfect_parry', 3], ['perfect_parry', 3],
-                        ['enemy_killed', 60], ['gold_collected', 150],
-                        [' shop_opened'.trim(), 3], ['weapon_purchased', 450],
-                        ['boss_killed', 3], ['gold_collected', 200],
+                        ['shop_opened', 3], ['weapon_purchased', 370],
+                        ['item_pickup', 40],
+                        ['perfect_parry', 3], ['block_hit', 24],
+                        ['enemy_killed', 160], ['gold_collected', 55],
+                        ['shop_opened', 3], ['weapon_purchased', 590],
+                        ['enemy_killed', 500], ['boss_killed', 3], ['gold_collected', 220],
+                        ['shop_opened', 3], ['weapon_purchased', 720],
                         ['level_complete', 3], ['game_exit', 3]
                     ];
                 }
 
                 for (const [evType, evVal] of steps) {
                     await postTelemetryEvent(sessionId, evType, evVal);
-                    await sleep(90);
+                    await sleep(75);
                 }
 
-                await fetch(`/api/Sessions/${sessionId}/end`, {
+                const endRes = await fetch(`/api/Sessions/${sessionId}/end`, {
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ result: finalResult })
                 });
+                if (!endRes.ok) throw new Error(`Đóng Session thất bại (${endRes.status})`);
 
-                logTerm(`Đã đóng Session #${sessionId} với kết quả: ${finalResult}! Đang đồng bộ biểu đồ...`, 'succ');
+                logTerm(`Đã đóng Session #${sessionId} (${finalResult}). Đang cập nhật dashboard...`, 'succ');
                 await loadAllDashboardData(false);
             } catch (err) {
                 logTerm(`Lỗi mô phỏng: ${err.message}`, 'err');
             } finally {
                 btn.disabled = false;
-                btn.innerHTML = `<i class="bi bi-play-circle-fill"></i><span>CHẠY MÔ PHỎNG & GỬI TELEMETRY</span>`;
+                btn.innerHTML = `<i class="bi bi-play-circle-fill"></i><span>CHẠY MÔ PHỎNG &amp; GỬI TELEMETRY</span>`;
             }
         }
 
-        // Xuất bảng nhật ký phiên chơi ra file CSV
         function exportTelemetryCsv() {
             if (!cachedRecentSessions || cachedRecentSessions.length === 0) {
                 alert('Chưa có dữ liệu phiên chơi để xuất CSV.');
                 return;
             }
-            const headers = ['SessionId', 'PlayerName', 'StartTime', 'EndTime', 'DurationMinutes', 'Result', 'TotalEvents'];
+            const headers = ['SessionId', 'PlayerName', 'Level', 'StartTime', 'EndTime', 'DurationMinutes', 'Result', 'TotalEvents'];
             const rows = cachedRecentSessions.map(s => [
                 s.sessionId,
                 `"${(s.playerName || '').replace(/"/g, '""')}"`,
+                s.level ?? '',
                 s.startTime,
                 s.endTime || '',
                 s.durationMinutes ?? '',
@@ -1963,7 +1433,7 @@
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;
-            a.download = `Vanguard_Telemetry_Sessions_${new Date().toISOString().slice(0,10)}.csv`;
+            a.download = `Vanguard_Telemetry_Sessions_${new Date().toISOString().slice(0, 10)}.csv`;
             a.click();
             URL.revokeObjectURL(url);
         }

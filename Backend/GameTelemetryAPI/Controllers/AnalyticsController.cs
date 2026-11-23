@@ -2,52 +2,77 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using GameTelemetryAPI.Data;
 using GameTelemetryAPI.DTOs;
+using GameTelemetryAPI.Models;
+using GameTelemetryAPI.Services;
 
 namespace GameTelemetryAPI.Controllers
 {
     [ApiController]
     [Route("api/[controller]")]
-    // Controller cung cấp các API tổng hợp dữ liệu phân tích cho dashboard
+    // Controller cung cấp các API tổng hợp dữ liệu phân tích cho dashboard từ schema 5 bảng chuẩn hóa
     public class AnalyticsController : ControllerBase
     {
         private readonly GameTelemetryContext _context;
-
-        private static readonly Dictionary<int, string> StageNames = new()
-        {
-            { 1, "Màn 1: Trại Rừng Ngoại Vi" },
-            { 2, "Màn 2: Thung Lũng Bẫy" },
-            { 3, "Màn 3: Đấu Trường Mỏ Vàng" }
-        };
-
-        private static readonly (int Price, string Name, string Rarity)[] WeaponCatalog =
-        {
-            (60,  "Kiếm 2",      "Hiếm"),
-            (100, "Kiếm 3",      "Hiếm"),
-            (150, "Búa Chiến",   "Sử Thi"),
-            (210, "Kiếm Đỏ",     "Sử Thi"),
-            (280, "Kiếm Xanh",   "Huyền Thoại"),
-            (360, "Thương Vàng", "Huyền Thoại"),
-            (450, "Búa Đỏ",      "Thần Thoại"),
-            (550, "Đại Kiếm Hoàng Kim", "Thần Thoại")
-        };
 
         public AnalyticsController(GameTelemetryContext context)
         {
             _context = context;
         }
 
-        // Lấy các chỉ số tổng quan như tổng người chơi, phiên chơi, tỷ lệ thắng và thời lượng trung bình
-        [HttpGet("overview")]
-        public async Task<ActionResult<OverviewStatsDto>> GetOverviewStats()
+        private IQueryable<GameSession> FilterSessions(DateTime? from, DateTime? to, int? level)
         {
-            var totalPlayers = await _context.Players.CountAsync();
-            var sessions = await _context.GameSessions
-                .Select(s => new { s.StartTime, s.EndTime, s.Result })
+            var query = _context.GameSessions.AsNoTracking();
+            if (from.HasValue)
+            {
+                var fromStart = from.Value.Date;
+                query = query.Where(s => s.StartTime >= fromStart);
+            }
+            if (to.HasValue)
+            {
+                var toExclusive = to.Value.Date.AddDays(1);
+                query = query.Where(s => s.StartTime < toExclusive);
+            }
+            if (level.HasValue)
+            {
+                int targetLevel = level.Value;
+                query = query.Where(s => s.LevelId == targetLevel);
+            }
+            return query;
+        }
+
+        // Lấy các chỉ số tổng quan như tổng người chơi, phiên chơi, tỷ lệ thắng, vàng và quái hạ gục
+        [HttpGet("overview")]
+        public async Task<ActionResult<OverviewStatsDto>> GetOverviewStats(
+            [FromQuery] DateTime? from = null,
+            [FromQuery] DateTime? to = null,
+            [FromQuery] int? level = null)
+        {
+            var sessionQuery = FilterSessions(from, to, level);
+
+            var totalPlayers = (from.HasValue || to.HasValue || level.HasValue)
+                ? await sessionQuery.Select(s => s.PlayerId).Distinct().CountAsync()
+                : await _context.Players.CountAsync();
+
+            var sessions = await sessionQuery
+                .Select(s => new
+                {
+                    s.SessionId,
+                    s.StartTime,
+                    s.EndTime,
+                    s.Result,
+                    s.GoldEarned,
+                    s.GoldSpent,
+                    s.EnemiesKilled,
+                    s.BossKilled
+                })
                 .ToListAsync();
 
-            var totalSessions = sessions.Count;
-            var totalEvents = await _context.GameEvents.CountAsync();
+            var sessionIds = sessions.Select(s => s.SessionId).ToList();
+            var totalEvents = sessionIds.Count > 0
+                ? await _context.GameEvents.AsNoTracking().CountAsync(e => sessionIds.Contains(e.SessionId))
+                : 0;
 
+            var totalSessions = sessions.Count;
             var finishedSessions = sessions.Where(s => s.EndTime != null).ToList();
             double avgDuration = finishedSessions.Count > 0
                 ? finishedSessions.Average(s => (s.EndTime!.Value - s.StartTime).TotalMinutes)
@@ -60,26 +85,6 @@ namespace GameTelemetryAPI.Controllers
                 ? Math.Round((double)totalWins / decidedCount * 100, 1)
                 : 0;
 
-            var summaryEvents = await _context.GameEvents
-                .Where(e => e.EventType == "gold_collected" ||
-                            e.EventType == "weapon_purchased" ||
-                            e.EventType == "potion_purchased" ||
-                            e.EventType == "enemy_killed" ||
-                            e.EventType == "boss_killed")
-                .Select(e => new { e.EventType, Value = e.Value ?? 0 })
-                .ToListAsync();
-
-            int totalGoldEarned = summaryEvents
-                .Where(e => e.EventType == "gold_collected")
-                .Sum(e => e.Value);
-
-            int totalGoldSpent = summaryEvents
-                .Where(e => e.EventType == "weapon_purchased" || e.EventType == "potion_purchased")
-                .Sum(e => e.Value);
-
-            int totalEnemiesKilled = summaryEvents.Count(e => e.EventType == "enemy_killed");
-            int totalBossKills = summaryEvents.Count(e => e.EventType == "boss_killed");
-
             return Ok(new OverviewStatsDto
             {
                 TotalPlayers = totalPlayers,
@@ -90,32 +95,40 @@ namespace GameTelemetryAPI.Controllers
                 TotalLosses = totalLosses,
                 ActiveOrQuitSessions = Math.Max(0, totalSessions - decidedCount),
                 WinRatePercent = winRate,
-                TotalGoldEarned = totalGoldEarned,
-                TotalGoldSpent = totalGoldSpent,
-                TotalEnemiesKilled = totalEnemiesKilled,
-                TotalBossKills = totalBossKills
+                TotalGoldEarned = sessions.Sum(s => s.GoldEarned),
+                TotalGoldSpent = sessions.Sum(s => s.GoldSpent),
+                TotalEnemiesKilled = sessions.Sum(s => s.EnemiesKilled),
+                TotalBossKills = sessions.Count(s => s.BossKilled)
             });
         }
 
-        // Thống kê tiến độ, tỷ lệ qua màn và số lượt thất bại theo từng màn
+        // Thống kê tiến độ, tỷ lệ hoàn thành và số lượt thất bại theo từng Level (1 Map = 1 Level)
         [HttpGet("levels")]
-        public async Task<ActionResult<List<LevelStatsDto>>> GetLevelStats([FromQuery] int? level = null)
+        public async Task<ActionResult<List<LevelStatsDto>>> GetLevelStats(
+            [FromQuery] int? level = null,
+            [FromQuery] DateTime? from = null,
+            [FromQuery] DateTime? to = null)
         {
-            var query = _context.GameEvents.AsQueryable();
+            var levelNames = await _context.Levels
+                .AsNoTracking()
+                .ToDictionaryAsync(l => l.LevelId, l => l.LevelName);
 
+            var eventQuery = _context.GameEvents.AsNoTracking();
+            if (from.HasValue || to.HasValue)
+            {
+                var dateSessionIds = FilterSessions(from, to, null).Select(s => s.SessionId);
+                eventQuery = eventQuery.Where(e => dateSessionIds.Contains(e.SessionId));
+            }
             if (level.HasValue)
             {
-                query = query.Where(e => e.Value == level.Value);
+                eventQuery = eventQuery.Where(e => e.Value == level.Value);
             }
 
-            var events = await query
+            var events = await eventQuery
                 .Where(e => e.Value != null &&
                             (e.EventType == "level_start" ||
                              e.EventType == "level_complete" ||
-                             e.EventType == "player_dead" ||
-                             e.EventType == "checkpoint_reached" ||
-                             e.EventType == "shop_opened" ||
-                             e.EventType == "perfect_parry"))
+                             e.EventType == "player_dead"))
                 .Select(e => new { Level = e.Value!.Value, e.EventType })
                 .ToListAsync();
 
@@ -125,7 +138,7 @@ namespace GameTelemetryAPI.Controllers
 
             var stageNumbers = level.HasValue
                 ? new List<int> { level.Value }
-                : new List<int> { 1, 2, 3 }.Union(grouped.Keys.Where(k => k >= 1 && k <= 10)).OrderBy(k => k).ToList();
+                : new List<int> { 1, 2, 3 };
 
             var result = stageNumbers.Select(lvl =>
             {
@@ -133,33 +146,28 @@ namespace GameTelemetryAPI.Controllers
                 int starts = list?.Count(x => x.EventType == "level_start") ?? 0;
                 int completions = list?.Count(x => x.EventType == "level_complete") ?? 0;
                 int deaths = list?.Count(x => x.EventType == "player_dead") ?? 0;
-                int checkpoints = list?.Count(x => x.EventType == "checkpoint_reached") ?? 0;
-                int shopOpens = list?.Count(x => x.EventType == "shop_opened") ?? 0;
-                int parries = list?.Count(x => x.EventType == "perfect_parry") ?? 0;
                 double rate = starts > 0 ? Math.Round((double)completions / starts * 100, 1) : 0;
 
                 return new LevelStatsDto
                 {
                     Level = lvl,
-                    StageName = StageNames.TryGetValue(lvl, out var name) ? name : $"Màn {lvl}",
+                    StageName = levelNames.TryGetValue(lvl, out var name) ? name : $"Level {lvl}",
                     Starts = starts,
                     Completions = completions,
                     Deaths = deaths,
-                    CompletionRatePercent = rate,
-                    CheckpointsReached = checkpoints,
-                    ShopOpens = shopOpens,
-                    PerfectParries = parries
+                    CompletionRatePercent = rate
                 };
             }).ToList();
 
             return Ok(result);
         }
 
-        // Thống kê phân bố số lượng theo từng loại sự kiện telemetry
+        // Thống kê phân bố số lượng theo từng loại sự kiện cột mốc trong GameEvents
         [HttpGet("events-distribution")]
         public async Task<ActionResult<List<EventCountDto>>> GetEventsDistribution()
         {
             var result = await _context.GameEvents
+                .AsNoTracking()
                 .GroupBy(e => e.EventType)
                 .Select(g => new EventCountDto
                 {
@@ -174,9 +182,12 @@ namespace GameTelemetryAPI.Controllers
 
         // Thống kê lượng phiên chơi theo từng ngày
         [HttpGet("sessions-by-date")]
-        public async Task<ActionResult<List<SessionsByDateDto>>> GetSessionsByDate()
+        public async Task<ActionResult<List<SessionsByDateDto>>> GetSessionsByDate(
+            [FromQuery] DateTime? from = null,
+            [FromQuery] DateTime? to = null,
+            [FromQuery] int? level = null)
         {
-            var sessions = await _context.GameSessions
+            var sessions = await FilterSessions(from, to, level)
                 .Select(s => s.StartTime)
                 .ToListAsync();
 
@@ -193,58 +204,67 @@ namespace GameTelemetryAPI.Controllers
             return Ok(result);
         }
 
-        // Lấy danh sách các phiên chơi gần nhất kèm số lượng sự kiện
+        // Lấy danh sách các phiên chơi gần nhất kèm Level và số liệu tổng hợp
         [HttpGet("recent-sessions")]
-        public async Task<ActionResult<List<RecentSessionDto>>> GetRecentSessions([FromQuery] int limit = 15)
+        public async Task<ActionResult<List<RecentSessionDto>>> GetRecentSessions(
+            [FromQuery] int limit = 15,
+            [FromQuery] DateTime? from = null,
+            [FromQuery] DateTime? to = null,
+            [FromQuery] int? level = null)
         {
-            var sessions = await _context.GameSessions
-                .Include(s => s.Player)
-                .Include(s => s.GameEvents)
+            var sessions = await FilterSessions(from, to, level)
                 .OrderByDescending(s => s.StartTime)
                 .Take(limit)
                 .Select(s => new RecentSessionDto
                 {
                     SessionId = s.SessionId,
                     PlayerName = s.Player != null ? s.Player.PlayerName : "Unknown",
+                    Level = s.LevelId,
                     StartTime = s.StartTime,
                     EndTime = s.EndTime,
                     DurationMinutes = s.EndTime != null ? Math.Round((s.EndTime.Value - s.StartTime).TotalMinutes, 2) : null,
                     Result = s.Result,
-                    TotalEvents = s.GameEvents.Count
+                    TotalEvents = s.GameEvents.Count + s.ShopPurchases.Count,
+                    EnemiesKilled = s.EnemiesKilled,
+                    GoldEarned = s.GoldEarned,
+                    GoldSpent = s.GoldSpent,
+                    PerfectParries = s.PerfectParries
                 })
                 .ToListAsync();
 
             return Ok(sessions);
         }
 
-        // Phân tích kinh tế vàng thu thập, chi tiêu nâng cấp vũ khí và mua bình máu
+        // Phân tích kinh tế vàng từ GameSessions và chi tiết giao dịch từ ShopPurchases
         [HttpGet("economy")]
-        public async Task<ActionResult<EconomyStatsDto>> GetEconomyStats()
+        public async Task<ActionResult<EconomyStatsDto>> GetEconomyStats(
+            [FromQuery] DateTime? from = null,
+            [FromQuery] DateTime? to = null,
+            [FromQuery] int? level = null)
         {
-            var totalSessions = await _context.GameSessions.CountAsync();
-
-            var econEvents = await _context.GameEvents
-                .Where(e => e.EventType == "gold_collected" ||
-                            e.EventType == "shop_opened" ||
-                            e.EventType == "weapon_purchased" ||
-                            e.EventType == "potion_purchased")
-                .Select(e => new { e.EventType, Value = e.Value ?? 0 })
+            var sessionQuery = FilterSessions(from, to, level);
+            var sessionStats = await sessionQuery
+                .Select(s => new { s.SessionId, s.GoldEarned, s.GoldSpent })
                 .ToListAsync();
 
-            int totalGoldCollected = econEvents
-                .Where(e => e.EventType == "gold_collected")
-                .Sum(e => e.Value);
+            int totalSessions = sessionStats.Count;
+            int totalGoldCollected = sessionStats.Sum(s => s.GoldEarned);
+            int totalGoldSpent = sessionStats.Sum(s => s.GoldSpent);
 
-            var weaponEvents = econEvents.Where(e => e.EventType == "weapon_purchased").ToList();
-            var potionEvents = econEvents.Where(e => e.EventType == "potion_purchased").ToList();
+            var sessionIds = sessionStats.Select(s => s.SessionId).ToList();
+            var purchases = sessionIds.Count > 0
+                ? await _context.ShopPurchases
+                    .AsNoTracking()
+                    .Where(p => sessionIds.Contains(p.SessionId))
+                    .Select(p => new { p.ItemType, p.Price })
+                    .ToListAsync()
+                : new();
 
-            int goldOnWeapons = weaponEvents.Sum(e => e.Value);
-            int goldOnPotions = potionEvents.Sum(e => e.Value);
-            int totalGoldSpent = goldOnWeapons + goldOnPotions;
+            var weaponPurchasesList = purchases.Where(p => p.ItemType == "Weapon").ToList();
+            var potionPurchasesList = purchases.Where(p => p.ItemType == "Potion").ToList();
 
-            int shopOpens = econEvents.Count(e => e.EventType == "shop_opened");
-            int weaponPurchases = weaponEvents.Count;
-            int potionPurchases = potionEvents.Count;
+            int goldOnWeapons = weaponPurchasesList.Sum(p => p.Price);
+            int goldOnPotions = potionPurchasesList.Sum(p => p.Price);
 
             double spendRatio = totalGoldCollected > 0
                 ? Math.Round((double)totalGoldSpent / totalGoldCollected * 100, 1)
@@ -254,22 +274,34 @@ namespace GameTelemetryAPI.Controllers
                 ? Math.Round((double)totalGoldCollected / totalSessions, 1)
                 : 0;
 
-            double shopConversion = shopOpens > 0
-                ? Math.Round((double)(weaponPurchases + potionPurchases) / shopOpens * 100, 1)
-                : 0;
-
-            var weaponBreakdown = WeaponCatalog.Select(w =>
+            var weaponBreakdown = WeaponCatalog.Items.Select(w =>
             {
-                int count = weaponEvents.Count(e => e.Value == w.Price);
+                var matched = weaponPurchasesList.Where(p => p.Price == w.Price).ToList();
                 return new WeaponPurchaseStatDto
                 {
                     Price = w.Price,
                     WeaponName = w.Name,
                     Rarity = w.Rarity,
-                    PurchaseCount = count,
-                    TotalGoldSpent = count * w.Price
+                    BonusDamage = w.BonusDamage,
+                    PurchaseCount = matched.Count,
+                    TotalGoldSpent = matched.Sum(p => p.Price)
                 };
             }).ToList();
+
+            var catalogPrices = WeaponCatalog.Items.Select(w => w.Price).ToHashSet();
+            var legacyWeapons = weaponPurchasesList.Where(p => !catalogPrices.Contains(p.Price)).ToList();
+            if (legacyWeapons.Count > 0)
+            {
+                weaponBreakdown.Add(new WeaponPurchaseStatDto
+                {
+                    Price = 0,
+                    WeaponName = "Vũ khí khác (bản cũ)",
+                    Rarity = "Cũ",
+                    BonusDamage = 0,
+                    PurchaseCount = legacyWeapons.Count,
+                    TotalGoldSpent = legacyWeapons.Sum(p => p.Price)
+                });
+            }
 
             return Ok(new EconomyStatsDto
             {
@@ -279,62 +311,54 @@ namespace GameTelemetryAPI.Controllers
                 GoldSpentOnPotions = goldOnPotions,
                 SpendRatioPercent = spendRatio,
                 AvgGoldPerSession = avgGoldPerSession,
-                ShopOpenCount = shopOpens,
-                WeaponPurchaseCount = weaponPurchases,
-                PotionPurchaseCount = potionPurchases,
-                ShopConversionPercent = shopConversion,
+                WeaponPurchaseCount = weaponPurchasesList.Count,
+                PotionPurchaseCount = potionPurchasesList.Count,
                 WeaponBreakdown = weaponBreakdown
             });
         }
 
-        // Tổng hợp chỉ số chiến đấu gồm hạ quái, hạ boss, đỡ đòn, parry và sát thương bẫy
+        // Tổng hợp chỉ số chiến đấu trực tiếp từ GameSessions
         [HttpGet("combat")]
-        public async Task<ActionResult<CombatStatsDto>> GetCombatStats()
+        public async Task<ActionResult<CombatStatsDto>> GetCombatStats(
+            [FromQuery] DateTime? from = null,
+            [FromQuery] DateTime? to = null,
+            [FromQuery] int? level = null)
         {
-            var combatEvents = await _context.GameEvents
-                .Where(e => e.EventType == "enemy_killed" ||
-                            e.EventType == "boss_killed" ||
-                            e.EventType == "level_start" ||
-                            e.EventType == "block_hit" ||
-                            e.EventType == "perfect_parry" ||
-                            e.EventType == "trap_hit" ||
-                            e.EventType == "item_pickup" ||
-                            e.EventType == "checkpoint_reached")
-                .Select(e => new { e.EventType, Value = e.Value ?? 0 })
+            var sessions = await FilterSessions(from, to, level)
+                .Select(s => new
+                {
+                    s.EnemiesKilled,
+                    s.BossKilled,
+                    s.BlockHits,
+                    s.BlockedDamage,
+                    s.PerfectParries,
+                    s.TrapHits,
+                    s.TrapDamage
+                })
                 .ToListAsync();
 
-            var enemyKills = combatEvents.Where(e => e.EventType == "enemy_killed").ToList();
-            int bossKills = combatEvents.Count(e => e.EventType == "boss_killed");
-            int stage3Starts = combatEvents.Count(e => e.EventType == "level_start" && e.Value == 3);
-
-            var blocks = combatEvents.Where(e => e.EventType == "block_hit").ToList();
-            int parries = combatEvents.Count(e => e.EventType == "perfect_parry");
-            int totalDefenses = blocks.Count + parries;
-
-            var traps = combatEvents.Where(e => e.EventType == "trap_hit").ToList();
-            var pickups = combatEvents.Where(e => e.EventType == "item_pickup").ToList();
-            int checkpoints = combatEvents.Count(e => e.EventType == "checkpoint_reached");
+            int totalSessions = sessions.Count;
+            int bossKills = sessions.Count(s => s.BossKilled);
+            int blockHits = sessions.Sum(s => s.BlockHits);
+            int parries = sessions.Sum(s => s.PerfectParries);
+            int totalDefenses = blockHits + parries;
 
             return Ok(new CombatStatsDto
             {
-                TotalEnemyKills = enemyKills.Count,
-                TotalKillScore = enemyKills.Sum(e => e.Value),
+                TotalEnemyKills = sessions.Sum(s => s.EnemiesKilled),
                 BossKills = bossKills,
-                Stage3Starts = stage3Starts,
-                BossClearRatePercent = stage3Starts > 0 ? Math.Round((double)bossKills / stage3Starts * 100, 1) : 0,
-                BlockHits = blocks.Count,
-                TotalBlockedDamage = blocks.Sum(e => e.Value),
+                Stage3Starts = totalSessions,
+                BossClearRatePercent = totalSessions > 0 ? Math.Round((double)bossKills / totalSessions * 100, 1) : 0,
+                BlockHits = blockHits,
+                TotalBlockedDamage = sessions.Sum(s => s.BlockedDamage),
                 PerfectParries = parries,
                 ParryMasteryPercent = totalDefenses > 0 ? Math.Round((double)parries / totalDefenses * 100, 1) : 0,
-                TrapHits = traps.Count,
-                TotalTrapDamage = traps.Sum(e => e.Value),
-                HealthPickups = pickups.Count,
-                TotalHealthHealed = pickups.Sum(e => e.Value),
-                CheckpointsReached = checkpoints
+                TrapHits = sessions.Sum(s => s.TrapHits),
+                TotalTrapDamage = sessions.Sum(s => s.TrapDamage)
             });
         }
 
-        // Truy xuất chuỗi sự kiện theo dòng thời gian của một phiên chơi cụ thể
+        // Truy xuất dòng thời gian kết hợp cột mốc (GameEvents) và giao dịch mua đồ (ShopPurchases) của 1 phiên chơi
         [HttpGet("sessions/{sessionId:long}/events")]
         public async Task<ActionResult<List<SessionEventTimelineDto>>> GetSessionEvents(long sessionId)
         {
@@ -350,19 +374,36 @@ namespace GameTelemetryAPI.Controllers
             var events = await _context.GameEvents
                 .AsNoTracking()
                 .Where(e => e.SessionId == sessionId)
-                .OrderBy(e => e.EventTime)
-                .ThenBy(e => e.EventId)
+                .ToListAsync();
+
+            var purchases = await _context.ShopPurchases
+                .AsNoTracking()
+                .Where(p => p.SessionId == sessionId)
                 .ToListAsync();
 
             var startTime = session.StartTime;
+
             var timeline = events.Select(e => new SessionEventTimelineDto
-            {
-                EventId = e.EventId,
-                EventType = e.EventType,
-                EventTime = e.EventTime,
-                Value = e.Value,
-                OffsetSeconds = Math.Max(0, Math.Round((e.EventTime - startTime).TotalSeconds, 1))
-            }).ToList();
+                {
+                    EventId = e.EventId,
+                    EventType = e.EventType,
+                    EventTime = e.EventTime,
+                    Value = e.Value,
+                    OffsetSeconds = Math.Max(0, Math.Round((e.EventTime - startTime).TotalSeconds, 1))
+                })
+                .Concat(purchases.Select(p => new SessionEventTimelineDto
+                {
+                    EventId = p.PurchaseId,
+                    EventType = string.Equals(p.ItemType, "Potion", StringComparison.OrdinalIgnoreCase)
+                        ? "potion_purchased"
+                        : "weapon_purchased",
+                    EventTime = p.PurchasedAt,
+                    Value = p.Price,
+                    OffsetSeconds = Math.Max(0, Math.Round((p.PurchasedAt - startTime).TotalSeconds, 1))
+                }))
+                .OrderBy(t => t.EventTime)
+                .ThenBy(t => t.EventId)
+                .ToList();
 
             return Ok(timeline);
         }

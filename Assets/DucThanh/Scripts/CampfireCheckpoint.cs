@@ -197,7 +197,8 @@ public class CampfireCheckpoint : MonoBehaviour
 
         if (TelemetryManager.Instance != null)
         {
-            TelemetryManager.Instance.TrackCheckpointReached(stageNumber);
+            int level = StageManager.Instance != null ? StageManager.Instance.MapLevel : stageNumber;
+            TelemetryManager.Instance.TrackCheckpointReached(level);
         }
 
         if (StageManager.Instance != null)

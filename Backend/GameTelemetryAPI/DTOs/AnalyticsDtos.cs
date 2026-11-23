@@ -50,11 +50,16 @@ namespace GameTelemetryAPI.DTOs
     {
         public long SessionId { get; set; }
         public string PlayerName { get; set; } = string.Empty;
+        public int? Level { get; set; }
         public DateTime StartTime { get; set; }
         public DateTime? EndTime { get; set; }
         public double? DurationMinutes { get; set; }
         public string? Result { get; set; }
         public int TotalEvents { get; set; }
+        public int EnemiesKilled { get; set; }
+        public int GoldEarned { get; set; }
+        public int GoldSpent { get; set; }
+        public int PerfectParries { get; set; }
     }
 
     // DTO thống kê lượt mua và doanh thu vàng theo từng vũ khí
@@ -63,6 +68,7 @@ namespace GameTelemetryAPI.DTOs
         public int Price { get; set; }
         public string WeaponName { get; set; } = string.Empty;
         public string Rarity { get; set; } = string.Empty;
+        public int BonusDamage { get; set; }
         public int PurchaseCount { get; set; }
         public int TotalGoldSpent { get; set; }
     }

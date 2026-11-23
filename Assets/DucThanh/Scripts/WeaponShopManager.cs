@@ -157,8 +157,8 @@ public class WeaponShopManager : MonoBehaviour
 
         if (TelemetryManager.Instance != null)
         {
-            int stage = StageManager.Instance != null ? StageManager.Instance.CurrentStage : TelemetryManager.Instance.CurrentLevel;
-            TelemetryManager.Instance.TrackShopOpened(stage);
+            int level = StageManager.Instance != null ? StageManager.Instance.MapLevel : TelemetryManager.Instance.CurrentLevel;
+            TelemetryManager.Instance.TrackShopOpened(level);
         }
     }
 
