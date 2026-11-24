@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Rendering;
 #if UNITY_EDITOR
@@ -24,6 +25,28 @@ public class GoldPickup : MonoBehaviour
     private static readonly Material[] SharedRingMats = new Material[2];
     private static Gradient cachedSparkleGradient;
 
+    private static readonly Stack<GoldPickup>[] PickupPools =
+    {
+        new Stack<GoldPickup>(24),
+        new Stack<GoldPickup>(24),
+        new Stack<GoldPickup>(8),
+        new Stack<GoldPickup>(4)
+    };
+    private static readonly int[] MaxPoolPerVariant = { 24, 24, 8, 4 };
+
+    [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+    private static void ResetStaticPoolState()
+    {
+        for (int i = 0; i < PickupPools.Length; i++) PickupPools[i].Clear();
+        cachedCoinCrownPrefab = null;
+        cachedCoinStarPrefab = null;
+        cachedBagPrefab = null;
+        cachedChestGoldPrefab = null;
+        for (int i = 0; i < SharedBeamMats.Length; i++) SharedBeamMats[i] = null;
+        for (int i = 0; i < SharedRingMats.Length; i++) SharedRingMats[i] = null;
+        cachedSparkleGradient = null;
+    }
+
     private Transform playerTransform;
     private Terrain cachedTerrain;
     private Transform visualPivot;
@@ -40,6 +63,8 @@ public class GoldPickup : MonoBehaviour
     private bool landed;
     private bool collected;
     private float spawnTime;
+    private int poolVariant = -1;
+    private bool isPooled;
 
     // Tung ra nhiều đồng vàng hoặc rương vàng tại vị trí quái vừa bị hạ
     public static void SpawnGoldBurst(Vector3 origin, int totalGold, int coinCount = 3, bool isBossDrop = false)
@@ -62,6 +87,14 @@ public class GoldPickup : MonoBehaviour
 
             bool isChest = isBossDrop && i == 0 && cachedChestGoldPrefab != null;
             bool isBag = !isChest && ((isBossDrop && i <= 2) || (!isBossDrop && i == 0 && totalGold >= 60)) && cachedBagPrefab != null;
+            int variant = isChest ? 3 : isBag ? 2 : (i % 2 == 0 ? 0 : (cachedCoinStarPrefab != null ? 1 : 0));
+
+            GoldPickup pooled = TryRentFromPool(variant);
+            if (pooled != null)
+            {
+                pooled.ResetForSpawn(origin + Vector3.up * 0.95f, amt, horizontalDir, isChest ? 0.65f : 1.0f);
+                continue;
+            }
 
             GameObject root = new GameObject(isChest ? "GoldChest_Drop" : isBag ? "GoldBag_Drop" : "GoldCoin_Drop");
             root.transform.position = origin + Vector3.up * 0.95f;
@@ -73,7 +106,7 @@ public class GoldPickup : MonoBehaviour
                 ? cachedChestGoldPrefab
                 : isBag
                     ? cachedBagPrefab
-                    : (i % 2 == 0 ? cachedCoinCrownPrefab : (cachedCoinStarPrefab != null ? cachedCoinStarPrefab : cachedCoinCrownPrefab));
+                    : (variant == 0 ? cachedCoinCrownPrefab : cachedCoinStarPrefab);
 
             float hoverHeight = isChest ? 0.08f : isBag ? 0.12f : 0.42f;
             float spin = isChest ? 85f : isBag ? 125f : 215f;
@@ -174,7 +207,47 @@ public class GoldPickup : MonoBehaviour
             gp.spinSpeed = spin;
             gp.baseLightIntensity = baseInt;
             gp.groundHoverHeight = hoverHeight;
+            gp.poolVariant = variant;
+            gp.isPooled = true;
             gp.InitScatter(horizontalDir, isChest ? 0.65f : 1.0f);
+        }
+    }
+
+    private static GoldPickup TryRentFromPool(int variant)
+    {
+        if (variant < 0 || variant >= PickupPools.Length) return null;
+        Stack<GoldPickup> pool = PickupPools[variant];
+        while (pool.Count > 0)
+        {
+            GoldPickup item = pool.Pop();
+            if (item != null) return item;
+        }
+        return null;
+    }
+
+    private void ResetForSpawn(Vector3 spawnPos, int amount, Vector3 horizontalDir, float distanceMul)
+    {
+        transform.position = spawnPos;
+        goldAmount = amount;
+        collected = false;
+        landed = false;
+        bounceCount = 0;
+        velocity = Vector3.zero;
+        if (visualPivot != null) visualPivot.localRotation = Quaternion.identity;
+        if (groundRingTransform != null) groundRingTransform.localRotation = Quaternion.identity;
+        if (glowLight != null)
+        {
+            glowLight.enabled = true;
+            glowLight.intensity = baseLightIntensity;
+        }
+        cachedTerrain = Terrain.activeTerrain;
+        ResolvePlayer();
+        InitScatter(horizontalDir, distanceMul);
+        gameObject.SetActive(true);
+        if (sparklePs != null)
+        {
+            sparklePs.Clear();
+            sparklePs.Play();
         }
     }
 
@@ -442,6 +515,16 @@ public class GoldPickup : MonoBehaviour
 
         CombatVfxManager.SpawnGoldCollectEffect(transform.position + Vector3.up * 0.2f, goldAmount);
         GameAudioManager.PlayPickup();
+
+        if (isPooled && poolVariant >= 0 && poolVariant < PickupPools.Length && PickupPools[poolVariant].Count < MaxPoolPerVariant[poolVariant])
+        {
+            if (sparklePs != null) sparklePs.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
+            if (glowLight != null) glowLight.enabled = false;
+            gameObject.SetActive(false);
+            PickupPools[poolVariant].Push(this);
+            return;
+        }
+
         Destroy(gameObject);
     }
 

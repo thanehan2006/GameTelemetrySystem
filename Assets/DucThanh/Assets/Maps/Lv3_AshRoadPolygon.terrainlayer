@@ -8,7 +8,7 @@ TerrainLayer:
   m_PrefabAsset: {fileID: 0}
   m_Name: Lv3_AshRoadPolygon
   m_DiffuseTexture: {fileID: 2800000, guid: 67506e039e9c4f146b2c005cd3967f35, type: 3}
-  m_NormalMapTexture: {fileID: 2800000, guid: 6725ffb624d89a24b9b117e258b95040, type: 3}
+  m_NormalMapTexture: {fileID: 2800000, guid: 33bca1f3081133340916776c352dc9bd, type: 3}
   m_MaskMapTexture: {fileID: 0}
   m_TileSize: {x: 5, y: 5}
   m_TileOffset: {x: 0, y: 0}

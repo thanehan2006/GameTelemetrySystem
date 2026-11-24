@@ -66,6 +66,11 @@ public class PlayerAttack : MonoBehaviour
     private Transform lockOuterDiamondT;
     private Transform lockInnerDiamondT;
     private MaterialPropertyBlock lockPropBlock;
+    private Camera cachedMainCamera;
+    private EnemyHealth cachedLockTarget;
+    private CapsuleCollider cachedLockTargetCollider;
+    private Vector3 lockSortLookDir;
+    private System.Comparison<EnemyHealth> lockCandidateComparer;
 
     private readonly List<int> availableAttackIndices = new List<int>(3);
     private int currentAttackStateHash = AttackStateHashes[0];
@@ -87,6 +92,7 @@ public class PlayerAttack : MonoBehaviour
         animator = GetComponentInChildren<Animator>();
         playerController = GetComponent<PlayerController>();
         animController = GetComponent<PlayerAnimationController>();
+        lockCandidateComparer = CompareLockCandidates;
 
         if (visualModel == null)
         {
@@ -922,17 +928,14 @@ public class PlayerAttack : MonoBehaviour
             return;
         }
 
-        Vector3 lookDir = Camera.main != null ? Camera.main.transform.forward : (playerController != null ? playerController.GetVisualForward() : transform.forward);
+        Camera mainCam = GetMainCamera();
+        Vector3 lookDir = mainCam != null ? mainCam.transform.forward : (playerController != null ? playerController.GetVisualForward() : transform.forward);
         lookDir.y = 0f;
         if (lookDir.sqrMagnitude < 0.001f) lookDir = transform.forward;
         lookDir.Normalize();
 
-        lockCandidates.Sort((a, b) =>
-        {
-            float scoreA = ComputeLockScore(a, lookDir);
-            float scoreB = ComputeLockScore(b, lookDir);
-            return scoreA.CompareTo(scoreB);
-        });
+        lockSortLookDir = lookDir;
+        lockCandidates.Sort(lockCandidateComparer ?? CompareLockCandidates);
 
         if (!cycleNext || CurrentLockedTarget == null)
         {
@@ -950,6 +953,22 @@ public class PlayerAttack : MonoBehaviour
                 CurrentLockedTarget = lockCandidates[0];
             }
         }
+    }
+
+    private Camera GetMainCamera()
+    {
+        if (cachedMainCamera == null)
+        {
+            cachedMainCamera = Camera.main;
+        }
+        return cachedMainCamera;
+    }
+
+    private int CompareLockCandidates(EnemyHealth a, EnemyHealth b)
+    {
+        float scoreA = ComputeLockScore(a, lockSortLookDir);
+        float scoreB = ComputeLockScore(b, lockSortLookDir);
+        return scoreA.CompareTo(scoreB);
     }
 
     private float ComputeLockScore(EnemyHealth eh, Vector3 lookDir)
@@ -1026,6 +1045,8 @@ public class PlayerAttack : MonoBehaviour
     {
         if (CurrentLockedTarget == null || CurrentLockedTarget.IsDead || GameOverManager.IsGameOver)
         {
+            cachedLockTarget = null;
+            cachedLockTargetCollider = null;
             if (lockIndicatorRoot != null && lockIndicatorRoot.activeSelf)
             {
                 lockIndicatorRoot.SetActive(false);
@@ -1040,7 +1061,12 @@ public class PlayerAttack : MonoBehaviour
         }
 
         Transform targetT = CurrentLockedTarget.transform;
-        CapsuleCollider col = CurrentLockedTarget.GetComponent<CapsuleCollider>();
+        if (cachedLockTarget != CurrentLockedTarget)
+        {
+            cachedLockTarget = CurrentLockedTarget;
+            cachedLockTargetCollider = CurrentLockedTarget.GetComponent<CapsuleCollider>();
+        }
+        CapsuleCollider col = cachedLockTargetCollider;
         float scaleY = Mathf.Max(0.5f, targetT.localScale.y);
         float radius = col != null ? col.radius * scaleY : (CurrentLockedTarget.isBoss ? 1.1f : 0.55f);
         float height = col != null ? col.height * scaleY : (CurrentLockedTarget.isBoss ? 2.6f : 1.85f);
@@ -1060,9 +1086,10 @@ public class PlayerAttack : MonoBehaviour
             lockGroundRingT.Rotate(Vector3.up, 95f * dt, Space.Self);
         }
 
-        if (lockReticleRootT != null && Camera.main != null)
+        Camera mainCam = GetMainCamera();
+        if (lockReticleRootT != null && mainCam != null)
         {
-            Transform camT = Camera.main.transform;
+            Transform camT = mainCam.transform;
             Vector3 toCam = (camT.position - (targetPos + Vector3.up * (height * 0.56f))).normalized;
             lockReticleRootT.localPosition = new Vector3(0f, height * 0.56f, 0f) + toCam * (radius * 0.65f + 0.25f);
 

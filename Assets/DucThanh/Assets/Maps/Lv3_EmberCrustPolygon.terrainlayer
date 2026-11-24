@@ -8,7 +8,7 @@ TerrainLayer:
   m_PrefabAsset: {fileID: 0}
   m_Name: Lv3_EmberCrustPolygon
   m_DiffuseTexture: {fileID: 2800000, guid: c33e68178e8070648aff733f0387ab3e, type: 3}
-  m_NormalMapTexture: {fileID: 2800000, guid: 6725ffb624d89a24b9b117e258b95040, type: 3}
+  m_NormalMapTexture: {fileID: 2800000, guid: 33bca1f3081133340916776c352dc9bd, type: 3}
   m_MaskMapTexture: {fileID: 0}
   m_TileSize: {x: 6, y: 6}
   m_TileOffset: {x: 0, y: 0}

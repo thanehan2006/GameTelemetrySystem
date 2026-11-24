@@ -13,10 +13,26 @@ public class OrcEnemyAI : MonoBehaviour
     private const float DestinationMoveThresholdSqr = 0.16f;
     private const float NavMeshSampleRadius = 6f;
 
+    public enum IdleBehaviorMode
+    {
+        AlwaysChase,
+        StandGuard,
+        Patrol
+    }
+
     [Header("Movement Settings")]
     public float moveSpeed = 3.5f;
     public float stoppingDistance = 1.4f;
     public float rotationSpeed = 10f;
+
+    [Header("Patrol & Detection Settings")]
+    public IdleBehaviorMode idleBehavior = IdleBehaviorMode.AlwaysChase;
+    public float detectionRange = 14f;
+    public float leashRange = 30f;
+    public float alertAllyRadius = 7f;
+    public float patrolSpeedMultiplier = 0.55f;
+    public float patrolWaitDuration = 1.8f;
+    public float patrolRadius = 6f;
 
     [Header("Collision, Separation & Knockback")]
     public float minEnemySpacing = 1.05f;
@@ -42,6 +58,7 @@ public class OrcEnemyAI : MonoBehaviour
 
     [Header("Animation State Names")]
     public string idleStateName = "Idle1";
+    public string walkStateName = "Walk";
     public string runStateName = "Run";
     public string attackStateName = "Attack1";
 
@@ -54,6 +71,8 @@ public class OrcEnemyAI : MonoBehaviour
     private float nextAttackTime;
     private bool isAttacking;
     private int idleStateHash;
+    private int walkStateHash;
+    private bool hasWalkState;
     private int runStateHash;
     private int attackStateHash;
     private int hitStateHash;
@@ -62,6 +81,16 @@ public class OrcEnemyAI : MonoBehaviour
     private Vector3 knockbackVelocity;
     private float hitStunTimer;
     private float parryStunTimer;
+
+    private bool isAggroed;
+    private Vector3 homePosition;
+    private Quaternion homeRotation;
+    private bool hasHomeConfigured;
+    private Vector3[] patrolPoints;
+    private int currentPatrolIndex;
+    private float patrolWaitTimer;
+    private float patrolStuckTimer;
+    private Vector3 lastPatrolProgressPos;
 
     public bool IsParryStunned => parryStunTimer > 0f;
     private float nextDestinationTime;
@@ -82,9 +111,12 @@ public class OrcEnemyAI : MonoBehaviour
     {
         animator = GetComponentInChildren<Animator>();
         idleStateHash = Animator.StringToHash(idleStateName);
+        walkStateHash = string.IsNullOrEmpty(walkStateName) ? 0 : Animator.StringToHash(walkStateName);
+        hasWalkState = animator != null && walkStateHash != 0 && animator.HasState(0, walkStateHash);
         runStateHash = Animator.StringToHash(runStateName);
         attackStateHash = Animator.StringToHash(attackStateName);
         hitStateHash = string.IsNullOrEmpty(hitStateName) ? 0 : Animator.StringToHash(hitStateName);
+        isAggroed = (idleBehavior == IdleBehaviorMode.AlwaysChase);
 
         CapsuleCollider bodyCollider = GetComponent<CapsuleCollider>();
         if (bodyCollider != null)
@@ -109,7 +141,17 @@ public class OrcEnemyAI : MonoBehaviour
     {
         SnapToGround();
         EnsureOnNavMesh();
+        if (!hasHomeConfigured)
+        {
+            homePosition = transform.position;
+            homeRotation = transform.rotation;
+        }
+        if (idleBehavior == IdleBehaviorMode.AlwaysChase)
+        {
+            isAggroed = true;
+        }
         lastProgressPos = transform.position;
+        lastPatrolProgressPos = transform.position;
         FindPlayerTarget();
         PlayAnimation(idleStateHash);
     }
@@ -123,7 +165,7 @@ public class OrcEnemyAI : MonoBehaviour
         }
 
         navAgent.speed = moveSpeed;
-        navAgent.stoppingDistance = Mathf.Min(stoppingDistance, Mathf.Max(0.8f, attackRange * 0.82f));
+        navAgent.stoppingDistance = GetCombatStoppingDistance();
         if (navAgent.radius < 0.25f) navAgent.radius = 0.48f;
         if (navAgent.height < 0.8f) navAgent.height = 1.9f;
         navAgent.baseOffset = 0f;
@@ -132,6 +174,80 @@ public class OrcEnemyAI : MonoBehaviour
         navAgent.autoBraking = true;
         navAgent.obstacleAvoidanceType = ObstacleAvoidanceType.HighQualityObstacleAvoidance;
         navAgent.avoidancePriority = Random.Range(30, 70);
+    }
+
+    private float GetCombatStoppingDistance()
+    {
+        return Mathf.Min(stoppingDistance, Mathf.Max(0.8f, attackRange * 0.82f));
+    }
+
+    // Cấu hình quái đứng gác tại một vị trí và chỉ đuổi đánh khi người chơi tới gần
+    public void ConfigureStandGuard(Vector3 guardPos, Vector3 lookDirection, float detectRadius = 14f, float maxLeashDistance = 28f)
+    {
+        idleBehavior = IdleBehaviorMode.StandGuard;
+        isAggroed = false;
+        detectionRange = Mathf.Max(2f, detectRadius);
+        leashRange = Mathf.Max(detectionRange + 4f, maxLeashDistance);
+        homePosition = guardPos;
+        hasHomeConfigured = true;
+        patrolPoints = null;
+
+        lookDirection.y = 0f;
+        homeRotation = lookDirection.sqrMagnitude > 0.001f
+            ? Quaternion.LookRotation(lookDirection.normalized)
+            : transform.rotation;
+        transform.rotation = homeRotation;
+    }
+
+    // Cấu hình quái đi tuần qua lại giữa các điểm và đuổi đánh khi phát hiện người chơi
+    public void ConfigurePatrol(Vector3[] waypoints, float detectRadius = 15f, float maxLeashDistance = 30f, float speedMult = 0.55f, float waitTime = 1.8f)
+    {
+        idleBehavior = IdleBehaviorMode.Patrol;
+        isAggroed = false;
+        detectionRange = Mathf.Max(2f, detectRadius);
+        leashRange = Mathf.Max(detectionRange + 4f, maxLeashDistance);
+        patrolSpeedMultiplier = Mathf.Clamp(speedMult, 0.3f, 0.9f);
+        patrolWaitDuration = Mathf.Max(0.4f, waitTime);
+        patrolPoints = waypoints;
+        currentPatrolIndex = 0;
+        patrolWaitTimer = 0f;
+        patrolStuckTimer = 0f;
+        homePosition = (waypoints != null && waypoints.Length > 0) ? waypoints[0] : transform.position;
+        homeRotation = transform.rotation;
+        hasHomeConfigured = true;
+    }
+
+    // Kích hoạt trạng thái truy đuổi và báo động cho đồng minh xung quanh
+    public void AlertAggro(bool alertNearbyAllies = true)
+    {
+        if (isAggroed) return;
+
+        isAggroed = true;
+        patrolWaitTimer = 0f;
+        patrolStuckTimer = 0f;
+        nextDestinationTime = 0f;
+        if (animator != null && parryStunTimer <= 0f)
+        {
+            animator.speed = 1f;
+        }
+
+        if (alertNearbyAllies && alertAllyRadius > 0f)
+        {
+            float sqrAlert = alertAllyRadius * alertAllyRadius;
+            Vector3 myPos = transform.position;
+            for (int i = 0; i < ActiveEnemies.Count; i++)
+            {
+                OrcEnemyAI other = ActiveEnemies[i];
+                if (other == null || other == this || other.isAggroed) continue;
+
+                Vector3 diff = other.transform.position - myPos;
+                diff.y = 0f;
+                if (diff.sqrMagnitude <= sqrAlert)
+                {
+                    other.AlertAggro(false);
+                }
+            }
+        }
     }
 
     // Tìm và neo kẻ địch lên bề mặt NavMesh hợp lệ gần nhất
@@ -161,7 +277,7 @@ public class OrcEnemyAI : MonoBehaviour
         if (navAgent != null)
         {
             navAgent.speed = moveSpeed;
-            navAgent.stoppingDistance = Mathf.Min(stoppingDistance, Mathf.Max(0.8f, attackRange * 0.82f));
+            navAgent.stoppingDistance = GetCombatStoppingDistance();
         }
         if (weaponHitbox != null)
         {
@@ -329,6 +445,43 @@ public class OrcEnemyAI : MonoBehaviour
         toPlayer.y = 0f;
         float sqrDistance = toPlayer.sqrMagnitude;
 
+        if (idleBehavior != IdleBehaviorMode.AlwaysChase)
+        {
+            if (!isAggroed)
+            {
+                if (sqrDistance <= detectionRange * detectionRange)
+                {
+                    AlertAggro(true);
+                }
+                else
+                {
+                    UpdateNonAggroBehavior();
+                    return;
+                }
+            }
+            else if (leashRange > 0f)
+            {
+                Vector3 toHome = transform.position - homePosition;
+                toHome.y = 0f;
+                float disengageRange = detectionRange * 1.15f;
+                if (toHome.sqrMagnitude > leashRange * leashRange && sqrDistance > disengageRange * disengageRange)
+                {
+                    isAggroed = false;
+                    patrolWaitTimer = 0f;
+                    patrolStuckTimer = 0f;
+                    nextDestinationTime = 0f;
+                    lastPatrolProgressPos = transform.position;
+                    UpdateNonAggroBehavior();
+                    return;
+                }
+            }
+        }
+
+        if (animator != null && !Mathf.Approximately(animator.speed, 1f))
+        {
+            animator.speed = 1f;
+        }
+
         if (sqrDistance <= attackRange * attackRange)
         {
             StopAgent();
@@ -358,6 +511,8 @@ public class OrcEnemyAI : MonoBehaviour
         {
             if (navAgent.isStopped) navAgent.isStopped = false;
             if (!Mathf.Approximately(navAgent.speed, moveSpeed)) navAgent.speed = moveSpeed;
+            float combatStop = GetCombatStoppingDistance();
+            if (!Mathf.Approximately(navAgent.stoppingDistance, combatStop)) navAgent.stoppingDistance = combatStop;
 
             Vector3 targetPos = player.position;
             if (Time.time >= nextDestinationTime || (targetPos - lastDestinationTarget).sqrMagnitude >= DestinationMoveThresholdSqr)
@@ -398,14 +553,169 @@ public class OrcEnemyAI : MonoBehaviour
         MoveWithObstacleAvoidance(flatDir, sqrDistance);
     }
 
+    private void UpdateNonAggroBehavior()
+    {
+        float patrolMoveSpeed = Mathf.Max(1.6f, moveSpeed * patrolSpeedMultiplier);
+
+        if (idleBehavior == IdleBehaviorMode.StandGuard)
+        {
+            Vector3 toHome = homePosition - transform.position;
+            toHome.y = 0f;
+            if (toHome.sqrMagnitude > 0.85f * 0.85f)
+            {
+                MoveTowardNonCombatPoint(homePosition, patrolMoveSpeed);
+                return;
+            }
+
+            StopAgent();
+            if (animator != null && !Mathf.Approximately(animator.speed, 1f))
+            {
+                animator.speed = 1f;
+            }
+            FaceDirection(homeRotation * Vector3.forward, rotationSpeed * 0.5f);
+            PlayAnimation(idleStateHash);
+            return;
+        }
+
+        EnsurePatrolWaypoints();
+        if (patrolPoints == null || patrolPoints.Length == 0)
+        {
+            Idle();
+            return;
+        }
+
+        if (patrolWaitTimer > 0f)
+        {
+            patrolWaitTimer -= Time.deltaTime;
+            StopAgent();
+            if (animator != null && !Mathf.Approximately(animator.speed, 1f))
+            {
+                animator.speed = 1f;
+            }
+            PlayAnimation(idleStateHash);
+            return;
+        }
+
+        if (currentPatrolIndex < 0 || currentPatrolIndex >= patrolPoints.Length)
+        {
+            currentPatrolIndex = 0;
+        }
+
+        Vector3 waypoint = patrolPoints[currentPatrolIndex];
+        Vector3 toWaypoint = waypoint - transform.position;
+        toWaypoint.y = 0f;
+
+        if (toWaypoint.sqrMagnitude <= 0.95f * 0.95f)
+        {
+            currentPatrolIndex = (currentPatrolIndex + 1) % patrolPoints.Length;
+            patrolWaitTimer = patrolWaitDuration;
+            patrolStuckTimer = 0f;
+            StopAgent();
+            if (animator != null && !Mathf.Approximately(animator.speed, 1f))
+            {
+                animator.speed = 1f;
+            }
+            PlayAnimation(idleStateHash);
+            return;
+        }
+
+        if ((transform.position - lastPatrolProgressPos).sqrMagnitude > 0.01f)
+        {
+            lastPatrolProgressPos = transform.position;
+            patrolStuckTimer = 0f;
+        }
+        else
+        {
+            patrolStuckTimer += Time.deltaTime;
+            if (patrolStuckTimer > 2.0f)
+            {
+                currentPatrolIndex = (currentPatrolIndex + 1) % patrolPoints.Length;
+                patrolStuckTimer = 0f;
+                nextDestinationTime = 0f;
+                return;
+            }
+        }
+
+        MoveTowardNonCombatPoint(waypoint, patrolMoveSpeed);
+    }
+
+    private void EnsurePatrolWaypoints()
+    {
+        if (patrolPoints != null && patrolPoints.Length >= 2) return;
+
+        float offset = Mathf.Max(2.5f, patrolRadius * 0.65f);
+        Vector3 p1 = homePosition + Vector3.right * offset;
+        Vector3 p2 = homePosition - Vector3.right * offset;
+        if (NavMesh.SamplePosition(p1, out NavMeshHit hit1, 6f, NavMesh.AllAreas)) p1 = hit1.position;
+        if (NavMesh.SamplePosition(p2, out NavMeshHit hit2, 6f, NavMesh.AllAreas)) p2 = hit2.position;
+        patrolPoints = new[] { p1, p2 };
+        currentPatrolIndex = 0;
+    }
+
+    private void MoveTowardNonCombatPoint(Vector3 targetPoint, float moveSpd)
+    {
+        if (hasWalkState)
+        {
+            if (animator != null && !Mathf.Approximately(animator.speed, 1f)) animator.speed = 1f;
+            PlayAnimation(walkStateHash);
+        }
+        else
+        {
+            if (animator != null && !Mathf.Approximately(animator.speed, 0.72f)) animator.speed = 0.72f;
+            PlayAnimation(runStateHash);
+        }
+
+        Vector3 toTarget = targetPoint - transform.position;
+        toTarget.y = 0f;
+        float sqrDistance = toTarget.sqrMagnitude;
+        Vector3 flatDir = sqrDistance > 0.0001f ? toTarget / Mathf.Sqrt(sqrDistance) : transform.forward;
+
+        if (AgentReady)
+        {
+            if (navAgent.isStopped) navAgent.isStopped = false;
+            if (!Mathf.Approximately(navAgent.speed, moveSpd)) navAgent.speed = moveSpd;
+            if (!Mathf.Approximately(navAgent.stoppingDistance, 0.25f)) navAgent.stoppingDistance = 0.25f;
+
+            if (Time.time >= nextDestinationTime || (targetPoint - lastDestinationTarget).sqrMagnitude >= DestinationMoveThresholdSqr)
+            {
+                nextDestinationTime = Time.time + DestinationUpdateInterval;
+                lastDestinationTarget = targetPoint;
+
+                Vector3 dest = targetPoint;
+                if (NavMesh.SamplePosition(targetPoint, out NavMeshHit hit, 6f, NavMesh.AllAreas))
+                {
+                    dest = hit.position;
+                }
+                navAgent.SetDestination(dest);
+            }
+
+            if (navAgent.pathStatus == NavMeshPathStatus.PathInvalid)
+            {
+                MoveWithObstacleAvoidance(flatDir, sqrDistance, moveSpd, 0.35f);
+                if (AgentReady)
+                {
+                    navAgent.Warp(transform.position);
+                }
+            }
+            return;
+        }
+
+        MoveWithObstacleAvoidance(flatDir, sqrDistance, moveSpd, 0.35f);
+    }
+
     private void MoveWithObstacleAvoidance(Vector3 flatDirToPlayer, float sqrDistance)
     {
-        Vector3 moveDir = ChooseClearSteeringDirection(flatDirToPlayer);
+        MoveWithObstacleAvoidance(flatDirToPlayer, sqrDistance, moveSpeed, stoppingDistance);
+    }
+
+    private void MoveWithObstacleAvoidance(Vector3 flatDirToTarget, float sqrDistance, float speed, float stopDist)
+    {
+        Vector3 moveDir = ChooseClearSteeringDirection(flatDirToTarget);
         FaceDirection(moveDir, rotationSpeed);
 
-        if (sqrDistance > stoppingDistance * stoppingDistance)
+        if (sqrDistance > stopDist * stopDist)
         {
-            transform.position += moveDir * (moveSpeed * Time.deltaTime);
+            transform.position += moveDir * (speed * Time.deltaTime);
         }
 
         if (TrySampleWalkableGroundY(transform.position, out float groundY))
@@ -467,6 +777,7 @@ public class OrcEnemyAI : MonoBehaviour
     // Đẩy lùi kẻ địch khi trúng đòn dựa theo hệ số kháng đẩy lùi
     public void ApplyKnockback(Vector3 attackerPosition, float force, bool applyHitStun = true)
     {
+        AlertAggro(true);
         float effectiveForce = Mathf.Max(0f, force * (1f - Mathf.Clamp01(knockbackResistance)));
         if (effectiveForce <= 0.01f) return;
 
@@ -491,6 +802,7 @@ public class OrcEnemyAI : MonoBehaviour
     // Đưa quái vào trạng thái choáng và ngắt đòn khi người chơi Perfect Parry
     public void ApplyParryStun(Vector3 attackerPosition, float knockbackForce, float duration = -1f)
     {
+        AlertAggro(true);
         if (attackRoutine != null)
         {
             StopCoroutine(attackRoutine);
@@ -614,6 +926,10 @@ public class OrcEnemyAI : MonoBehaviour
     void Idle()
     {
         StopAgent();
+        if (animator != null && !Mathf.Approximately(animator.speed, 1f))
+        {
+            animator.speed = 1f;
+        }
         PlayAnimation(idleStateHash);
     }
 

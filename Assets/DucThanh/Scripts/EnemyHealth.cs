@@ -63,6 +63,7 @@ public class EnemyHealth : MonoBehaviour
     private float currentBarScaleMult = 1f;
     private bool wasLockedTarget;
     private Transform cachedCamTransform;
+    private OrcEnemyAI cachedEnemyAI;
 
     public int CurrentHealth => currentHealth;
     public bool IsDead => isDead;
@@ -75,6 +76,7 @@ public class EnemyHealth : MonoBehaviour
         currentHealth = maxHealth;
         isDead = false;
         cachedRenderers = GetComponentsInChildren<Renderer>(true);
+        cachedEnemyAI = GetComponent<OrcEnemyAI>();
         for (int i = 0; i < cachedRenderers.Length; i++)
         {
             if (cachedRenderers[i] is SkinnedMeshRenderer smr)
@@ -213,6 +215,11 @@ public class EnemyHealth : MonoBehaviour
         }
         else
         {
+            if (cachedEnemyAI == null) cachedEnemyAI = GetComponent<OrcEnemyAI>();
+            if (cachedEnemyAI != null)
+            {
+                cachedEnemyAI.AlertAggro(true);
+            }
             TriggerHitFlash();
         }
     }

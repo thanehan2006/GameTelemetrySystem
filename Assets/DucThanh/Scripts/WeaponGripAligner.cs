@@ -373,6 +373,17 @@ public static class WeaponGripAligner
 
         float gripY = Mathf.Lerp(minY, maxY, gripU);
         gripPointLocal = new Vector3(0f, gripY, 0f);
-        edgeSign = localBounds.center.x < -0.025f ? -1f : 1f;
+        if (lower.Contains("scythe") || lower.Contains("sword3_1"))
+        {
+            edgeSign = 1f;
+        }
+        else if (lower.Contains("polearm"))
+        {
+            edgeSign = -1f;
+        }
+        else
+        {
+            edgeSign = localBounds.center.x < -0.025f ? 1f : -1f;
+        }
     }
 }

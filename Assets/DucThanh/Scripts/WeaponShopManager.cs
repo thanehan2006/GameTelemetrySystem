@@ -11,9 +11,10 @@ using UnityEditor;
 public class WeaponShopManager : MonoBehaviour
 {
     public static WeaponShopManager Instance { get; private set; }
-    public static bool IsShopOpen => Instance != null && Instance.isOpen;
+    public bool IsActualShopOpen => isOpen;
+    public static bool IsShopOpen => (Instance != null && Instance.isOpen) || StoryGuideManager.IsAnyModalOpen;
 
-    public const string DefaultConfigPath = "Assets/DucThanh/Assets/Weapons/WeaponUpgradeConfig.asset";
+    public const string DefaultConfigPath = "Assets/Resources/WeaponUpgradeConfig.asset";
 
     [Header("Shop Config")]
     public WeaponUpgradeConfigSO weaponConfig;
@@ -97,6 +98,8 @@ public class WeaponShopManager : MonoBehaviour
             return;
         }
 
+        if (StoryGuideManager.IsAnyModalOpen) return;
+
         if (Input.GetKeyDown(KeyCode.B))
         {
             ToggleShop();
@@ -105,7 +108,7 @@ public class WeaponShopManager : MonoBehaviour
         {
             CloseShop();
         }
-        else if (!isOpen && Input.GetKeyDown(KeyCode.E) && IsNearAnyCampfire())
+        else if (!isOpen && Input.GetKeyDown(KeyCode.E) && !StoryChestPickup.IsPlayerNearAnyUnopenedChest(playerTransform) && IsNearAnyCampfire())
         {
             OpenShop();
         }
@@ -135,7 +138,7 @@ public class WeaponShopManager : MonoBehaviour
     // Tạm dừng thời gian trận đấu, mở khóa chuột và hiển thị bảng cửa hàng
     public void OpenShop()
     {
-        if (isOpen || GameOverManager.IsGameOver) return;
+        if (isOpen || GameOverManager.IsGameOver || StoryGuideManager.IsAnyModalOpen) return;
 
         EnsureShopUi();
         if (shopOverlayRoot == null) return;
@@ -181,7 +184,7 @@ public class WeaponShopManager : MonoBehaviour
 
         GameAudioManager.PlayUiClick();
 
-        if (!GameOverManager.IsGameOver)
+        if (!GameOverManager.IsGameOver && !StoryGuideManager.IsAnyModalOpen)
         {
             Time.timeScale = 1f;
             Cursor.lockState = CursorLockMode.Locked;

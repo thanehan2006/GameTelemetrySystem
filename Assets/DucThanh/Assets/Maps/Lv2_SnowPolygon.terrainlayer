@@ -8,7 +8,7 @@ TerrainLayer:
   m_PrefabAsset: {fileID: 0}
   m_Name: Lv2_SnowPolygon
   m_DiffuseTexture: {fileID: 2800000, guid: 22f2c90065d93f546b89852e00e476df, type: 3}
-  m_NormalMapTexture: {fileID: 2800000, guid: 6725ffb624d89a24b9b117e258b95040, type: 3}
+  m_NormalMapTexture: {fileID: 2800000, guid: 33bca1f3081133340916776c352dc9bd, type: 3}
   m_MaskMapTexture: {fileID: 0}
   m_TileSize: {x: 5.5, y: 5.5}
   m_TileOffset: {x: 0, y: 0}

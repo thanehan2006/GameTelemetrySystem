@@ -84,6 +84,22 @@ public class StageManager : MonoBehaviour
     public Color stage2UnitAuraColor = new Color(0.3f, 0.7f, 1f);
     public Color bossAuraColor = new Color(1f, 0.18f, 0.12f);
 
+    [Header("Cân bằng Số lượng Quái mỗi Đợt")]
+    public int stage1Wave1Count = 3;
+    public int stage1Wave2Count = 4;
+    public int stage2Wave1TankCount = 1;
+    public int stage2Wave1StrikerCount = 3;
+    public int stage2Wave2TankCount = 2;
+    public int stage2Wave2StrikerCount = 3;
+    public int bossEnrageGuardCount = 2;
+
+    [Header("Quái Đứng Sẵn & Đi Tuần Trên Đường")]
+    public bool spawnRoadEnemies = true;
+    public int road1To2EnemyCount = 4;
+    public int road2To3EnemyCount = 3;
+    public float roadEnemyDetectRadius = 15f;
+    public float roadEnemyLeashRadius = 30f;
+
     public int CurrentStage { get; private set; } = 1;
     public int MapLevel => Mathf.Clamp(mapIndex, 1, 3);
 
@@ -92,6 +108,7 @@ public class StageManager : MonoBehaviour
     private PlayerController playerController;
 
     private readonly List<EnemyHealth> activeWaveEnemies = new List<EnemyHealth>();
+    private readonly List<EnemyHealth> roadEnemies = new List<EnemyHealth>();
     private int currentWaveIndex;
     private int totalWavesInStage;
     private bool spawningWave;
@@ -159,7 +176,9 @@ public class StageManager : MonoBehaviour
         stage3Center = SnapPositionToTerrain(stage3Center);
 
         BuildStageEnvironments();
+        SpawnRoadEnemies();
         BuildRuntimeHud();
+        StoryGuideManager.EnsureInstance().InitializeForMap(MapLevel, mapDisplayName, stage1Center);
         CreateWaypointBeacon();
 
         ApplySkybox(skyboxStage1Dawn);
@@ -273,6 +292,12 @@ public class StageManager : MonoBehaviour
             TelemetryManager.Instance.TrackLevelStart(MapLevel);
         }
 
+        SetHudStage(stage1Title, "Quan sát khu vực phía trước...");
+        while (StoryGuideManager.IsWaitingForOpeningOrWarmup)
+        {
+            yield return null;
+        }
+
         SetHudStage(stage1Title, "Chuẩn bị chiến đấu...");
         ShowBanner(stage1Banner, new Color(1f, 0.88f, 0.45f), 3.0f);
 
@@ -282,6 +307,7 @@ public class StageManager : MonoBehaviour
         currentWaveIndex = 1;
         totalWavesInStage = 2;
         SpawnStage1Wave(1);
+        StoryGuideManager.EnsureInstance().NotifyFirstWaveSpawned();
     }
 
     private void UpdatePhaseLogic()
@@ -301,8 +327,9 @@ public class StageManager : MonoBehaviour
                 {
                     if (currentWaveIndex < totalWavesInStage)
                     {
+                        SpawnWaveStoryChest(0, stage1Center, new Vector3(4.5f, 0f, 3.5f));
                         currentWaveIndex++;
-                        StartCoroutine(DelayedWaveSpawn(() => SpawnStage1Wave(currentWaveIndex), 1.6f, "ĐỢT 2 ĐANG TỚI!"));
+                        StartCoroutine(DelayedWaveSpawn(() => SpawnStage1Wave(currentWaveIndex), 3.2f, "ĐỢT 1 ĐÃ BỊ ĐÁNH TAN — RƯƠNG CỔ VỪA LỘ DIỆN!\nVIỆN BINH ĐỊCH ĐANG TỚI!"));
                     }
                     else
                     {
@@ -339,8 +366,9 @@ public class StageManager : MonoBehaviour
                 {
                     if (currentWaveIndex < totalWavesInStage)
                     {
+                        SpawnWaveStoryChest(2, stage2Center, new Vector3(-4.5f, 0f, 4.5f));
                         currentWaveIndex++;
-                        StartCoroutine(DelayedWaveSpawn(() => SpawnStage2Wave(currentWaveIndex), 1.8f, stage2Wave2Banner));
+                        StartCoroutine(DelayedWaveSpawn(() => SpawnStage2Wave(currentWaveIndex), 3.4f, $"ĐỢT 1 ĐÃ BỊ ĐÁNH TAN — RƯƠNG CỔ VỪA LỘ DIỆN!\n{stage2Wave2Banner}"));
                     }
                     else
                     {
@@ -407,10 +435,9 @@ public class StageManager : MonoBehaviour
     // Sinh các đợt quái tại khu vực 1
     private void SpawnStage1Wave(int wave)
     {
-        bool hasVariety = stage1ExtraEnemyPrefabs != null && stage1ExtraEnemyPrefabs.Length > 0;
         if (wave == 1)
         {
-            int count = hasVariety ? 4 : 3;
+            int count = Mathf.Max(1, stage1Wave1Count);
             for (int i = 0; i < count; i++)
             {
                 GameObject pref = i == 0
@@ -423,14 +450,15 @@ public class StageManager : MonoBehaviour
         }
         else
         {
-            int count = hasVariety ? 5 : 4;
+            int count = Mathf.Max(1, stage1Wave2Count);
+            int heavyCount = Mathf.Clamp(count / 2, 1, 2);
             for (int i = 0; i < count; i++)
             {
                 GameObject fallback = i == count - 1 && axeOrcPrefab != null ? axeOrcPrefab : scoutOrcPrefab;
                 GameObject pref = i < 2
                     ? (i == 0 ? scoutOrcPrefab : fallback)
                     : PickWavePrefab(stage1ExtraEnemyPrefabs, i, fallback);
-                bool isHeavy = i >= count - 2;
+                bool isHeavy = i >= count - heavyCount;
                 int hp = isHeavy ? 125 : 100;
                 int dmg = isHeavy ? 16 : 14;
                 float spd = isHeavy ? 3.8f : 3.6f;
@@ -451,6 +479,8 @@ public class StageManager : MonoBehaviour
         GameAudioManager.PlayStageClear();
         SetWaypointBeacon(stage2Center, new Color(1f, 0.78f, 0.15f));
 
+        SpawnWaveStoryChest(1, stage1Center, new Vector3(-4.5f, 0f, 4.0f));
+        StoryGuideManager.EnsureInstance().NotifyTravelToStage2Started();
         SpawnHealthPickupAt(stage1Center + new Vector3(4f, 0f, -2f), 35);
     }
 
@@ -476,10 +506,11 @@ public class StageManager : MonoBehaviour
         bool hasVariety = (stage2TankPrefabs != null && stage2TankPrefabs.Length > 0)
             || (stage2StrikerPrefabs != null && stage2StrikerPrefabs.Length > 0);
 
-        for (int i = 0; i < 2; i++)
+        int tankCount = Mathf.Max(1, wave == 1 ? stage2Wave1TankCount : stage2Wave2TankCount);
+        for (int i = 0; i < tankCount; i++)
         {
             GameObject tankPref = PickWavePrefab(stage2TankPrefabs, (wave - 1) * 2 + i, tankFallback);
-            bool isSecondWaveBrute = hasVariety && wave == 2 && i == 1;
+            bool isSecondWaveBrute = hasVariety && wave == 2 && i == tankCount - 1;
             int tankHp = isSecondWaveBrute ? 220 : 185;
             int tankDmg = isSecondWaveBrute ? 19 : 16;
             float tankScale = isSecondWaveBrute ? 1.24f : 1.16f;
@@ -488,8 +519,8 @@ public class StageManager : MonoBehaviour
             AddUnitAuraLight(tank, stage2UnitAuraColor, 3.8f, 1.7f);
         }
 
-        int axeCount = wave == 1 ? (hasVariety ? 3 : 2) : (hasVariety ? 4 : 3);
-        for (int i = 0; i < axeCount; i++)
+        int strikerCount = Mathf.Max(1, wave == 1 ? stage2Wave1StrikerCount : stage2Wave2StrikerCount);
+        for (int i = 0; i < strikerCount; i++)
         {
             GameObject strikerPref = PickWavePrefab(stage2StrikerPrefabs, (wave - 1) * 3 + i, axeFallback);
             string strikerName = strikerPref != null ? strikerPref.name : "Striker";
@@ -509,7 +540,24 @@ public class StageManager : MonoBehaviour
         GameAudioManager.PlayStageClear();
         SetWaypointBeacon(stage3Center, new Color(1f, 0.22f, 0.22f));
 
+        SpawnWaveStoryChest(3, stage2Center, new Vector3(4.5f, 0f, -4.5f));
         SpawnHealthPickupAt(stage2Center + new Vector3(-4f, 0f, -3f), 45);
+    }
+
+    private void SpawnWaveStoryChest(int chapterIndex, Vector3 arenaCenter, Vector3 fallbackOffset)
+    {
+        Vector3 desiredPos = arenaCenter + fallbackOffset;
+        if (playerTransform != null)
+        {
+            float dist = HorizontalDistance(playerTransform.position, arenaCenter);
+            if (dist <= 20f)
+            {
+                desiredPos = Vector3.Lerp(playerTransform.position, arenaCenter, 0.35f) + fallbackOffset * 0.45f;
+            }
+        }
+
+        Vector3 chestPos = FindWalkableRoadPoint(desiredPos);
+        StoryGuideManager.EnsureInstance().SpawnWaveStoryChest(chapterIndex, chestPos);
     }
 
     // Triệu hồi Boss đấu trường cùng thanh máu Boss và quân hộ vệ
@@ -596,7 +644,7 @@ public class StageManager : MonoBehaviour
             }
 
             GameObject addFallback = axeOrcPrefab != null ? axeOrcPrefab : scoutOrcPrefab;
-            int guardCount = (stage3BossGuardPrefabs != null && stage3BossGuardPrefabs.Length > 0) ? 3 : 2;
+            int guardCount = Mathf.Max(1, bossEnrageGuardCount);
             for (int i = 0; i < guardCount; i++)
             {
                 GameObject guardPref = PickWavePrefab(stage3BossGuardPrefabs, i, addFallback);
@@ -650,7 +698,9 @@ public class StageManager : MonoBehaviour
         float scale,
         int scoreVal,
         bool isBoss,
-        string unitName)
+        string unitName,
+        bool registerInActiveWave = true,
+        bool playSpawnVfx = true)
     {
         if (prefab == null)
         {
@@ -661,36 +711,51 @@ public class StageManager : MonoBehaviour
         Vector3 spawnPos = arenaCenter;
         bool hasNavMeshPoint = false;
 
-        for (int attempt = 0; attempt < 6; attempt++)
+        if (maxRadius <= 0.01f)
         {
-            Vector2 dir2D = Random.insideUnitCircle.normalized;
-            if (dir2D.sqrMagnitude < 0.01f) dir2D = Vector2.right;
-
-            Vector3 candidate = arenaCenter + new Vector3(dir2D.x, 0f, dir2D.y) * Random.Range(minRadius, maxRadius);
-            candidate = SnapPositionToTerrain(candidate);
-
-            if (NavMesh.SamplePosition(candidate, out NavMeshHit navHit, 7f, NavMesh.AllAreas))
+            spawnPos = SnapPositionToTerrain(arenaCenter);
+            if (NavMesh.SamplePosition(spawnPos, out NavMeshHit directHit, 7f, NavMesh.AllAreas))
             {
-                candidate = navHit.position;
+                spawnPos = directHit.position;
                 hasNavMeshPoint = true;
             }
-
-            if (!Physics.CheckSphere(candidate + Vector3.up * 1.45f, 0.55f, ~0, QueryTriggerInteraction.Ignore))
+        }
+        else
+        {
+            for (int attempt = 0; attempt < 6; attempt++)
             {
-                spawnPos = candidate;
-                break;
-            }
+                Vector2 dir2D = Random.insideUnitCircle.normalized;
+                if (dir2D.sqrMagnitude < 0.01f) dir2D = Vector2.right;
 
-            if (attempt == 5)
-            {
-                spawnPos = candidate;
+                Vector3 candidate = arenaCenter + new Vector3(dir2D.x, 0f, dir2D.y) * Random.Range(minRadius, maxRadius);
+                candidate = SnapPositionToTerrain(candidate);
+
+                if (NavMesh.SamplePosition(candidate, out NavMeshHit navHit, 7f, NavMesh.AllAreas))
+                {
+                    candidate = navHit.position;
+                    hasNavMeshPoint = true;
+                }
+
+                if (!Physics.CheckSphere(candidate + Vector3.up * 1.45f, 0.55f, ~0, QueryTriggerInteraction.Ignore))
+                {
+                    spawnPos = candidate;
+                    break;
+                }
+
+                if (attempt == 5)
+                {
+                    spawnPos = candidate;
+                }
             }
         }
 
         GameObject enemy = Instantiate(prefab, spawnPos, Quaternion.identity);
         enemy.name = unitName;
         enemy.transform.localScale = Vector3.one * scale;
-        CombatVfxManager.SpawnEnemySpawnEffect(spawnPos, isBoss);
+        if (playSpawnVfx)
+        {
+            CombatVfxManager.SpawnEnemySpawnEffect(spawnPos, isBoss);
+        }
         if (mapIndex >= 2 && (isBoss || kbResist >= 0.45f || unitName.IndexOf("Demon", System.StringComparison.OrdinalIgnoreCase) >= 0))
         {
             CombatVfxManager.AttachEnemyBiomeAura(enemy.transform, mapIndex, isBoss || kbResist >= 0.45f);
@@ -710,7 +775,14 @@ public class StageManager : MonoBehaviour
             eh.healPickupPrefab = potionPrefab != null ? potionPrefab : mushroomPickupPrefab;
             eh.dropHealChance = isBoss ? 0f : 0.22f;
             eh.SetMaxHealth(scaledHp);
-            activeWaveEnemies.Add(eh);
+            if (registerInActiveWave)
+            {
+                activeWaveEnemies.Add(eh);
+            }
+            else
+            {
+                roadEnemies.Add(eh);
+            }
         }
 
         OrcEnemyAI ai = enemy.GetComponent<OrcEnemyAI>();
@@ -724,6 +796,133 @@ public class StageManager : MonoBehaviour
         }
 
         return enemy;
+    }
+
+    // Đặt sẵn quái đứng gác và đi tuần dọc đường dẫn giữa các khu vực mục tiêu
+    private void SpawnRoadEnemies()
+    {
+        if (!spawnRoadEnemies) return;
+
+        SpawnRoadSegmentEnemies(stage1Center, stage2Center, road1To2EnemyCount, false, "Road12");
+        SpawnRoadSegmentEnemies(stage2Center, stage3Center, road2To3EnemyCount, true, "Road23");
+    }
+
+    private void SpawnRoadSegmentEnemies(Vector3 fromCenter, Vector3 toCenter, int count, bool isTier2, string tagPrefix)
+    {
+        if (count <= 0) return;
+
+        Vector3 flatDelta = toCenter - fromCenter;
+        flatDelta.y = 0f;
+        float dist = flatDelta.magnitude;
+        if (dist < 10f) return;
+
+        Vector3 forwardDir = flatDelta / dist;
+        Vector3 sideDir = new Vector3(-forwardDir.z, 0f, forwardDir.x);
+
+        float safeMargin = Mathf.Max(zoneTriggerRadius + 6f, 32f);
+        float tMin = Mathf.Clamp(safeMargin / dist, 0.24f, 0.42f);
+        float tMax = 1f - tMin;
+        if (tMin >= tMax)
+        {
+            tMin = 0.35f;
+            tMax = 0.65f;
+        }
+
+        for (int i = 0; i < count; i++)
+        {
+            float t = count == 1 ? 0.5f : Mathf.Lerp(tMin, tMax, (float)i / (count - 1));
+            float lateralOffset = (i % 2 == 0) ? 3.5f : -3.5f;
+            Vector3 desiredPos = Vector3.Lerp(fromCenter, toCenter, t) + sideDir * lateralOffset;
+            Vector3 spawnPos = FindWalkableRoadPoint(desiredPos);
+
+            GameObject enemy;
+            if (!isTier2)
+            {
+                GameObject fallback = (i == count - 1 && axeOrcPrefab != null) ? axeOrcPrefab : scoutOrcPrefab;
+                GameObject pref = i == 0 ? scoutOrcPrefab : PickWavePrefab(stage1ExtraEnemyPrefabs, i - 1, fallback);
+                bool isHeavy = i == count - 1;
+                int hp = isHeavy ? 115 : 90;
+                int dmg = isHeavy ? 15 : 12;
+                float spd = isHeavy ? 3.75f : 3.5f;
+                float kb = isHeavy ? 0.14f : 0.06f;
+                float sc = isHeavy ? 1.06f : 1.0f;
+                int scoreVal = isHeavy ? 115 : 95;
+                string pName = pref != null ? pref.name : "Unit";
+                enemy = SpawnOrc(pref, spawnPos, 0f, 0f, hp, dmg, spd, 1.85f, kb, 1.58f, sc, scoreVal, false, $"{tagPrefix}_{i + 1}_{pName}", registerInActiveWave: false, playSpawnVfx: false);
+            }
+            else
+            {
+                bool isTank = i == count / 2;
+                GameObject tankFallback = shieldTankPrefab != null ? shieldTankPrefab : scoutOrcPrefab;
+                GameObject strikerFallback = axeOrcPrefab != null ? axeOrcPrefab : scoutOrcPrefab;
+                GameObject pref = isTank
+                    ? PickWavePrefab(stage2TankPrefabs, i, tankFallback)
+                    : PickWavePrefab(stage2StrikerPrefabs, i, strikerFallback);
+                int hp = isTank ? 165 : 115;
+                int dmg = isTank ? 16 : 17;
+                float spd = isTank ? 3.25f : 4.0f;
+                float range = isTank ? 2.0f : 1.9f;
+                float kb = isTank ? 0.55f : 0.16f;
+                float cd = isTank ? 1.75f : 1.52f;
+                float sc = isTank ? 1.15f : 1.05f;
+                int scoreVal = isTank ? 150 : 130;
+                string pName = pref != null ? pref.name : "Unit";
+                enemy = SpawnOrc(pref, spawnPos, 0f, 0f, hp, dmg, spd, range, kb, cd, sc, scoreVal, false, $"{tagPrefix}_{i + 1}_{pName}", registerInActiveWave: false, playSpawnVfx: false);
+                if (isTank && enemy != null)
+                {
+                    AddUnitAuraLight(enemy, stage2UnitAuraColor, 3.4f, 1.4f);
+                }
+            }
+
+            if (enemy == null) continue;
+
+            OrcEnemyAI ai = enemy.GetComponent<OrcEnemyAI>();
+            if (ai == null) continue;
+
+            if (i % 2 == 0)
+            {
+                Vector3 patrolStep = sideDir * 4.5f + forwardDir * 2.5f;
+                Vector3 wpA = FindWalkableRoadPoint(spawnPos + patrolStep);
+                Vector3 wpB = FindWalkableRoadPoint(spawnPos - patrolStep);
+                ai.ConfigurePatrol(new[] { wpA, wpB }, roadEnemyDetectRadius, roadEnemyLeashRadius, 0.55f, 1.8f);
+            }
+            else
+            {
+                Vector3 lookDir = fromCenter - spawnPos;
+                ai.ConfigureStandGuard(spawnPos, lookDir, roadEnemyDetectRadius, roadEnemyLeashRadius);
+            }
+        }
+    }
+
+    private Vector3 FindWalkableRoadPoint(Vector3 desiredPos)
+    {
+        Vector3 snapped = SnapPositionToTerrain(desiredPos);
+        if (NavMesh.SamplePosition(snapped, out NavMeshHit navHit, 8f, NavMesh.AllAreas))
+        {
+            snapped = navHit.position;
+        }
+
+        if (!Physics.CheckSphere(snapped + Vector3.up * 1.45f, 0.55f, ~0, QueryTriggerInteraction.Ignore))
+        {
+            return snapped;
+        }
+
+        for (int attempt = 0; attempt < 6; attempt++)
+        {
+            float angle = attempt * 60f * Mathf.Deg2Rad;
+            Vector3 probe = desiredPos + new Vector3(Mathf.Cos(angle), 0f, Mathf.Sin(angle)) * 2.4f;
+            probe = SnapPositionToTerrain(probe);
+            if (NavMesh.SamplePosition(probe, out NavMeshHit altHit, 7f, NavMesh.AllAreas))
+            {
+                probe = altHit.position;
+            }
+            if (!Physics.CheckSphere(probe + Vector3.up * 1.45f, 0.55f, ~0, QueryTriggerInteraction.Ignore))
+            {
+                return probe;
+            }
+        }
+
+        return snapped;
     }
 
     // Dựng hoặc liên kết trại lửa checkpoint, cụm bẫy gai và bình hồi máu trên bản đồ
@@ -1068,7 +1267,7 @@ public class StageManager : MonoBehaviour
             hudDashText = CreateUiText("DashStatusText", missionPanel.transform,
                 new Vector2(0f, 0f), new Vector2(1f, 0f), new Vector2(0.5f, 0f),
                 new Vector2(0f, 3f), new Vector2(-28f, 28f),
-                "[LMB] Chém  •  [RMB] Đỡ  •  [Tab/Q] Khóa  •  [B] Shop", 12.6f, FontStyles.Bold, Color.white, TextAlignmentOptions.MidlineLeft);
+                "[LMB] Chém  •  [RMB] Đỡ  •  [B] Lò Rèn  •  [H] Sổ Tay", 12.6f, FontStyles.Bold, Color.white, TextAlignmentOptions.MidlineLeft);
         }
         CombatHudStyler.StyleMissionHud(missionPanel, hudStageTitleText, hudObjectiveText, hudDashText);
 
@@ -1201,7 +1400,7 @@ public class StageManager : MonoBehaviour
         }
         else
         {
-            hudDashText.text = "<color=#7BE5FF><b>[LMB]</b></color> Chém  <color=#5C6A85>•</color>  <color=#7BE5FF><b>[RMB]</b></color> Đỡ  <color=#5C6A85>•</color>  <color=#7BE5FF><b>[Tab/Q]</b></color> Khóa  <color=#5C6A85>•</color>  <color=#E8C56E><b>[B]</b></color> Shop";
+            hudDashText.text = "<color=#7BE5FF><b>[LMB]</b></color> Chém  <color=#5C6A85>•</color>  <color=#7BE5FF><b>[RMB]</b></color> Đỡ  <color=#5C6A85>•</color>  <color=#E8C56E><b>[B]</b></color> Lò Rèn  <color=#5C6A85>•</color>  <color=#7BE5FF><b>[H]</b></color> Sổ Tay";
         }
     }
 
@@ -1255,6 +1454,14 @@ public class StageManager : MonoBehaviour
             if (activeWaveEnemies[i] == null || activeWaveEnemies[i].IsDead)
             {
                 activeWaveEnemies.RemoveAt(i);
+            }
+        }
+
+        for (int i = roadEnemies.Count - 1; i >= 0; i--)
+        {
+            if (roadEnemies[i] == null || roadEnemies[i].IsDead)
+            {
+                roadEnemies.RemoveAt(i);
             }
         }
     }
