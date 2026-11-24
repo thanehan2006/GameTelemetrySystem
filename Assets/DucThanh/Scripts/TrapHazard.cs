@@ -23,6 +23,8 @@ public class TrapHazard : MonoBehaviour
     private bool ringHasColor;
     private float nextHitTime;
     private float pulsePhase;
+    private float ringPulseTimer;
+    private float nextFarCheckTime;
 
     // Tìm người chơi và dựng vòng cảnh báo phát sáng đỏ quanh bẫy
     void Start()
@@ -44,6 +46,9 @@ public class TrapHazard : MonoBehaviour
     {
         if (GameOverManager.IsGameOver || WeaponShopManager.IsShopOpen) return;
 
+        float now = Time.time;
+        if (now < nextFarCheckTime) return;
+
         if (playerTransform == null || playerHealth == null)
         {
             ResolvePlayer();
@@ -61,17 +66,25 @@ public class TrapHazard : MonoBehaviour
         {
             childLight.enabled = inRange;
         }
-        if (!inRange) return;
-
-        float now = Time.time;
+        if (!inRange)
+        {
+            nextFarCheckTime = now + 0.22f;
+            return;
+        }
+        nextFarCheckTime = 0f;
 
         if (ringRenderer != null && ringPropBlock != null)
         {
-            float pulse = 0.28f + 0.22f * Mathf.Sin(now * 4.2f + pulsePhase);
-            Color c = new Color(2.0f, 0.24f, 0.14f, pulse);
-            if (ringHasBaseColor) ringPropBlock.SetColor(BaseColorId, c);
-            if (ringHasColor) ringPropBlock.SetColor(ColorId, c);
-            ringRenderer.SetPropertyBlock(ringPropBlock);
+            ringPulseTimer -= Time.deltaTime;
+            if (ringPulseTimer <= 0f)
+            {
+                ringPulseTimer = 0.05f;
+                float pulse = 0.28f + 0.22f * Mathf.Sin(now * 4.2f + pulsePhase);
+                Color c = new Color(2.0f, 0.24f, 0.14f, pulse);
+                if (ringHasBaseColor) ringPropBlock.SetColor(BaseColorId, c);
+                if (ringHasColor) ringPropBlock.SetColor(ColorId, c);
+                ringRenderer.SetPropertyBlock(ringPropBlock);
+            }
         }
 
         if (now < nextHitTime) return;

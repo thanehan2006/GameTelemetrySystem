@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using GameTelemetryAPI.Models;
 
 namespace GameTelemetryAPI.Data
@@ -16,6 +17,46 @@ namespace GameTelemetryAPI.Data
         public DbSet<GameSession> GameSessions { get; set; } = null!;
         public DbSet<ShopPurchase> ShopPurchases { get; set; } = null!;
         public DbSet<GameEvent> GameEvents { get; set; } = null!;
+
+        // Bảo đảm mọi cột DateTime được đọc/ghi nhất quán ở chuẩn UTC để JSON luôn trả hậu tố Z
+        protected override void ConfigureConventions(ModelConfigurationBuilder configurationBuilder)
+        {
+            configurationBuilder.Properties<DateTime>()
+                .HaveConversion<UtcDateTimeConverter>();
+
+            configurationBuilder.Properties<DateTime?>()
+                .HaveConversion<NullableUtcDateTimeConverter>();
+        }
+
+        private sealed class UtcDateTimeConverter : ValueConverter<DateTime, DateTime>
+        {
+            public UtcDateTimeConverter()
+                : base(
+                    v => NormalizeToUtc(v),
+                    v => DateTime.SpecifyKind(v, DateTimeKind.Utc))
+            {
+            }
+        }
+
+        private sealed class NullableUtcDateTimeConverter : ValueConverter<DateTime?, DateTime?>
+        {
+            public NullableUtcDateTimeConverter()
+                : base(
+                    v => v.HasValue ? NormalizeToUtc(v.Value) : v,
+                    v => v.HasValue ? DateTime.SpecifyKind(v.Value, DateTimeKind.Utc) : v)
+            {
+            }
+        }
+
+        private static DateTime NormalizeToUtc(DateTime value)
+        {
+            return value.Kind switch
+            {
+                DateTimeKind.Utc => value,
+                DateTimeKind.Local => value.ToUniversalTime(),
+                _ => DateTime.SpecifyKind(value, DateTimeKind.Utc)
+            };
+        }
 
         // Cấu hình khóa chính, ràng buộc dữ liệu và quan hệ giữa 5 bảng
         protected override void OnModelCreating(ModelBuilder modelBuilder)

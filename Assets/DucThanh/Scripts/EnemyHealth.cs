@@ -11,6 +11,15 @@ public class EnemyHealth : MonoBehaviour
     private static readonly int ColorId = Shader.PropertyToID("_Color");
     private static readonly int BaseMapId = Shader.PropertyToID("_BaseMap");
     private static readonly int MainTexId = Shader.PropertyToID("_MainTex");
+    private static readonly int SurfaceId = Shader.PropertyToID("_Surface");
+    private static readonly int BlendId = Shader.PropertyToID("_Blend");
+    private static readonly int SrcBlendId = Shader.PropertyToID("_SrcBlend");
+    private static readonly int DstBlendId = Shader.PropertyToID("_DstBlend");
+    private static readonly int SrcBlendAlphaId = Shader.PropertyToID("_SrcBlendAlpha");
+    private static readonly int DstBlendAlphaId = Shader.PropertyToID("_DstBlendAlpha");
+    private static readonly int ZWriteId = Shader.PropertyToID("_ZWrite");
+    private static readonly int AlphaClipId = Shader.PropertyToID("_AlphaClip");
+    private static readonly int CullId = Shader.PropertyToID("_Cull");
     private static readonly int DeathStateHash = Animator.StringToHash("Death");
     private static readonly WaitForSeconds HitFlashWait = new WaitForSeconds(0.1f);
     private const float HpBarVisibleSqrDist = 18f * 18f;
@@ -64,13 +73,19 @@ public class EnemyHealth : MonoBehaviour
     private bool wasLockedTarget;
     private Transform cachedCamTransform;
     private OrcEnemyAI cachedEnemyAI;
+    private float lastAppliedBarScale = -1f;
+    private float lowHpPulseTimer;
+    private float nextBarVisCheckTime;
+    private Quaternion lastBarRotation;
+    private bool hasBarRotation;
 
     public int CurrentHealth => currentHealth;
     public bool IsDead => isDead;
+    public OrcEnemyAI CachedEnemyAI => cachedEnemyAI != null ? cachedEnemyAI : (cachedEnemyAI = GetComponent<OrcEnemyAI>());
     public event Action OnDied;
     public event Action<int, int> OnHealthChanged;
 
-    // Tìm các renderer của kẻ địch, bật render kể cả ngoài vùng bao và khởi tạo thanh máu ban đầu
+    // Tìm các renderer của kẻ địch, thiết lập vùng bao hợp lý và khởi tạo thanh máu ban đầu
     private void Awake()
     {
         currentHealth = maxHealth;
@@ -81,7 +96,8 @@ public class EnemyHealth : MonoBehaviour
         {
             if (cachedRenderers[i] is SkinnedMeshRenderer smr)
             {
-                smr.updateWhenOffscreen = true;
+                smr.updateWhenOffscreen = false;
+                smr.localBounds = new Bounds(new Vector3(0f, 1.15f, 0f), new Vector3(3.2f, 3.2f, 3.2f));
             }
         }
         hitFlashBlock = new MaterialPropertyBlock();
@@ -111,6 +127,12 @@ public class EnemyHealth : MonoBehaviour
         if (cachedCamTransform == null) return;
 
         bool isLocked = PlayerAttack.CurrentLockedTarget == this;
+        if (!hpBarRoot.gameObject.activeSelf && !isLocked && !isBoss && currentHealth >= maxHealth)
+        {
+            if (Time.time < nextBarVisCheckTime) return;
+            nextBarVisCheckTime = Time.time + 0.12f;
+        }
+
         Vector3 toCam = cachedCamTransform.position - transform.position;
         toCam.y = 0f;
         bool shouldShow = isLocked || isBoss || currentHealth < maxHealth || toCam.sqrMagnitude <= HpBarVisibleSqrDist;
@@ -123,7 +145,13 @@ public class EnemyHealth : MonoBehaviour
 
         float dt = Time.deltaTime;
 
-        hpBarRoot.rotation = cachedCamTransform.rotation;
+        Quaternion camRot = cachedCamTransform.rotation;
+        if (!hasBarRotation || Quaternion.Dot(lastBarRotation, camRot) < 0.999999f)
+        {
+            lastBarRotation = camRot;
+            hasBarRotation = true;
+            hpBarRoot.rotation = camRot;
+        }
 
         bool needsColorRefresh = false;
         if (hitPulseTimer > 0f)
@@ -137,7 +165,12 @@ public class EnemyHealth : MonoBehaviour
         float pulseBoost = hitPulseTimer > 0f ? (hitPulseTimer / 0.12f) * 0.08f : 0f;
 
         float parentScale = Mathf.Max(0.25f, transform.localScale.y);
-        hpBarRoot.localScale = Vector3.one * ((currentBarScaleMult + pulseBoost) / parentScale);
+        float finalScale = (currentBarScaleMult + pulseBoost) / parentScale;
+        if (Mathf.Abs(finalScale - lastAppliedBarScale) > 0.0005f)
+        {
+            lastAppliedBarScale = finalScale;
+            hpBarRoot.localScale = Vector3.one * finalScale;
+        }
 
         if (targetPointerT != null)
         {
@@ -159,7 +192,12 @@ public class EnemyHealth : MonoBehaviour
         }
         else if (hpRatio <= 0.25f)
         {
-            needsColorRefresh = true;
+            lowHpPulseTimer -= dt;
+            if (lowHpPulseTimer <= 0f)
+            {
+                lowHpPulseTimer = 0.066f;
+                needsColorRefresh = true;
+            }
         }
 
         if (needsColorRefresh)
@@ -202,6 +240,7 @@ public class EnemyHealth : MonoBehaviour
         hpRatio = Mathf.Clamp01((float)currentHealth / Mathf.Max(1, maxHealth));
         ghostHoldTimer = 0.16f;
         hitPulseTimer = 0.12f;
+        nextBarVisCheckTime = 0f;
         if (fillQuadT != null)
         {
             ApplyQuadHorizontalFill(fillQuadT, hpRatio, innerHeight, -0.002f);
@@ -629,15 +668,15 @@ public class EnemyHealth : MonoBehaviour
         Material mat = new Material(sh) { name = matName };
         if (mat.HasProperty(BaseMapId)) mat.SetTexture(BaseMapId, tex);
         if (mat.HasProperty(MainTexId)) mat.SetTexture(MainTexId, tex);
-        if (mat.HasProperty("_Surface")) mat.SetFloat("_Surface", 1f);
-        if (mat.HasProperty("_Blend")) mat.SetFloat("_Blend", 0f);
-        if (mat.HasProperty("_SrcBlend")) mat.SetFloat("_SrcBlend", (float)BlendMode.SrcAlpha);
-        if (mat.HasProperty("_DstBlend")) mat.SetFloat("_DstBlend", (float)BlendMode.OneMinusSrcAlpha);
-        if (mat.HasProperty("_SrcBlendAlpha")) mat.SetFloat("_SrcBlendAlpha", (float)BlendMode.One);
-        if (mat.HasProperty("_DstBlendAlpha")) mat.SetFloat("_DstBlendAlpha", (float)BlendMode.OneMinusSrcAlpha);
-        if (mat.HasProperty("_ZWrite")) mat.SetFloat("_ZWrite", 0f);
-        if (mat.HasProperty("_AlphaClip")) mat.SetFloat("_AlphaClip", 0f);
-        if (mat.HasProperty("_Cull")) mat.SetFloat("_Cull", 0f);
+        if (mat.HasProperty(SurfaceId)) mat.SetFloat(SurfaceId, 1f);
+        if (mat.HasProperty(BlendId)) mat.SetFloat(BlendId, 0f);
+        if (mat.HasProperty(SrcBlendId)) mat.SetFloat(SrcBlendId, (float)BlendMode.SrcAlpha);
+        if (mat.HasProperty(DstBlendId)) mat.SetFloat(DstBlendId, (float)BlendMode.OneMinusSrcAlpha);
+        if (mat.HasProperty(SrcBlendAlphaId)) mat.SetFloat(SrcBlendAlphaId, (float)BlendMode.One);
+        if (mat.HasProperty(DstBlendAlphaId)) mat.SetFloat(DstBlendAlphaId, (float)BlendMode.OneMinusSrcAlpha);
+        if (mat.HasProperty(ZWriteId)) mat.SetFloat(ZWriteId, 0f);
+        if (mat.HasProperty(AlphaClipId)) mat.SetFloat(AlphaClipId, 0f);
+        if (mat.HasProperty(CullId)) mat.SetFloat(CullId, 0f);
         mat.SetOverrideTag("RenderType", "Transparent");
         mat.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
         mat.DisableKeyword("_ALPHATEST_ON");

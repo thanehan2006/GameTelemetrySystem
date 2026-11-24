@@ -22,6 +22,7 @@ public class CampfireCheckpoint : MonoBehaviour
     private Material ringMatInstance;
     private ParticleSystem emberPs;
     private bool activated;
+    private float nextFarCheckTime;
 
     // Đăng ký checkpoint vào danh sách đang hoạt động trong scene
     private void OnEnable()
@@ -55,6 +56,8 @@ public class CampfireCheckpoint : MonoBehaviour
     {
         if (GameOverManager.IsGameOver || WeaponShopManager.IsShopOpen) return;
 
+        if (Time.time < nextFarCheckTime) return;
+
         if (playerTransform == null || playerHealth == null)
         {
             ResolvePlayer();
@@ -64,6 +67,17 @@ public class CampfireCheckpoint : MonoBehaviour
         Vector3 diff = playerTransform.position - transform.position;
         diff.y = 0f;
         float sqrDist = diff.sqrMagnitude;
+
+        if (sqrDist > 40f * 40f)
+        {
+            if (emberPs != null && emberPs.isPlaying)
+            {
+                emberPs.Stop(false, ParticleSystemStopBehavior.StopEmitting);
+            }
+            nextFarCheckTime = Time.time + 0.22f;
+            return;
+        }
+        nextFarCheckTime = 0f;
 
         if (sanctuaryRing != null && sqrDist <= 1600f)
         {
@@ -110,7 +124,7 @@ public class CampfireCheckpoint : MonoBehaviour
             Color col = new Color(1.55f, 1.05f, 0.28f, 0.36f);
             if (ringMatInstance.HasProperty(BaseColorId)) ringMatInstance.SetColor(BaseColorId, col);
             if (ringMatInstance.HasProperty(ColorId)) ringMatInstance.SetColor(ColorId, col);
-            mr.material = ringMatInstance;
+            mr.sharedMaterial = ringMatInstance;
             mr.shadowCastingMode = ShadowCastingMode.Off;
             mr.receiveShadows = false;
             sanctuaryRing = ring.transform;
@@ -153,6 +167,7 @@ public class CampfireCheckpoint : MonoBehaviour
 
             var noise = ps.noise;
             noise.enabled = true;
+            noise.quality = ParticleSystemNoiseQuality.Low;
             noise.strength = 0.45f;
             noise.frequency = 1.1f;
 
@@ -165,7 +180,9 @@ public class CampfireCheckpoint : MonoBehaviour
             colOver.color = g;
 
             var rend = ps.GetComponent<ParticleSystemRenderer>();
-            rend.material = CombatVfxManager.GetAdditiveStarMaterial();
+            rend.sharedMaterial = CombatVfxManager.GetAdditiveStarMaterial();
+            rend.shadowCastingMode = ShadowCastingMode.Off;
+            rend.receiveShadows = false;
             ps.Play();
         }
     }

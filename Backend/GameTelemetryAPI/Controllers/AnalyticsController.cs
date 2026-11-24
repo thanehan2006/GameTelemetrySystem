@@ -19,18 +19,30 @@ namespace GameTelemetryAPI.Controllers
             _context = context;
         }
 
-        private IQueryable<GameSession> FilterSessions(DateTime? from, DateTime? to, int? level)
+        private static TimeSpan ResolveUtcOffset(int? tzOffsetMinutes)
+        {
+            if (tzOffsetMinutes.HasValue)
+            {
+                int clamped = Math.Clamp(tzOffsetMinutes.Value, -720, 840);
+                return TimeSpan.FromMinutes(clamped);
+            }
+            return TimeZoneInfo.Local.GetUtcOffset(DateTime.UtcNow);
+        }
+
+        private IQueryable<GameSession> FilterSessions(DateTime? from, DateTime? to, int? level, int? tzOffset = null)
         {
             var query = _context.GameSessions.AsNoTracking();
+            var offset = ResolveUtcOffset(tzOffset);
+
             if (from.HasValue)
             {
-                var fromStart = from.Value.Date;
-                query = query.Where(s => s.StartTime >= fromStart);
+                var fromStartUtc = DateTime.SpecifyKind(from.Value.Date - offset, DateTimeKind.Utc);
+                query = query.Where(s => s.StartTime >= fromStartUtc);
             }
             if (to.HasValue)
             {
-                var toExclusive = to.Value.Date.AddDays(1);
-                query = query.Where(s => s.StartTime < toExclusive);
+                var toExclusiveUtc = DateTime.SpecifyKind(to.Value.Date.AddDays(1) - offset, DateTimeKind.Utc);
+                query = query.Where(s => s.StartTime < toExclusiveUtc);
             }
             if (level.HasValue)
             {
@@ -45,9 +57,10 @@ namespace GameTelemetryAPI.Controllers
         public async Task<ActionResult<OverviewStatsDto>> GetOverviewStats(
             [FromQuery] DateTime? from = null,
             [FromQuery] DateTime? to = null,
-            [FromQuery] int? level = null)
+            [FromQuery] int? level = null,
+            [FromQuery] int? tzOffset = null)
         {
-            var sessionQuery = FilterSessions(from, to, level);
+            var sessionQuery = FilterSessions(from, to, level, tzOffset);
 
             var totalPlayers = (from.HasValue || to.HasValue || level.HasValue)
                 ? await sessionQuery.Select(s => s.PlayerId).Distinct().CountAsync()
@@ -75,7 +88,7 @@ namespace GameTelemetryAPI.Controllers
             var totalSessions = sessions.Count;
             var finishedSessions = sessions.Where(s => s.EndTime != null).ToList();
             double avgDuration = finishedSessions.Count > 0
-                ? finishedSessions.Average(s => (s.EndTime!.Value - s.StartTime).TotalMinutes)
+                ? finishedSessions.Average(s => Math.Max(0, (s.EndTime!.Value - s.StartTime).TotalMinutes))
                 : 0;
 
             int totalWins = sessions.Count(s => IsWinResult(s.Result));
@@ -107,7 +120,8 @@ namespace GameTelemetryAPI.Controllers
         public async Task<ActionResult<List<LevelStatsDto>>> GetLevelStats(
             [FromQuery] int? level = null,
             [FromQuery] DateTime? from = null,
-            [FromQuery] DateTime? to = null)
+            [FromQuery] DateTime? to = null,
+            [FromQuery] int? tzOffset = null)
         {
             var levelNames = await _context.Levels
                 .AsNoTracking()
@@ -116,7 +130,7 @@ namespace GameTelemetryAPI.Controllers
             var eventQuery = _context.GameEvents.AsNoTracking();
             if (from.HasValue || to.HasValue)
             {
-                var dateSessionIds = FilterSessions(from, to, null).Select(s => s.SessionId);
+                var dateSessionIds = FilterSessions(from, to, null, tzOffset).Select(s => s.SessionId);
                 eventQuery = eventQuery.Where(e => dateSessionIds.Contains(e.SessionId));
             }
             if (level.HasValue)
@@ -185,14 +199,16 @@ namespace GameTelemetryAPI.Controllers
         public async Task<ActionResult<List<SessionsByDateDto>>> GetSessionsByDate(
             [FromQuery] DateTime? from = null,
             [FromQuery] DateTime? to = null,
-            [FromQuery] int? level = null)
+            [FromQuery] int? level = null,
+            [FromQuery] int? tzOffset = null)
         {
-            var sessions = await FilterSessions(from, to, level)
+            var offset = ResolveUtcOffset(tzOffset);
+            var sessions = await FilterSessions(from, to, level, tzOffset)
                 .Select(s => s.StartTime)
                 .ToListAsync();
 
             var result = sessions
-                .GroupBy(s => s.ToString("yyyy-MM-dd"))
+                .GroupBy(s => (s + offset).ToString("yyyy-MM-dd"))
                 .OrderBy(g => g.Key)
                 .Select(g => new SessionsByDateDto
                 {
@@ -210,27 +226,45 @@ namespace GameTelemetryAPI.Controllers
             [FromQuery] int limit = 15,
             [FromQuery] DateTime? from = null,
             [FromQuery] DateTime? to = null,
-            [FromQuery] int? level = null)
+            [FromQuery] int? level = null,
+            [FromQuery] int? tzOffset = null)
         {
-            var sessions = await FilterSessions(from, to, level)
+            var rawSessions = await FilterSessions(from, to, level, tzOffset)
                 .OrderByDescending(s => s.StartTime)
                 .Take(limit)
-                .Select(s => new RecentSessionDto
+                .Select(s => new
                 {
-                    SessionId = s.SessionId,
+                    s.SessionId,
                     PlayerName = s.Player != null ? s.Player.PlayerName : "Unknown",
                     Level = s.LevelId,
-                    StartTime = s.StartTime,
-                    EndTime = s.EndTime,
-                    DurationMinutes = s.EndTime != null ? Math.Round((s.EndTime.Value - s.StartTime).TotalMinutes, 2) : null,
-                    Result = s.Result,
+                    s.StartTime,
+                    s.EndTime,
+                    s.Result,
                     TotalEvents = s.GameEvents.Count + s.ShopPurchases.Count,
-                    EnemiesKilled = s.EnemiesKilled,
-                    GoldEarned = s.GoldEarned,
-                    GoldSpent = s.GoldSpent,
-                    PerfectParries = s.PerfectParries
+                    s.EnemiesKilled,
+                    s.GoldEarned,
+                    s.GoldSpent,
+                    s.PerfectParries
                 })
                 .ToListAsync();
+
+            var sessions = rawSessions.Select(s => new RecentSessionDto
+            {
+                SessionId = s.SessionId,
+                PlayerName = s.PlayerName,
+                Level = s.Level,
+                StartTime = DateTime.SpecifyKind(s.StartTime, DateTimeKind.Utc),
+                EndTime = s.EndTime.HasValue ? DateTime.SpecifyKind(s.EndTime.Value, DateTimeKind.Utc) : null,
+                DurationMinutes = s.EndTime.HasValue
+                    ? Math.Round(Math.Max(0, (s.EndTime.Value - s.StartTime).TotalMinutes), 2)
+                    : null,
+                Result = s.Result,
+                TotalEvents = s.TotalEvents,
+                EnemiesKilled = s.EnemiesKilled,
+                GoldEarned = s.GoldEarned,
+                GoldSpent = s.GoldSpent,
+                PerfectParries = s.PerfectParries
+            }).ToList();
 
             return Ok(sessions);
         }
@@ -240,9 +274,10 @@ namespace GameTelemetryAPI.Controllers
         public async Task<ActionResult<EconomyStatsDto>> GetEconomyStats(
             [FromQuery] DateTime? from = null,
             [FromQuery] DateTime? to = null,
-            [FromQuery] int? level = null)
+            [FromQuery] int? level = null,
+            [FromQuery] int? tzOffset = null)
         {
-            var sessionQuery = FilterSessions(from, to, level);
+            var sessionQuery = FilterSessions(from, to, level, tzOffset);
             var sessionStats = await sessionQuery
                 .Select(s => new { s.SessionId, s.GoldEarned, s.GoldSpent })
                 .ToListAsync();
@@ -322,9 +357,10 @@ namespace GameTelemetryAPI.Controllers
         public async Task<ActionResult<CombatStatsDto>> GetCombatStats(
             [FromQuery] DateTime? from = null,
             [FromQuery] DateTime? to = null,
-            [FromQuery] int? level = null)
+            [FromQuery] int? level = null,
+            [FromQuery] int? tzOffset = null)
         {
-            var sessions = await FilterSessions(from, to, level)
+            var sessions = await FilterSessions(from, to, level, tzOffset)
                 .Select(s => new
                 {
                     s.EnemiesKilled,

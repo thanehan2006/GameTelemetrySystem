@@ -558,7 +558,7 @@ public class PlayerAttack : MonoBehaviour
                     playerController.StopCombatLunge();
                 }
 
-                OrcEnemyAI orcAI = enemy.GetComponent<OrcEnemyAI>();
+                OrcEnemyAI orcAI = enemy.CachedEnemyAI;
                 if (orcAI != null)
                 {
                     float kb = currentAttackVariant == 2 ? knockbackForce * 1.25f : knockbackForce;
@@ -662,7 +662,7 @@ public class PlayerAttack : MonoBehaviour
         weaponTrail.minVertexDistance = 0.04f;
         weaponTrail.startWidth = desiredTrailWidth;
         weaponTrail.endWidth = 0.02f;
-        weaponTrail.material = CombatVfxManager.GetWeaponTrailMaterial();
+        weaponTrail.sharedMaterial = CombatVfxManager.GetWeaponTrailMaterial();
         weaponTrail.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
         weaponTrail.receiveShadows = false;
 

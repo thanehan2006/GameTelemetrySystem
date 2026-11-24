@@ -117,3 +117,8 @@ InitTestScene*.unity*
 bin/
 obj/
 *.user
+
+# Word documents / reports
+*.doc
+*.docx
+

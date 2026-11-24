@@ -1,4 +1,4 @@
-using System.Collections;
+﻿using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
@@ -12,7 +12,7 @@ public class WeaponShopManager : MonoBehaviour
 {
     public static WeaponShopManager Instance { get; private set; }
     public bool IsActualShopOpen => isOpen;
-    public static bool IsShopOpen => (Instance != null && Instance.isOpen) || StoryGuideManager.IsAnyModalOpen;
+    public static bool IsShopOpen => (Instance != null && Instance.isOpen) || StoryGuideManager.IsAnyModalOpen || GameMenuManager.IsMenuOpen;
 
     public const string DefaultConfigPath = "Assets/Resources/WeaponUpgradeConfig.asset";
 
@@ -98,7 +98,7 @@ public class WeaponShopManager : MonoBehaviour
             return;
         }
 
-        if (StoryGuideManager.IsAnyModalOpen) return;
+        if (StoryGuideManager.IsAnyModalOpen || GameMenuManager.IsMenuOpen) return;
 
         if (Input.GetKeyDown(KeyCode.B))
         {
@@ -138,7 +138,7 @@ public class WeaponShopManager : MonoBehaviour
     // Tạm dừng thời gian trận đấu, mở khóa chuột và hiển thị bảng cửa hàng
     public void OpenShop()
     {
-        if (isOpen || GameOverManager.IsGameOver || StoryGuideManager.IsAnyModalOpen) return;
+        if (isOpen || GameOverManager.IsGameOver || StoryGuideManager.IsAnyModalOpen || GameMenuManager.IsMenuOpen) return;
 
         EnsureShopUi();
         if (shopOverlayRoot == null) return;
@@ -183,8 +183,9 @@ public class WeaponShopManager : MonoBehaviour
         }
 
         GameAudioManager.PlayUiClick();
+        GameMenuManager.SuppressEscapeThisFrame();
 
-        if (!GameOverManager.IsGameOver && !StoryGuideManager.IsAnyModalOpen)
+        if (!GameOverManager.IsGameOver && !StoryGuideManager.IsAnyModalOpen && !GameMenuManager.IsMenuOpen)
         {
             Time.timeScale = 1f;
             Cursor.lockState = CursorLockMode.Locked;
@@ -453,7 +454,7 @@ public class WeaponShopManager : MonoBehaviour
 
         if (ScoreManager.Instance == null || !ScoreManager.Instance.TrySpendGold(potionPrice))
         {
-            SetFeedback($"Không đủ vàng! Cần {potionPrice} Gold để mua Bình Hồi Máu.", new Color(1f, 0.38f, 0.38f));
+            SetFeedback($"Không đủ vàng! Cần {potionPrice} vàng để mua Bình Hồi Máu.", new Color(1f, 0.38f, 0.38f));
             return;
         }
 
@@ -487,7 +488,7 @@ public class WeaponShopManager : MonoBehaviour
 
         if (ScoreManager.Instance == null || !ScoreManager.Instance.TrySpendGold(item.price))
         {
-            SetFeedback($"Chưa đủ vàng! Cần {item.price} Gold để mua {item.displayName}.", new Color(1f, 0.38f, 0.38f));
+            SetFeedback($"Chưa đủ vàng! Cần {item.price} vàng để mua {item.displayName}.", new Color(1f, 0.38f, 0.38f));
             return;
         }
 
@@ -565,7 +566,7 @@ public class WeaponShopManager : MonoBehaviour
     {
         if (shopOverlayRoot != null) return;
 
-        Canvas canvas = FindFirstObjectByType<Canvas>();
+        Canvas canvas = FantasyUiThemeHelper.FindSceneCanvas(gameObject);
         if (canvas == null) return;
 
         TMP_FontAsset font = canvas.GetComponentInChildren<TMP_Text>(true)?.font;

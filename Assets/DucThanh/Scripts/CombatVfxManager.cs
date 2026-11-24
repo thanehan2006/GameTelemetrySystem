@@ -25,6 +25,7 @@ public class CombatVfxManager : MonoBehaviour
     private static readonly WaitForSeconds WaitSlashNormal = new WaitForSeconds(0.09f);
     private static readonly WaitForSeconds WaitSlashSpin = new WaitForSeconds(0.12f);
     private static readonly WaitForSeconds WaitBloodReturn = new WaitForSeconds(0.95f);
+    private static readonly ParticleSystem.Burst[] SingleBurstBuffer = new ParticleSystem.Burst[1];
 
     private const float FloatingTextBaseFontSize = 2.35f;
     private const int MaxConcurrentFlashLights = 3;
@@ -72,6 +73,15 @@ public class CombatVfxManager : MonoBehaviour
         public ParticleSystem starFlare;
         public ParticleSystem shockRing;
         public ParticleSystem sparks;
+        public Gradient starGrad;
+        public Gradient ringGrad;
+        public Gradient sparksGrad;
+        public GradientColorKey[] colorKeys2;
+        public GradientAlphaKey[] alphaKeys3;
+        public Color lastPrimary;
+        public Color lastCore;
+        public Color lastSecondary;
+        public bool hasColorCache;
     }
 
     private sealed class PooledSlashArc
@@ -103,7 +113,8 @@ public class CombatVfxManager : MonoBehaviour
     private float screenFlashAlpha;
     private float screenFlashFadeSpeed = 1.6f;
 
-    private Coroutine hitStopRoutine;
+    private bool hitStopActive;
+    private float hitStopEndUnscaledTime;
     private bool postProcessingChecked;
 
     // Lấy hoặc tạo instance CombatVfxManager duy nhất trong scene
@@ -138,6 +149,15 @@ public class CombatVfxManager : MonoBehaviour
 
     private void Update()
     {
+        if (hitStopActive && Time.unscaledTime >= hitStopEndUnscaledTime)
+        {
+            hitStopActive = false;
+            if (!GameOverManager.IsGameOver && !WeaponShopManager.IsShopOpen)
+            {
+                Time.timeScale = 1f;
+            }
+        }
+
         if (screenFlashImage != null && screenFlashAlpha > 0.001f)
         {
             screenFlashAlpha = Mathf.MoveTowards(screenFlashAlpha, 0f, Time.unscaledDeltaTime * screenFlashFadeSpeed);
@@ -154,7 +174,7 @@ public class CombatVfxManager : MonoBehaviour
 
     private void OnDestroy()
     {
-        if (hitStopRoutine != null && !GameOverManager.IsGameOver && !WeaponShopManager.IsShopOpen)
+        if (hitStopActive && !GameOverManager.IsGameOver && !WeaponShopManager.IsShopOpen)
         {
             Time.timeScale = 1f;
         }
@@ -390,49 +410,40 @@ public class CombatVfxManager : MonoBehaviour
         if (postProcessingChecked) return;
         postProcessingChecked = true;
 
-        if (Camera.main != null)
-        {
-            UniversalAdditionalCameraData camData = Camera.main.GetComponent<UniversalAdditionalCameraData>();
-            if (camData != null)
-            {
-                camData.renderPostProcessing = true;
-            }
-        }
-
         Volume existingVol = FindFirstObjectByType<Volume>();
-        if (existingVol != null && existingVol.sharedProfile != null && existingVol.sharedProfile.Has<Bloom>())
+        if (existingVol == null || existingVol.sharedProfile == null || !existingVol.sharedProfile.Has<Bloom>())
         {
-            return;
+            GameObject volObj = new GameObject("GlobalVfxVolume");
+            volObj.transform.SetParent(transform, false);
+            Volume vol = volObj.AddComponent<Volume>();
+            vol.isGlobal = true;
+            vol.priority = 5f;
+
+            VolumeProfile profile = ScriptableObject.CreateInstance<VolumeProfile>();
+            runtimeVolumeProfile = profile;
+
+            Bloom bloom = profile.Add<Bloom>(true);
+            bloom.threshold.Override(0.95f);
+            bloom.intensity.Override(0.42f);
+            bloom.scatter.Override(0.58f);
+            bloom.highQualityFiltering.Override(false);
+            bloom.maxIterations.Override(4);
+
+            Vignette vignette = profile.Add<Vignette>(true);
+            vignette.intensity.Override(0.14f);
+            vignette.smoothness.Override(0.42f);
+
+            Tonemapping tone = profile.Add<Tonemapping>(true);
+            tone.mode.Override(TonemappingMode.ACES);
+
+            ColorAdjustments colorAdj = profile.Add<ColorAdjustments>(true);
+            colorAdj.contrast.Override(8f);
+            colorAdj.saturation.Override(10f);
+
+            vol.profile = profile;
         }
 
-        GameObject volObj = new GameObject("GlobalVfxVolume");
-        volObj.transform.SetParent(transform, false);
-        Volume vol = volObj.AddComponent<Volume>();
-        vol.isGlobal = true;
-        vol.priority = 5f;
-
-        VolumeProfile profile = ScriptableObject.CreateInstance<VolumeProfile>();
-        runtimeVolumeProfile = profile;
-
-        Bloom bloom = profile.Add<Bloom>(true);
-        bloom.threshold.Override(0.95f);
-        bloom.intensity.Override(0.42f);
-        bloom.scatter.Override(0.58f);
-        bloom.highQualityFiltering.Override(false);
-        bloom.maxIterations.Override(4);
-
-        Vignette vignette = profile.Add<Vignette>(true);
-        vignette.intensity.Override(0.14f);
-        vignette.smoothness.Override(0.42f);
-
-        Tonemapping tone = profile.Add<Tonemapping>(true);
-        tone.mode.Override(TonemappingMode.ACES);
-
-        ColorAdjustments colorAdj = profile.Add<ColorAdjustments>(true);
-        colorAdj.contrast.Override(8f);
-        colorAdj.saturation.Override(10f);
-
-        vol.profile = profile;
+        GameSettingsManager.ApplyCurrentGraphicsSettings();
     }
 
     private void TriggerHitStopInternal(float duration, float slowScale)
@@ -440,22 +451,9 @@ public class CombatVfxManager : MonoBehaviour
         if (GameOverManager.IsGameOver || WeaponShopManager.IsShopOpen) return;
         if (duration <= 0.005f) return;
 
-        if (hitStopRoutine != null)
-        {
-            StopCoroutine(hitStopRoutine);
-        }
-        hitStopRoutine = StartCoroutine(HitStopCoroutine(duration, slowScale));
-    }
-
-    private IEnumerator HitStopCoroutine(float duration, float slowScale)
-    {
         Time.timeScale = Mathf.Clamp(slowScale, 0.02f, 0.5f);
-        yield return new WaitForSecondsRealtime(duration);
-        if (!GameOverManager.IsGameOver && !WeaponShopManager.IsShopOpen)
-        {
-            Time.timeScale = 1f;
-        }
-        hitStopRoutine = null;
+        hitStopActive = true;
+        hitStopEndUnscaledTime = Mathf.Max(hitStopEndUnscaledTime, Time.unscaledTime + duration);
     }
 
     private void TriggerScreenFlashInternal(Color color, float intensity, float fadeSpeed)
@@ -476,7 +474,7 @@ public class CombatVfxManager : MonoBehaviour
     {
         if (screenFlashImage != null) return;
 
-        Canvas canvas = FindFirstObjectByType<Canvas>();
+        Canvas canvas = FantasyUiThemeHelper.FindSceneCanvas(gameObject);
         if (canvas == null) return;
 
         GameObject go = new GameObject("PlayerScreenVignetteFX", typeof(RectTransform), typeof(Image));
@@ -520,6 +518,7 @@ public class CombatVfxManager : MonoBehaviour
         go.transform.SetParent(transform, false);
 
         TextMeshPro tmp = go.AddComponent<TextMeshPro>();
+        ClassicFontRuntimeManager.ApplyFont(tmp);
         tmp.fontSize = FloatingTextBaseFontSize;
         tmp.fontStyle = FontStyles.Bold;
         tmp.alignment = TextAlignmentOptions.Center;
@@ -558,6 +557,7 @@ public class CombatVfxManager : MonoBehaviour
         private float duration;
         private float elapsed;
         private float riseSpeed;
+        private float lastAppliedAlpha = 1f;
 
         public void Bind(TextMeshPro textComp)
         {
@@ -573,6 +573,7 @@ public class CombatVfxManager : MonoBehaviour
             duration = Mathf.Max(0.4f, dur);
             elapsed = 0f;
             riseSpeed = 1.15f;
+            lastAppliedAlpha = color.a;
 
             if (tmp != null)
             {
@@ -608,9 +609,14 @@ public class CombatVfxManager : MonoBehaviour
 
             if (tmp != null)
             {
-                Color c = baseColor;
-                c.a = t < 0.62f ? 1f : Mathf.Clamp01(1f - (t - 0.62f) / 0.38f);
-                tmp.color = c;
+                float nextAlpha = t < 0.62f ? baseColor.a : baseColor.a * Mathf.Clamp01(1f - (t - 0.62f) / 0.38f);
+                if (Mathf.Abs(nextAlpha - lastAppliedAlpha) > 0.005f || (t >= 1f && lastAppliedAlpha > 0f))
+                {
+                    lastAppliedAlpha = nextAlpha;
+                    Color c = baseColor;
+                    c.a = nextAlpha;
+                    tmp.color = c;
+                }
             }
 
             if (elapsed >= duration)
@@ -676,7 +682,7 @@ public class CombatVfxManager : MonoBehaviour
             main.startRotation = new ParticleSystem.MinMaxCurve(0f, Mathf.PI * 2f);
             var emission = ps.emission;
             emission.rateOverTime = 0f;
-            emission.SetBursts(new[] { new ParticleSystem.Burst(0f, 1) });
+            SetSingleBurst(ps, 0f, 1);
             var sizeOver = ps.sizeOverLifetime;
             sizeOver.enabled = true;
             sizeOver.size = new ParticleSystem.MinMaxCurve(1f, AnimationCurve.EaseInOut(0f, 0.4f, 1f, 1.35f));
@@ -694,7 +700,7 @@ public class CombatVfxManager : MonoBehaviour
             main.startSpeed = 0f;
             var emission = ps.emission;
             emission.rateOverTime = 0f;
-            emission.SetBursts(new[] { new ParticleSystem.Burst(0f, 1) });
+            SetSingleBurst(ps, 0f, 1);
             var sizeOver = ps.sizeOverLifetime;
             sizeOver.enabled = true;
             sizeOver.size = new ParticleSystem.MinMaxCurve(1f, AnimationCurve.EaseInOut(0f, 0.15f, 1f, 1f));
@@ -817,7 +823,7 @@ public class CombatVfxManager : MonoBehaviour
         mSparks.startLifetime = new ParticleSystem.MinMaxCurve(0.12f, heavy ? 0.32f : 0.22f);
         mSparks.startSpeed = new ParticleSystem.MinMaxCurve(heavy ? 6.5f : 5.0f, heavy ? 13.5f : 10.0f);
         mSparks.startSize = new ParticleSystem.MinMaxCurve(0.05f, heavy ? 0.13f : 0.095f);
-        fx.sparks.emission.SetBursts(new[] { new ParticleSystem.Burst(0f, heavy ? 22 : 12) });
+        SetSingleBurst(fx.sparks, 0f, heavy ? 22 : 12);
         var sSparks = fx.sparks.shape;
         sSparks.angle = heavy ? 52f : 42f;
 
@@ -826,14 +832,14 @@ public class CombatVfxManager : MonoBehaviour
         mDrop.startLifetime = new ParticleSystem.MinMaxCurve(0.28f, heavy ? 0.68f : 0.5f);
         mDrop.startSpeed = new ParticleSystem.MinMaxCurve(heavy ? 4.4f : 3.2f, heavy ? 9.0f : 6.4f);
         mDrop.startSize = new ParticleSystem.MinMaxCurve(0.08f, heavy ? 0.24f : 0.17f);
-        fx.droplets.emission.SetBursts(new[] { new ParticleSystem.Burst(0f, heavy ? 32 : 20) });
+        SetSingleBurst(fx.droplets, 0f, heavy ? 32 : 20);
         var sDrop = fx.droplets.shape;
         sDrop.angle = heavy ? 44f : 34f;
 
         fx.mist.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
         var mMist = fx.mist.main;
         mMist.startSize = new ParticleSystem.MinMaxCurve(0.35f, heavy ? 0.85f : 0.6f);
-        fx.mist.emission.SetBursts(new[] { new ParticleSystem.Burst(0f, heavy ? 10 : 6) });
+        SetSingleBurst(fx.mist, 0f, heavy ? 10 : 6);
     }
 
     private IEnumerator ReturnBloodHitAfter(PooledBloodHit fx)
@@ -904,7 +910,12 @@ public class CombatVfxManager : MonoBehaviour
         var fx = new PooledElementalHit
         {
             root = root,
-            rootTransform = root.transform
+            rootTransform = root.transform,
+            starGrad = new Gradient(),
+            ringGrad = new Gradient(),
+            sparksGrad = new Gradient(),
+            colorKeys2 = new GradientColorKey[2],
+            alphaKeys3 = new GradientAlphaKey[3]
         };
 
         {
@@ -916,7 +927,7 @@ public class CombatVfxManager : MonoBehaviour
             main.startRotation = new ParticleSystem.MinMaxCurve(0f, Mathf.PI * 2f);
             var emission = ps.emission;
             emission.rateOverTime = 0f;
-            emission.SetBursts(new[] { new ParticleSystem.Burst(0f, 1) });
+            SetSingleBurst(ps, 0f, 1);
             var sizeOver = ps.sizeOverLifetime;
             sizeOver.enabled = true;
             sizeOver.size = new ParticleSystem.MinMaxCurve(1f, AnimationCurve.EaseInOut(0f, 0.35f, 1f, 1.38f));
@@ -933,7 +944,7 @@ public class CombatVfxManager : MonoBehaviour
             main.startSpeed = 0f;
             var emission = ps.emission;
             emission.rateOverTime = 0f;
-            emission.SetBursts(new[] { new ParticleSystem.Burst(0f, 1) });
+            SetSingleBurst(ps, 0f, 1);
             var sizeOver = ps.sizeOverLifetime;
             sizeOver.enabled = true;
             sizeOver.size = new ParticleSystem.MinMaxCurve(1f, AnimationCurve.EaseInOut(0f, 0.14f, 1f, 1f));
@@ -979,13 +990,29 @@ public class CombatVfxManager : MonoBehaviour
         Color hdrPrimary = new Color(primaryColor.r * hdrMult, primaryColor.g * hdrMult, primaryColor.b * hdrMult, 1f);
         Color hdrSecondary = new Color(secondaryColor.r * hdrMult, secondaryColor.g * hdrMult, secondaryColor.b * hdrMult, 1f);
 
+        bool colorsDirty = !fx.hasColorCache
+            || fx.lastPrimary != primaryColor
+            || fx.lastCore != coreColor
+            || fx.lastSecondary != secondaryColor;
+        if (colorsDirty)
+        {
+            fx.hasColorCache = true;
+            fx.lastPrimary = primaryColor;
+            fx.lastCore = coreColor;
+            fx.lastSecondary = secondaryColor;
+        }
+
         fx.starFlare.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
         var mStar = fx.starFlare.main;
         mStar.startLifetime = heavy ? 0.20f : 0.15f;
         mStar.startSize = (0.90f + tier * 0.24f) * (heavy ? 1.32f : 1f);
         mStar.startColor = hdrCore;
-        var colStar = fx.starFlare.colorOverLifetime;
-        colStar.color = CreateFadeOutGradient(coreColor, primaryColor, 1f);
+        if (colorsDirty)
+        {
+            SetFadeOutGradient(fx.starGrad, fx.colorKeys2, fx.alphaKeys3, coreColor, primaryColor, 1f);
+            var colStar = fx.starFlare.colorOverLifetime;
+            colStar.color = fx.starGrad;
+        }
 
         fx.shockRing.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
         var mRing = fx.shockRing.main;
@@ -994,8 +1021,12 @@ public class CombatVfxManager : MonoBehaviour
         mRing.startColor = hdrPrimary;
         var eRing = fx.shockRing.emission;
         eRing.enabled = tier >= 2 || heavy;
-        var colRing = fx.shockRing.colorOverLifetime;
-        colRing.color = CreateFadeOutGradient(coreColor, secondaryColor, 0.92f);
+        if (colorsDirty)
+        {
+            SetFadeOutGradient(fx.ringGrad, fx.colorKeys2, fx.alphaKeys3, coreColor, secondaryColor, 0.92f);
+            var colRing = fx.shockRing.colorOverLifetime;
+            colRing.color = fx.ringGrad;
+        }
 
         fx.sparks.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
         var mSparks = fx.sparks.main;
@@ -1003,11 +1034,15 @@ public class CombatVfxManager : MonoBehaviour
         mSparks.startSpeed = new ParticleSystem.MinMaxCurve(5.2f + tier * 0.8f, 9.5f + tier * 1.4f);
         mSparks.startSize = new ParticleSystem.MinMaxCurve(0.045f, 0.085f + tier * 0.015f);
         mSparks.startColor = new ParticleSystem.MinMaxGradient(hdrPrimary, hdrSecondary);
-        fx.sparks.emission.SetBursts(new[] { new ParticleSystem.Burst(0f, 10 + tier * 5 + (heavy ? 8 : 0)) });
+        SetSingleBurst(fx.sparks, 0f, 10 + tier * 5 + (heavy ? 8 : 0));
         var sSparks = fx.sparks.shape;
         sSparks.angle = heavy ? 56f : 46f;
-        var colSparks = fx.sparks.colorOverLifetime;
-        colSparks.color = CreateFadeOutGradient(coreColor, secondaryColor, 1f);
+        if (colorsDirty)
+        {
+            SetFadeOutGradient(fx.sparksGrad, fx.colorKeys2, fx.alphaKeys3, coreColor, secondaryColor, 1f);
+            var colSparks = fx.sparks.colorOverLifetime;
+            colSparks.color = fx.sparksGrad;
+        }
     }
 
     private IEnumerator ReturnElementalHitAfter(PooledElementalHit fx)
@@ -1047,7 +1082,7 @@ public class CombatVfxManager : MonoBehaviour
 
             var emission = ps.emission;
             emission.rateOverTime = 0f;
-            emission.SetBursts(new[] { new ParticleSystem.Burst(0f, isBoss ? 64 : 32) });
+            SetSingleBurst(ps, 0f, isBoss ? 64 : 32);
 
             var shape = ps.shape;
             shape.shapeType = ParticleSystemShapeType.Sphere;
@@ -1057,8 +1092,7 @@ public class CombatVfxManager : MonoBehaviour
             colOver.enabled = true;
             colOver.color = CreateFadeOutGradient(new Color(0.88f, 0.05f, 0.05f), new Color(0.25f, 0.01f, 0.02f), 1f);
 
-            var rend = ps.GetComponent<ParticleSystemRenderer>();
-            rend.material = alphaDropletMat;
+            var rend = ConfigureParticleRenderer(ps, alphaDropletMat);
             rend.renderMode = ParticleSystemRenderMode.Stretch;
             rend.velocityScale = 0.055f;
             rend.lengthScale = 1.6f;
@@ -1086,7 +1120,7 @@ public class CombatVfxManager : MonoBehaviour
 
             var emission = ps.emission;
             emission.rateOverTime = 0f;
-            emission.SetBursts(new[] { new ParticleSystem.Burst(0f, isBoss ? 28 : 16) });
+            SetSingleBurst(ps, 0f, isBoss ? 28 : 16);
 
             var shape = ps.shape;
             shape.shapeType = ParticleSystemShapeType.Sphere;
@@ -1100,8 +1134,7 @@ public class CombatVfxManager : MonoBehaviour
             colOver.enabled = true;
             colOver.color = CreateFadeOutGradient(new Color(0.24f, 0.05f, 0.07f), new Color(0.05f, 0.03f, 0.06f), 0.76f);
 
-            var rend = ps.GetComponent<ParticleSystemRenderer>();
-            rend.material = alphaSoftMat;
+            ConfigureParticleRenderer(ps, alphaSoftMat);
 
             ps.Play();
         }
@@ -1126,7 +1159,7 @@ public class CombatVfxManager : MonoBehaviour
 
             var emission = ps.emission;
             emission.rateOverTime = 0f;
-            emission.SetBursts(new[] { new ParticleSystem.Burst(0.04f, isBoss ? 68 : 28) });
+            SetSingleBurst(ps, 0.04f, isBoss ? 68 : 28);
 
             var shape = ps.shape;
             shape.shapeType = ParticleSystemShapeType.Cone;
@@ -1136,6 +1169,7 @@ public class CombatVfxManager : MonoBehaviour
 
             var noise = ps.noise;
             noise.enabled = true;
+            noise.quality = ParticleSystemNoiseQuality.Low;
             noise.strength = 0.85f;
             noise.frequency = 1.6f;
 
@@ -1147,8 +1181,7 @@ public class CombatVfxManager : MonoBehaviour
             colOver.enabled = true;
             colOver.color = CreateFadeOutGradient(new Color(1f, 0.95f, 0.55f), new Color(1f, 0.45f, 0.1f), 1f);
 
-            var rend = ps.GetComponent<ParticleSystemRenderer>();
-            rend.material = additiveStarMat;
+            ConfigureParticleRenderer(ps, additiveStarMat);
 
             ps.Play();
         }
@@ -1211,7 +1244,7 @@ public class CombatVfxManager : MonoBehaviour
 
             var emission = ps.emission;
             emission.rateOverTime = 0f;
-            emission.SetBursts(new[] { new ParticleSystem.Burst(0f, isBoss ? 18 : 9) });
+            SetSingleBurst(ps, 0f, isBoss ? 18 : 9);
 
             var shape = ps.shape;
             shape.shapeType = ParticleSystemShapeType.Sphere;
@@ -1221,8 +1254,7 @@ public class CombatVfxManager : MonoBehaviour
             colOver.enabled = true;
             colOver.color = CreateFadeOutGradient(new Color(0.22f, 0.15f, 0.18f), new Color(0.08f, 0.05f, 0.08f), 0.7f);
 
-            var rend = ps.GetComponent<ParticleSystemRenderer>();
-            rend.material = alphaSoftMat;
+            ConfigureParticleRenderer(ps, alphaSoftMat);
             ps.Play();
         }
 
@@ -1244,7 +1276,7 @@ public class CombatVfxManager : MonoBehaviour
 
             var emission = ps.emission;
             emission.rateOverTime = 0f;
-            emission.SetBursts(new[] { new ParticleSystem.Burst(0f, isBoss ? 24 : 12) });
+            SetSingleBurst(ps, 0f, isBoss ? 24 : 12);
 
             var shape = ps.shape;
             shape.shapeType = ParticleSystemShapeType.Sphere;
@@ -1254,8 +1286,7 @@ public class CombatVfxManager : MonoBehaviour
             colOver.enabled = true;
             colOver.color = CreateFadeOutGradient(Color.white, new Color(1f, 0.55f, 0.15f), 0.95f);
 
-            var rend = ps.GetComponent<ParticleSystemRenderer>();
-            rend.material = additiveStarMat;
+            ConfigureParticleRenderer(ps, additiveStarMat);
             ps.Play();
         }
 
@@ -1485,7 +1516,7 @@ public class CombatVfxManager : MonoBehaviour
         main.startSpeed = new ParticleSystem.MinMaxCurve(4.2f, is360 ? 10.5f : 7.8f);
         main.startSize = new ParticleSystem.MinMaxCurve(0.055f, is360 ? 0.14f : 0.11f);
         main.startColor = new ParticleSystem.MinMaxGradient(sparkColor, coreSparkColor);
-        ps.emission.SetBursts(new[] { new ParticleSystem.Burst(0f, is360 ? 32 : 14) });
+        SetSingleBurst(ps, 0f, is360 ? 32 : 14);
         var shape = ps.shape;
         shape.shapeType = is360 ? ParticleSystemShapeType.Circle : ParticleSystemShapeType.Cone;
         shape.radius = is360 ? 1.25f : 0.45f;
@@ -1524,7 +1555,7 @@ public class CombatVfxManager : MonoBehaviour
 
             var emission = ps.emission;
             emission.rateOverTime = 0f;
-            emission.SetBursts(new[] { new ParticleSystem.Burst(0f, 22) });
+            SetSingleBurst(ps, 0f, 22);
 
             var shape = ps.shape;
             shape.shapeType = ParticleSystemShapeType.Circle;
@@ -1535,8 +1566,7 @@ public class CombatVfxManager : MonoBehaviour
             colOver.enabled = true;
             colOver.color = CreateFadeOutGradient(new Color(0.84f, 0.72f, 0.54f), new Color(0.45f, 0.38f, 0.30f), 0.62f);
 
-            var rend = ps.GetComponent<ParticleSystemRenderer>();
-            rend.material = alphaSoftMat;
+            ConfigureParticleRenderer(ps, alphaSoftMat);
             ps.Play();
         }
 
@@ -1558,7 +1588,7 @@ public class CombatVfxManager : MonoBehaviour
 
             var emission = ps.emission;
             emission.rateOverTime = 0f;
-            emission.SetBursts(new[] { new ParticleSystem.Burst(0f, 18) });
+            SetSingleBurst(ps, 0f, 18);
 
             var shape = ps.shape;
             shape.shapeType = ParticleSystemShapeType.Circle;
@@ -1569,8 +1599,7 @@ public class CombatVfxManager : MonoBehaviour
             colOver.enabled = true;
             colOver.color = CreateFadeOutGradient(Color.white, new Color(1f, 0.38f, 0.08f), 1f);
 
-            var rend = ps.GetComponent<ParticleSystemRenderer>();
-            rend.material = additiveStarMat;
+            ConfigureParticleRenderer(ps, additiveStarMat);
             ps.Play();
         }
 
@@ -1605,7 +1634,7 @@ public class CombatVfxManager : MonoBehaviour
 
             var emission = ps.emission;
             emission.rateOverTime = 0f;
-            emission.SetBursts(new[] { new ParticleSystem.Burst(0f, 1) });
+            SetSingleBurst(ps, 0f, 1);
 
             var sizeOver = ps.sizeOverLifetime;
             sizeOver.enabled = true;
@@ -1615,8 +1644,7 @@ public class CombatVfxManager : MonoBehaviour
             colOver.enabled = true;
             colOver.color = CreateFadeOutGradient(Color.white, perfectParry ? new Color(1f, 0.72f, 0.15f) : new Color(0.45f, 0.85f, 1f), 1f);
 
-            var rend = ps.GetComponent<ParticleSystemRenderer>();
-            rend.material = additiveStarMat;
+            ConfigureParticleRenderer(ps, additiveStarMat);
             ps.Play();
         }
 
@@ -1640,7 +1668,7 @@ public class CombatVfxManager : MonoBehaviour
 
             var emission = ps.emission;
             emission.rateOverTime = 0f;
-            emission.SetBursts(new[] { new ParticleSystem.Burst(0f, perfectParry ? 48 : 22) });
+            SetSingleBurst(ps, 0f, perfectParry ? 48 : 22);
 
             var shape = ps.shape;
             shape.shapeType = ParticleSystemShapeType.Cone;
@@ -1651,8 +1679,7 @@ public class CombatVfxManager : MonoBehaviour
             colOver.enabled = true;
             colOver.color = CreateFadeOutGradient(Color.white, perfectParry ? new Color(1f, 0.68f, 0.12f) : new Color(0.45f, 0.88f, 1f), 1f);
 
-            var rend = ps.GetComponent<ParticleSystemRenderer>();
-            rend.material = additiveSparkMat;
+            var rend = ConfigureParticleRenderer(ps, additiveSparkMat);
             rend.renderMode = ParticleSystemRenderMode.Stretch;
             rend.velocityScale = 0.09f;
             rend.lengthScale = 2.6f;
@@ -1678,7 +1705,7 @@ public class CombatVfxManager : MonoBehaviour
 
             var emission = ps.emission;
             emission.rateOverTime = 0f;
-            emission.SetBursts(new[] { new ParticleSystem.Burst(0f, 1) });
+            SetSingleBurst(ps, 0f, 1);
 
             var sizeOver = ps.sizeOverLifetime;
             sizeOver.enabled = true;
@@ -1688,8 +1715,7 @@ public class CombatVfxManager : MonoBehaviour
             colOver.enabled = true;
             colOver.color = CreateFadeOutGradient(Color.white, perfectParry ? new Color(1f, 0.72f, 0.16f) : new Color(0.4f, 0.85f, 1f), 0.95f);
 
-            var rend = ps.GetComponent<ParticleSystemRenderer>();
-            rend.material = additiveRingMat;
+            ConfigureParticleRenderer(ps, additiveRingMat);
             ps.Play();
         }
 
@@ -1837,7 +1863,7 @@ public class CombatVfxManager : MonoBehaviour
 
             var emission = ps.emission;
             emission.rateOverTime = 0f;
-            emission.SetBursts(new[] { new ParticleSystem.Burst(0f, isParryHeal ? 22 : 30) });
+            SetSingleBurst(ps, 0f, isParryHeal ? 22 : 30);
 
             var shape = ps.shape;
             shape.shapeType = ParticleSystemShapeType.Circle;
@@ -1852,8 +1878,7 @@ public class CombatVfxManager : MonoBehaviour
             colOver.enabled = true;
             colOver.color = CreateFadeOutGradient(Color.white, new Color(0.25f, 1f, 0.55f), 1f);
 
-            var rend = ps.GetComponent<ParticleSystemRenderer>();
-            rend.material = additiveStarMat;
+            ConfigureParticleRenderer(ps, additiveStarMat);
             ps.Play();
         }
 
@@ -1900,7 +1925,7 @@ public class CombatVfxManager : MonoBehaviour
 
             var emission = ps.emission;
             emission.rateOverTime = 0f;
-            emission.SetBursts(new[] { new ParticleSystem.Burst(0f, 16) });
+            SetSingleBurst(ps, 0f, 16);
 
             var shape = ps.shape;
             shape.shapeType = ParticleSystemShapeType.Sphere;
@@ -1910,8 +1935,7 @@ public class CombatVfxManager : MonoBehaviour
             colOver.enabled = true;
             colOver.color = CreateFadeOutGradient(Color.white, new Color(1f, 0.78f, 0.15f), 1f);
 
-            var rend = ps.GetComponent<ParticleSystemRenderer>();
-            rend.material = additiveStarMat;
+            ConfigureParticleRenderer(ps, additiveStarMat);
             ps.Play();
         }
 
@@ -1931,7 +1955,7 @@ public class CombatVfxManager : MonoBehaviour
 
             var emission = ps.emission;
             emission.rateOverTime = 0f;
-            emission.SetBursts(new[] { new ParticleSystem.Burst(0f, 1) });
+            SetSingleBurst(ps, 0f, 1);
 
             var sizeOver = ps.sizeOverLifetime;
             sizeOver.enabled = true;
@@ -1941,8 +1965,7 @@ public class CombatVfxManager : MonoBehaviour
             colOver.enabled = true;
             colOver.color = CreateFadeOutGradient(Color.white, new Color(1f, 0.75f, 0.18f), 0.9f);
 
-            var rend = ps.GetComponent<ParticleSystemRenderer>();
-            rend.material = additiveRingMat;
+            ConfigureParticleRenderer(ps, additiveRingMat);
             ps.Play();
         }
 
@@ -2002,7 +2025,7 @@ public class CombatVfxManager : MonoBehaviour
 
             var emission = ps.emission;
             emission.rateOverTime = 0f;
-            emission.SetBursts(new[] { new ParticleSystem.Burst(0f, isBoss ? 48 : 20) });
+            SetSingleBurst(ps, 0f, isBoss ? 48 : 20);
 
             var shape = ps.shape;
             shape.shapeType = ParticleSystemShapeType.Circle;
@@ -2015,8 +2038,7 @@ public class CombatVfxManager : MonoBehaviour
                 ? CreateFadeOutGradient(new Color(0.65f, 1f, 1f), new Color(0.28f, 0.55f, 1f), 1f)
                 : CreateFadeOutGradient(new Color(1f, 0.78f, 0.35f), new Color(1f, 0.15f, 0.08f), 1f);
 
-            var rend = ps.GetComponent<ParticleSystemRenderer>();
-            rend.material = additiveStarMat;
+            ConfigureParticleRenderer(ps, additiveStarMat);
             ps.Play();
         }
 
@@ -2094,6 +2116,7 @@ public class CombatVfxManager : MonoBehaviour
 
             var noise = ps.noise;
             noise.enabled = true;
+            noise.quality = ParticleSystemNoiseQuality.Low;
             noise.strength = 0.65f;
             noise.frequency = 1.4f;
 
@@ -2103,8 +2126,7 @@ public class CombatVfxManager : MonoBehaviour
                 ? CreateFadeOutGradient(new Color(0.45f, 0.95f, 1f), new Color(0.45f, 0.35f, 1f), 0.95f)
                 : CreateFadeOutGradient(new Color(1f, 0.72f, 0.22f), new Color(1f, 0.12f, 0.05f), 0.95f);
 
-            var rend = ps.GetComponent<ParticleSystemRenderer>();
-            rend.material = additiveSoftMat;
+            ConfigureParticleRenderer(ps, additiveSoftMat);
             ps.Play();
         }
 
@@ -2151,8 +2173,7 @@ public class CombatVfxManager : MonoBehaviour
             ? CreateFadeOutGradient(new Color(0.5f, 0.96f, 1f), new Color(0.25f, 0.6f, 1f), 0.85f)
             : CreateFadeOutGradient(new Color(1f, 0.72f, 0.2f), new Color(1f, 0.18f, 0.05f), 0.85f);
 
-        var rend = ps.GetComponent<ParticleSystemRenderer>();
-        rend.material = isElite ? additiveStarMat : additiveSoftMat;
+        ConfigureParticleRenderer(ps, isElite ? additiveStarMat : additiveSoftMat);
         ps.Play();
     }
 
@@ -2185,7 +2206,7 @@ public class CombatVfxManager : MonoBehaviour
 
             var emission = ps.emission;
             emission.rateOverTime = 0f;
-            emission.SetBursts(new[] { new ParticleSystem.Burst(0f, 38) });
+            SetSingleBurst(ps, 0f, 38);
 
             var shape = ps.shape;
             shape.shapeType = ParticleSystemShapeType.Circle;
@@ -2200,8 +2221,7 @@ public class CombatVfxManager : MonoBehaviour
             colOver.enabled = true;
             colOver.color = CreateFadeOutGradient(Color.white, new Color(1f, 0.65f, 0.15f), 1f);
 
-            var rend = ps.GetComponent<ParticleSystemRenderer>();
-            rend.material = additiveStarMat;
+            ConfigureParticleRenderer(ps, additiveStarMat);
             ps.Play();
         }
 
@@ -2239,7 +2259,7 @@ public class CombatVfxManager : MonoBehaviour
 
             var emission = ps.emission;
             emission.rateOverTime = 0f;
-            emission.SetBursts(new[] { new ParticleSystem.Burst(0f, 32) });
+            SetSingleBurst(ps, 0f, 32);
 
             var shape = ps.shape;
             shape.shapeType = ParticleSystemShapeType.Sphere;
@@ -2249,8 +2269,7 @@ public class CombatVfxManager : MonoBehaviour
             colOver.enabled = true;
             colOver.color = CreateFadeOutGradient(Color.white, rarityColor, 1f);
 
-            var rend = ps.GetComponent<ParticleSystemRenderer>();
-            rend.material = additiveStarMat;
+            ConfigureParticleRenderer(ps, additiveStarMat);
             ps.Play();
         }
 
@@ -2285,7 +2304,7 @@ public class CombatVfxManager : MonoBehaviour
 
             var emission = ps.emission;
             emission.rateOverTime = 0f;
-            emission.SetBursts(new[] { new ParticleSystem.Burst(0f, 20) });
+            SetSingleBurst(ps, 0f, 20);
 
             var shape = ps.shape;
             shape.shapeType = ParticleSystemShapeType.Cone;
@@ -2293,8 +2312,7 @@ public class CombatVfxManager : MonoBehaviour
             shape.radius = 0.45f;
             shape.rotation = new Vector3(-90f, 0f, 0f);
 
-            var rend = ps.GetComponent<ParticleSystemRenderer>();
-            rend.material = additiveSparkMat;
+            var rend = ConfigureParticleRenderer(ps, additiveSparkMat);
             rend.renderMode = ParticleSystemRenderMode.Stretch;
             rend.velocityScale = 0.08f;
             rend.lengthScale = 2.0f;
@@ -2383,7 +2401,7 @@ public class CombatVfxManager : MonoBehaviour
 
             var emission = ps.emission;
             emission.rateOverTime = 0f;
-            emission.SetBursts(new[] { new ParticleSystem.Burst(0f, 36) });
+            SetSingleBurst(ps, 0f, 36);
 
             var shape = ps.shape;
             shape.shapeType = ParticleSystemShapeType.Sphere;
@@ -2393,8 +2411,7 @@ public class CombatVfxManager : MonoBehaviour
             colOver.enabled = true;
             colOver.color = CreateFadeOutGradient(Color.white, fireworkColors[i % fireworkColors.Length], 1f);
 
-            var rend = ps.GetComponent<ParticleSystemRenderer>();
-            rend.material = additiveStarMat;
+            ConfigureParticleRenderer(ps, additiveStarMat);
             ps.Play();
 
             Destroy(go, 2.2f);
@@ -2421,7 +2438,7 @@ public class CombatVfxManager : MonoBehaviour
 
         var emission = ps.emission;
         emission.rateOverTime = 0f;
-        emission.SetBursts(new[] { new ParticleSystem.Burst(0f, 1) });
+        SetSingleBurst(ps, 0f, 1);
 
         var sizeOver = ps.sizeOverLifetime;
         sizeOver.enabled = true;
@@ -2431,8 +2448,7 @@ public class CombatVfxManager : MonoBehaviour
         colOver.enabled = true;
         colOver.color = CreateFadeOutGradient(Color.white, new Color(hdrColor.r * 0.6f, hdrColor.g * 0.6f, hdrColor.b * 0.6f), hdrColor.a);
 
-        var rend = ps.GetComponent<ParticleSystemRenderer>();
-        rend.material = additiveRingMat;
+        var rend = ConfigureParticleRenderer(ps, additiveRingMat);
         rend.renderMode = ParticleSystemRenderMode.Mesh;
         rend.mesh = horizontalQuadMesh;
 
@@ -2452,7 +2468,7 @@ public class CombatVfxManager : MonoBehaviour
         Renderer r = pillar.GetComponent<Renderer>();
         Material mat = new Material(additiveBeamMat);
         SetMaterialColor(mat, hdrColor);
-        r.material = mat;
+        r.sharedMaterial = mat;
         r.shadowCastingMode = ShadowCastingMode.Off;
         r.receiveShadows = false;
 
@@ -2481,6 +2497,7 @@ public class CombatVfxManager : MonoBehaviour
             Light pooled = flashLightPool.Dequeue();
             if (pooled != null)
             {
+                pooled.shadows = LightShadows.None;
                 pooled.gameObject.SetActive(true);
                 return pooled;
             }
@@ -2490,6 +2507,7 @@ public class CombatVfxManager : MonoBehaviour
         lightGo.transform.SetParent(transform, false);
         Light lightComp = lightGo.AddComponent<Light>();
         lightComp.type = LightType.Point;
+        lightComp.shadows = LightShadows.None;
         return lightComp;
     }
 
@@ -2504,7 +2522,7 @@ public class CombatVfxManager : MonoBehaviour
     private IEnumerator FlashPointLight(Vector3 pos, Color color, float range, float startIntensity, float duration)
     {
 
-        if (activeFlashLights >= MaxConcurrentFlashLights) yield break;
+        if (GameSettingsManager.CurrentGraphicsPreset == GraphicsPreset.Low || activeFlashLights >= MaxConcurrentFlashLights) yield break;
 
         activeFlashLights++;
         Light lightComp = RentFlashLight();
@@ -2527,6 +2545,37 @@ public class CombatVfxManager : MonoBehaviour
 
         ReturnFlashLight(lightComp);
         activeFlashLights = Mathf.Max(0, activeFlashLights - 1);
+    }
+
+    private static ParticleSystemRenderer ConfigureParticleRenderer(ParticleSystem ps, Material mat)
+    {
+        ParticleSystemRenderer rend = ps.GetComponent<ParticleSystemRenderer>();
+        rend.sharedMaterial = mat;
+        rend.shadowCastingMode = ShadowCastingMode.Off;
+        rend.receiveShadows = false;
+        return rend;
+    }
+
+    private static void SetSingleBurst(ParticleSystem ps, float time, int count)
+    {
+        SingleBurstBuffer[0] = new ParticleSystem.Burst(time, count);
+        ps.emission.SetBursts(SingleBurstBuffer);
+    }
+
+    private static void SetFadeOutGradient(
+        Gradient grad,
+        GradientColorKey[] colorKeys,
+        GradientAlphaKey[] alphaKeys,
+        Color startColor,
+        Color endColor,
+        float startAlpha)
+    {
+        colorKeys[0] = new GradientColorKey(startColor, 0f);
+        colorKeys[1] = new GradientColorKey(endColor, 1f);
+        alphaKeys[0] = new GradientAlphaKey(startAlpha, 0f);
+        alphaKeys[1] = new GradientAlphaKey(startAlpha * 0.7f, 0.55f);
+        alphaKeys[2] = new GradientAlphaKey(0f, 1f);
+        grad.SetKeys(colorKeys, alphaKeys);
     }
 
     private static Gradient CreateFadeOutGradient(Color startColor, Color endColor, float startAlpha)

@@ -758,7 +758,18 @@ public static class CombatHudStyler
 
         TMP_Text tmp = go.GetComponent<TMP_Text>();
         if (tmp == null) tmp = go.AddComponent<TextMeshProUGUI>();
-        if (fontAsset != null && tmp.font == null) tmp.font = fontAsset;
+        if (fontAsset != null && !fontAsset.name.StartsWith("LiberationSans", System.StringComparison.OrdinalIgnoreCase))
+        {
+            if (tmp.font != fontAsset)
+            {
+                tmp.font = fontAsset;
+                tmp.fontSharedMaterial = fontAsset.material;
+            }
+        }
+        else
+        {
+            ClassicFontRuntimeManager.ApplyFont(tmp);
+        }
         tmp.text = content;
         tmp.fontSize = fontSize;
         tmp.fontStyle = style;

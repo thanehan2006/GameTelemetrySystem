@@ -13,6 +13,8 @@ public class StoryChestPickup : MonoBehaviour
 
     private static readonly int BaseColorId = Shader.PropertyToID("_BaseColor");
     private static readonly int ColorId = Shader.PropertyToID("_Color");
+    private static readonly int MetallicId = Shader.PropertyToID("_Metallic");
+    private static readonly int SmoothnessId = Shader.PropertyToID("_Smoothness");
 
     private static GameObject cachedChestPrefab;
     private static Gradient cachedSparkleGradient;
@@ -38,6 +40,8 @@ public class StoryChestPickup : MonoBehaviour
     private Material fallbackChestMat;
     private Vector3 baseVisualLocalPos;
     private float baseLightIntensity = 3.2f;
+    private Transform playerTransform;
+    private float nextFarCheckTime;
 
     private void OnEnable()
     {
@@ -214,9 +218,11 @@ public class StoryChestPickup : MonoBehaviour
                 Color goldCol = new Color(0.96f, 0.74f, 0.20f, 1f);
                 fallbackChestMat.color = goldCol;
                 if (fallbackChestMat.HasProperty(BaseColorId)) fallbackChestMat.SetColor(BaseColorId, goldCol);
-                if (fallbackChestMat.HasProperty("_Metallic")) fallbackChestMat.SetFloat("_Metallic", 0.75f);
-                if (fallbackChestMat.HasProperty("_Smoothness")) fallbackChestMat.SetFloat("_Smoothness", 0.75f);
+                if (fallbackChestMat.HasProperty(MetallicId)) fallbackChestMat.SetFloat(MetallicId, 0.75f);
+                if (fallbackChestMat.HasProperty(SmoothnessId)) fallbackChestMat.SetFloat(SmoothnessId, 0.75f);
                 r.sharedMaterial = fallbackChestMat;
+                r.shadowCastingMode = ShadowCastingMode.Off;
+                r.receiveShadows = false;
             }
         }
 
@@ -265,6 +271,7 @@ public class StoryChestPickup : MonoBehaviour
         lightObj.transform.localPosition = Vector3.up * 0.9f;
         glowLight = lightObj.AddComponent<Light>();
         glowLight.type = LightType.Point;
+        glowLight.shadows = LightShadows.None;
         glowLight.color = new Color(1f, 0.80f, 0.25f);
         glowLight.range = 7.5f;
         glowLight.intensity = baseLightIntensity;
@@ -311,6 +318,8 @@ public class StoryChestPickup : MonoBehaviour
 
         var rend = ps.GetComponent<ParticleSystemRenderer>();
         rend.sharedMaterial = CombatVfxManager.GetAdditiveStarMaterial();
+        rend.shadowCastingMode = ShadowCastingMode.Off;
+        rend.receiveShadows = false;
         ps.Play();
         return ps;
     }
@@ -320,6 +329,39 @@ public class StoryChestPickup : MonoBehaviour
         if (IsOpened || GameOverManager.IsGameOver || WeaponShopManager.IsShopOpen) return;
 
         float t = Time.time;
+        if (t < nextFarCheckTime) return;
+
+        if (playerTransform == null && PlayerController.Instance != null)
+        {
+            playerTransform = PlayerController.Instance.transform;
+        }
+
+        if (playerTransform != null)
+        {
+            Vector3 diff = playerTransform.position - transform.position;
+            diff.y = 0f;
+            const float activeSqrDist = 32f * 32f;
+            bool inRange = diff.sqrMagnitude <= activeSqrDist;
+
+            if (glowLight != null)
+            {
+                bool allowLight = inRange && GameSettingsManager.CurrentGraphicsPreset != GraphicsPreset.Low;
+                if (glowLight.enabled != allowLight) glowLight.enabled = allowLight;
+            }
+            if (sparklePs != null)
+            {
+                if (inRange && !sparklePs.isPlaying) sparklePs.Play(false);
+                else if (!inRange && sparklePs.isPlaying) sparklePs.Stop(false, ParticleSystemStopBehavior.StopEmitting);
+            }
+
+            if (!inRange)
+            {
+                nextFarCheckTime = t + 0.22f;
+                return;
+            }
+        }
+        nextFarCheckTime = 0f;
+
         if (visualPivot != null)
         {
             float bob = Mathf.Sin(t * 2.6f) * 0.06f;
@@ -332,7 +374,7 @@ public class StoryChestPickup : MonoBehaviour
             groundRingTransform.Rotate(Vector3.up, -42f * Time.deltaTime, Space.World);
         }
 
-        if (glowLight != null)
+        if (glowLight != null && glowLight.enabled)
         {
             glowLight.intensity = baseLightIntensity + Mathf.Sin(t * 3.8f) * 0.55f;
         }

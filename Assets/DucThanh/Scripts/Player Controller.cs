@@ -1,5 +1,6 @@
 using UnityEngine;
 using UnityEngine.AI;
+using UnityEngine.EventSystems;
 
 [RequireComponent(typeof(CharacterController))]
 [DefaultExecutionOrder(-20)]
@@ -68,6 +69,7 @@ public class PlayerController : MonoBehaviour
     private float cachedGroundY;
     private bool cachedHasGround;
     private float nextGroundSampleTime;
+    private Terrain cachedTerrain;
 
     // Khởi tạo CharacterController và hiệu chỉnh kích thước collider
     void Awake()
@@ -161,14 +163,14 @@ public class PlayerController : MonoBehaviour
         }
 
         Vector3 curPos = transform.position;
-        if (!controller.isGrounded
-            || !cachedHasGround
-            || (curPos - lastGroundSamplePos).sqrMagnitude > 0.0004f
-            || Time.time >= nextGroundSampleTime)
+        float now = Time.time;
+        if (!cachedHasGround
+            || (!controller.isGrounded && now >= nextGroundSampleTime)
+            || (controller.isGrounded && (curPos - lastGroundSamplePos).sqrMagnitude > 0.0225f && now >= nextGroundSampleTime))
         {
             cachedHasGround = TrySampleGroundHeight(curPos, out cachedGroundY, 1.2f, 4.0f);
             lastGroundSamplePos = curPos;
-            nextGroundSampleTime = Time.time + 0.15f;
+            nextGroundSampleTime = now + 0.10f;
         }
 
         bool hasGround = cachedHasGround;
@@ -563,10 +565,10 @@ public class PlayerController : MonoBehaviour
             return true;
         }
 
-        Terrain activeTerrain = Terrain.activeTerrain;
-        if (activeTerrain != null)
+        if (cachedTerrain == null) cachedTerrain = Terrain.activeTerrain;
+        if (cachedTerrain != null)
         {
-            groundY = activeTerrain.SampleHeight(worldPos) + activeTerrain.transform.position.y;
+            groundY = cachedTerrain.SampleHeight(worldPos) + cachedTerrain.transform.position.y;
             return true;
         }
 
@@ -586,16 +588,12 @@ public class PlayerController : MonoBehaviour
         }
     }
 
-    // Bật/tắt khóa con trỏ chuột khi chơi hoặc mở cửa hàng/UI
+    // Khóa lại con trỏ chuột khi người chơi click vào vùng game (không bấm đè nút UI)
     private void HandleCursorLock()
     {
-        if (Input.GetKeyDown(KeyCode.Escape))
-        {
-            Cursor.lockState = CursorLockMode.None;
-            Cursor.visible = true;
-        }
-
-        if (Input.GetMouseButtonDown(0) && Cursor.lockState != CursorLockMode.Locked)
+        if (Input.GetMouseButtonDown(0)
+            && Cursor.lockState != CursorLockMode.Locked
+            && (EventSystem.current == null || !EventSystem.current.IsPointerOverGameObject()))
         {
             Cursor.lockState = CursorLockMode.Locked;
             Cursor.visible = false;
@@ -626,7 +624,7 @@ public class PlayerController : MonoBehaviour
             mf.sharedMesh = CombatVfxManager.GetHorizontalQuadMesh();
             MeshRenderer mr = ring.AddComponent<MeshRenderer>();
             blockAuraMat = new Material(CombatVfxManager.GetAdditiveRingMaterial());
-            mr.material = blockAuraMat;
+            mr.sharedMaterial = blockAuraMat;
             mr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
             mr.receiveShadows = false;
 
@@ -634,6 +632,7 @@ public class PlayerController : MonoBehaviour
             lightObj.transform.SetParent(blockAuraObj.transform, false);
             blockAuraLight = lightObj.AddComponent<Light>();
             blockAuraLight.type = LightType.Point;
+            blockAuraLight.shadows = LightShadows.None;
             blockAuraLight.range = 4.2f;
         }
 
@@ -663,8 +662,13 @@ public class PlayerController : MonoBehaviour
 
         if (blockAuraLight != null)
         {
-            blockAuraLight.color = inParry ? new Color(1f, 0.85f, 0.28f) : new Color(0.45f, 0.85f, 1f);
-            blockAuraLight.intensity = inParry ? 3.8f : 1.8f;
+            bool allowLight = GameSettingsManager.CurrentGraphicsPreset != GraphicsPreset.Low;
+            if (blockAuraLight.enabled != allowLight) blockAuraLight.enabled = allowLight;
+            if (allowLight)
+            {
+                blockAuraLight.color = inParry ? new Color(1f, 0.85f, 0.28f) : new Color(0.45f, 0.85f, 1f);
+                blockAuraLight.intensity = inParry ? 3.8f : 1.8f;
+            }
         }
     }
 }

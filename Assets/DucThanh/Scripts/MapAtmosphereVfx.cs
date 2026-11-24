@@ -47,8 +47,23 @@ public class MapAtmosphereVfx : MonoBehaviour
 
     private readonly List<ParticleSystem> culledParticles = new List<ParticleSystem>();
     private readonly List<Vector3> culledParticlePositions = new List<Vector3>();
+    private readonly List<ParticleSystem> weatherParticles = new List<ParticleSystem>(4);
+    private readonly List<float> weatherBaseRates = new List<float>(4);
     private float cullTimer;
     private float auroraColorTimer;
+    private float auroraPosTimer;
+    private float lightFlickerTimer;
+    private float activeLightCullSqrDist = LightCullSqrDist;
+
+    private void OnEnable()
+    {
+        GameSettingsManager.OnSettingsChanged += ApplyQualitySettings;
+    }
+
+    private void OnDisable()
+    {
+        GameSettingsManager.OnSettingsChanged -= ApplyQualitySettings;
+    }
 
     // Phân tích chủ đề biome, tìm đèn và particle để khởi tạo hiệu ứng môi trường
     private void Start()
@@ -63,7 +78,28 @@ public class MapAtmosphereVfx : MonoBehaviour
         BuildMagmaFissurePlumes();
         BuildBossArenaRing();
         CacheCulledParticles();
+        ApplyQualitySettings();
         cullTimer = 0f;
+    }
+
+    private void ApplyQualitySettings()
+    {
+        GraphicsPreset preset = GameSettingsManager.CurrentGraphicsPreset;
+        float rateMult = preset == GraphicsPreset.Low ? 0.38f : (preset == GraphicsPreset.Medium ? 0.68f : 1.0f);
+        bool enableNoise = preset != GraphicsPreset.Low;
+        float lightDist = preset == GraphicsPreset.Low ? 22f : (preset == GraphicsPreset.Medium ? 32f : 42f);
+        activeLightCullSqrDist = lightDist * lightDist;
+
+        for (int i = 0; i < weatherParticles.Count; i++)
+        {
+            ParticleSystem ps = weatherParticles[i];
+            if (ps == null) continue;
+            var emission = ps.emission;
+            emission.rateOverTime = weatherBaseRates[i] * rateMult;
+            var noise = ps.noise;
+            noise.enabled = enableNoise;
+            if (enableNoise) noise.quality = ParticleSystemNoiseQuality.Low;
+        }
     }
 
     private void OnDestroy()
@@ -326,6 +362,7 @@ public class MapAtmosphereVfx : MonoBehaviour
 
         var noise = ps.noise;
         noise.enabled = true;
+        noise.quality = ParticleSystemNoiseQuality.Low;
         noise.strength = noiseStrength;
         noise.frequency = 0.45f;
         noise.scrollSpeed = 0.35f;
@@ -343,6 +380,9 @@ public class MapAtmosphereVfx : MonoBehaviour
         psr.renderMode = ParticleSystemRenderMode.Billboard;
         psr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
         psr.receiveShadows = false;
+
+        weatherParticles.Add(ps);
+        weatherBaseRates.Add(rate);
     }
 
     // Gắn luồng sương lạnh phát sáng quanh các cụm pha lê băng
@@ -569,15 +609,20 @@ public class MapAtmosphereVfx : MonoBehaviour
 
         if (flickeringLights != null && baseLightIntensities != null)
         {
-            float amp = biome == BiomeTheme.InfernoHold ? 0.26f : 0.14f;
-            float speed = biome == BiomeTheme.InfernoHold ? 5.2f : 2.1f;
-
-            for (int i = 0; i < flickeringLights.Length; i++)
+            lightFlickerTimer += dt;
+            if (lightFlickerTimer >= 0.05f)
             {
-                Light l = flickeringLights[i];
-                if (l == null || !l.enabled) continue;
-                float wave = Mathf.Sin(t * speed + i * 1.7f) * 0.6f + Mathf.Sin(t * (speed * 2.3f) + i * 3.1f) * 0.4f;
-                l.intensity = baseLightIntensities[i] * (1f + wave * amp);
+                lightFlickerTimer = 0f;
+                float amp = biome == BiomeTheme.InfernoHold ? 0.26f : 0.14f;
+                float speed = biome == BiomeTheme.InfernoHold ? 5.2f : 2.1f;
+
+                for (int i = 0; i < flickeringLights.Length; i++)
+                {
+                    Light l = flickeringLights[i];
+                    if (l == null || !l.enabled) continue;
+                    float wave = Mathf.Sin(t * speed + i * 1.7f) * 0.6f + Mathf.Sin(t * (speed * 2.3f) + i * 3.1f) * 0.4f;
+                    l.intensity = baseLightIntensities[i] * (1f + wave * amp);
+                }
             }
         }
 
@@ -602,23 +647,33 @@ public class MapAtmosphereVfx : MonoBehaviour
             bool updateAuroraColor = auroraColorTimer >= AuroraColorUpdateInterval;
             if (updateAuroraColor) auroraColorTimer = 0f;
 
-            for (int i = 0; i < auroraRibbons.Length; i++)
-            {
-                Transform r = auroraRibbons[i];
-                if (r == null) continue;
-                Vector3 lp = r.localPosition;
-                lp.y = auroraBaseYs[i] + Mathf.Sin(t * 0.45f + i * 1.4f) * 2.6f;
-                if (auroraBaseXs != null) lp.x = auroraBaseXs[i] + Mathf.Cos(t * 0.25f + i * 0.9f) * 3.2f;
-                r.localPosition = lp;
+            auroraPosTimer += dt;
+            bool updateAuroraPos = auroraPosTimer >= 0.033f;
+            if (updateAuroraPos) auroraPosTimer = 0f;
 
-                if (updateAuroraColor && auroraRenderers != null && auroraPropBlock != null && auroraBaseColors != null && auroraRenderers[i] != null)
+            if (updateAuroraPos || updateAuroraColor)
+            {
+                for (int i = 0; i < auroraRibbons.Length; i++)
                 {
-                    float shimmer = 0.85f + 0.28f * Mathf.Sin(t * 0.85f + i * 1.9f);
-                    Color c = auroraBaseColors[i];
-                    Color dynamicCol = new Color(c.r * shimmer, c.g * shimmer, c.b * (1.15f - 0.15f * Mathf.Cos(t * 0.7f + i)), c.a);
-                    auroraPropBlock.SetColor(BaseColorId, dynamicCol);
-                    auroraPropBlock.SetColor(ColorId, dynamicCol);
-                    auroraRenderers[i].SetPropertyBlock(auroraPropBlock);
+                    Transform r = auroraRibbons[i];
+                    if (r == null) continue;
+                    if (updateAuroraPos)
+                    {
+                        Vector3 lp = r.localPosition;
+                        lp.y = auroraBaseYs[i] + Mathf.Sin(t * 0.45f + i * 1.4f) * 2.6f;
+                        if (auroraBaseXs != null) lp.x = auroraBaseXs[i] + Mathf.Cos(t * 0.25f + i * 0.9f) * 3.2f;
+                        r.localPosition = lp;
+                    }
+
+                    if (updateAuroraColor && auroraRenderers != null && auroraPropBlock != null && auroraBaseColors != null && auroraRenderers[i] != null)
+                    {
+                        float shimmer = 0.85f + 0.28f * Mathf.Sin(t * 0.85f + i * 1.9f);
+                        Color c = auroraBaseColors[i];
+                        Color dynamicCol = new Color(c.r * shimmer, c.g * shimmer, c.b * (1.15f - 0.15f * Mathf.Cos(t * 0.7f + i)), c.a);
+                        auroraPropBlock.SetColor(BaseColorId, dynamicCol);
+                        auroraPropBlock.SetColor(ColorId, dynamicCol);
+                        auroraRenderers[i].SetPropertyBlock(auroraPropBlock);
+                    }
                 }
             }
         }
@@ -635,7 +690,7 @@ public class MapAtmosphereVfx : MonoBehaviour
                 if (l == null) continue;
                 float dx = lightPositions[i].x - viewerPos.x;
                 float dz = lightPositions[i].z - viewerPos.z;
-                bool enableLight = (dx * dx + dz * dz) <= LightCullSqrDist;
+                bool enableLight = (dx * dx + dz * dz) <= activeLightCullSqrDist;
                 if (l.enabled != enableLight) l.enabled = enableLight;
             }
         }

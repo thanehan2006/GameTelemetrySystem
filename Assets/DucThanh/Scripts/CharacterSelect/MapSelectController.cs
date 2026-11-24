@@ -281,6 +281,7 @@ public class MapSelectController : MonoBehaviour
 
     private void HandleKeyboardInput()
     {
+        if (GameMenuManager.IsMenuOpen) return;
         if (Input.GetKeyDown(KeyCode.LeftArrow) || Input.GetKeyDown(KeyCode.A))
         {
             CycleMap(-1);

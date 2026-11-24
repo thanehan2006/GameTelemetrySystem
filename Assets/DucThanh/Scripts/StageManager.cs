@@ -1,4 +1,4 @@
-using System.Collections;
+﻿using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.AI;
@@ -147,6 +147,8 @@ public class StageManager : MonoBehaviour
     private int lastHudWave = -1;
     private int lastHudMetric = int.MinValue;
     private int lastDashBlockingState = -1;
+    private Color lastBossFillColor = Color.clear;
+    private float bossPulseTimer;
 
     // Khởi tạo instance, đọc hệ số độ khó theo map và áp dụng tối ưu hiệu năng
     private void Awake()
@@ -272,11 +274,22 @@ public class StageManager : MonoBehaviour
         {
             if (bossEnraged)
             {
-                float pulse = 0.86f + 0.14f * Mathf.Sin(Time.unscaledTime * 6f);
-                bossFillImage.color = Color.Lerp(CombatHudStyler.BossFillEnraged * pulse, new Color(1f, 0.56f, 0.16f, 1f), 0.25f);
+                bossPulseTimer -= dt;
+                if (bossPulseTimer <= 0f || lastBossFillColor == CombatHudStyler.BossFillNormal || lastBossFillColor == Color.clear)
+                {
+                    bossPulseTimer = 0.05f;
+                    float pulse = 0.86f + 0.14f * Mathf.Sin(Time.unscaledTime * 6f);
+                    Color targetCol = Color.Lerp(CombatHudStyler.BossFillEnraged * pulse, new Color(1f, 0.56f, 0.16f, 1f), 0.25f);
+                    if (targetCol != lastBossFillColor)
+                    {
+                        lastBossFillColor = targetCol;
+                        bossFillImage.color = targetCol;
+                    }
+                }
             }
-            else
+            else if (lastBossFillColor != CombatHudStyler.BossFillNormal)
             {
+                lastBossFillColor = CombatHudStyler.BossFillNormal;
                 bossFillImage.color = CombatHudStyler.BossFillNormal;
             }
         }
@@ -570,7 +583,7 @@ public class StageManager : MonoBehaviour
         ApplySkybox(skyboxStage3Lunar);
 
         ShowBanner(bossIntroBanner, new Color(1f, 0.28f, 0.28f), 3.5f);
-        GameAudioManager.PlayBgm(GameAudioManager.BgmTrack.Boss, 1.2f);
+        GameAudioManager.PlayBossBgmForMap(MapLevel, 1.2f);
         GameAudioManager.PlayBossRoar();
 
         GameObject bPrefab = bossOrcPrefab != null ? bossOrcPrefab : (shieldTankPrefab != null ? shieldTankPrefab : scoutOrcPrefab);
@@ -578,7 +591,7 @@ public class StageManager : MonoBehaviour
 
         if (bossObj != null)
         {
-            AddUnitAuraLight(bossObj, bossAuraColor, 7f, 3.2f);
+            AddUnitAuraLight(bossObj, bossAuraColor, 7f, 3.2f, essential: true);
             activeBoss = bossObj.GetComponent<EnemyHealth>();
             activeBossAI = bossObj.GetComponent<OrcEnemyAI>();
 
@@ -637,6 +650,7 @@ public class StageManager : MonoBehaviour
             }
 
             ShowBanner("BOSS CUỒNG NỘ — GỌI VIỆN BINH!", new Color(1f, 0.2f, 0.2f), 3.0f);
+            GameAudioManager.PlayBossBgmForMap(MapLevel, 0.8f);
             GameAudioManager.PlayBossRoar();
             if (activeBoss != null)
             {
@@ -1045,33 +1059,7 @@ public class StageManager : MonoBehaviour
 
     private static void ApplyRuntimePerformanceOptimizations()
     {
-        QualitySettings.vSyncCount = 0;
-        if (Application.targetFrameRate <= 0 || Application.targetFrameRate > 120)
-        {
-            Application.targetFrameRate = 60;
-        }
-
-        Camera mainCam = Camera.main;
-        if (mainCam != null && mainCam.farClipPlane > 240f)
-        {
-            mainCam.farClipPlane = 240f;
-        }
-
-        QualitySettings.shadowDistance = Mathf.Min(QualitySettings.shadowDistance, 38f);
-
-        Terrain terrain = Terrain.activeTerrain;
-        if (terrain != null)
-        {
-            terrain.drawInstanced = true;
-            terrain.heightmapPixelError = Mathf.Max(terrain.heightmapPixelError, 16f);
-            terrain.treeDistance = Mathf.Min(terrain.treeDistance, 140f);
-            terrain.treeBillboardDistance = Mathf.Min(terrain.treeBillboardDistance, 35f);
-            terrain.treeMaximumFullLODCount = Mathf.Min(terrain.treeMaximumFullLODCount, 24);
-            terrain.detailObjectDistance = Mathf.Min(terrain.detailObjectDistance, 45f);
-            terrain.detailObjectDensity = Mathf.Min(terrain.detailObjectDensity, 0.65f);
-            terrain.basemapDistance = Mathf.Min(terrain.basemapDistance, 180f);
-            terrain.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
-        }
+        GameSettingsManager.ApplyCurrentGraphicsSettings();
     }
 
     private void SpawnHealthPickupAt(Vector3 rawPos, int healAmt, Transform parent = null)
@@ -1110,9 +1098,11 @@ public class StageManager : MonoBehaviour
         obj.transform.localScale = scale;
     }
 
-    private void AddUnitAuraLight(GameObject target, Color color, float range, float intensity)
+    private void AddUnitAuraLight(GameObject target, Color color, float range, float intensity, bool essential = false)
     {
         if (target == null) return;
+        if (!essential && GameSettingsManager.CurrentGraphicsPreset == GraphicsPreset.Low) return;
+
         GameObject lightObj = new GameObject("AuraLight");
         lightObj.transform.SetParent(target.transform, false);
         lightObj.transform.localPosition = Vector3.up * 1.4f;
@@ -1121,6 +1111,7 @@ public class StageManager : MonoBehaviour
         l.color = color;
         l.range = range;
         l.intensity = intensity;
+        l.shadows = LightShadows.None;
     }
 
     private void ApplySkybox(Material skyMat)
@@ -1146,9 +1137,9 @@ public class StageManager : MonoBehaviour
         {
             beaconBeamMat = new Material(CombatVfxManager.GetAdditiveBeamMaterial());
             Color initCol = new Color(1.9f, 1.45f, 0.3f, 0.55f);
-            if (beaconBeamMat.HasProperty("_BaseColor")) beaconBeamMat.SetColor("_BaseColor", initCol);
-            if (beaconBeamMat.HasProperty("_Color")) beaconBeamMat.SetColor("_Color", initCol);
-            pr.material = beaconBeamMat;
+            if (beaconBeamMat.HasProperty(BaseColorId)) beaconBeamMat.SetColor(BaseColorId, initCol);
+            if (beaconBeamMat.HasProperty(ColorId)) beaconBeamMat.SetColor(ColorId, initCol);
+            pr.sharedMaterial = beaconBeamMat;
             pr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
             pr.receiveShadows = false;
         }
@@ -1161,7 +1152,7 @@ public class StageManager : MonoBehaviour
         mf.sharedMesh = CombatVfxManager.GetHorizontalQuadMesh();
         MeshRenderer rmr = ring.AddComponent<MeshRenderer>();
         beaconRingMat = new Material(CombatVfxManager.GetAdditiveRingMaterial());
-        rmr.material = beaconRingMat;
+        rmr.sharedMaterial = beaconRingMat;
         rmr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
         rmr.receiveShadows = false;
         beaconRingTransform = ring.transform;
@@ -1189,9 +1180,11 @@ public class StageManager : MonoBehaviour
         shape.rotation = new Vector3(-90f, 0f, 0f);
 
         var rend = beaconMotesPs.GetComponent<ParticleSystemRenderer>();
-        rend.material = CombatVfxManager.GetAdditiveStarMaterial();
+        rend.sharedMaterial = CombatVfxManager.GetAdditiveStarMaterial();
+        rend.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+        rend.receiveShadows = false;
 
-        AddUnitAuraLight(beaconObject, new Color(1f, 0.8f, 0.2f), 16f, 4.5f);
+        AddUnitAuraLight(beaconObject, new Color(1f, 0.8f, 0.2f), 16f, 4.5f, essential: true);
         beaconObject.SetActive(false);
     }
 
@@ -1235,7 +1228,7 @@ public class StageManager : MonoBehaviour
     // Khởi tạo hoặc nâng cấp giao diện bảng nhiệm vụ, thanh máu Boss và banner trên Canvas
     private void BuildRuntimeHud()
     {
-        Canvas canvas = FindFirstObjectByType<Canvas>();
+        Canvas canvas = FantasyUiThemeHelper.FindSceneCanvas(gameObject);
         if (canvas == null) return;
 
         Transform existingMission = canvas.transform.Find("StageMissionHUD");
@@ -1392,7 +1385,7 @@ public class StageManager : MonoBehaviour
         hudDashText.color = Color.white;
         if (state == 1)
         {
-            hudDashText.text = "<color=#FFD966><b>[RMB]</b> ĐANG ĐỠ ĐÒN (BLOCK / PARRY)</color>";
+            hudDashText.text = "<color=#FFD966><b>[RMB]</b> ĐANG ĐỠ ĐÒN</color>";
         }
         else if (state == 2)
         {
@@ -1430,6 +1423,7 @@ public class StageManager : MonoBehaviour
         rt.sizeDelta = size;
 
         TextMeshProUGUI tmp = go.GetComponent<TextMeshProUGUI>();
+        ClassicFontRuntimeManager.ApplyFont(tmp);
         tmp.text = content;
         tmp.fontSize = fontSize;
         tmp.fontStyle = style;

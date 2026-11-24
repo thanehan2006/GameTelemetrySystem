@@ -26,6 +26,8 @@ public class PlayerHealth : MonoBehaviour
     private float hpFlashTimer = 0f;
     private Color hpFlashColor = new Color(1f, 0.36f, 0.30f, 1f);
     private Color currentTargetFillColor = CombatHudStyler.HpEmeraldHealthy;
+    private Color lastAppliedFillColor = Color.clear;
+    private float lowHpPulseTimer;
 
     private bool isDead = false;
     private float invulnerableUntil = 0f;
@@ -88,9 +90,24 @@ public class PlayerHealth : MonoBehaviour
     {
         if (healthSlider == null) return;
 
+        bool sliderAtTarget = Mathf.Approximately(healthSlider.value, currentHealth);
+        bool ghostAtTarget = ghostFillImage == null || Mathf.Approximately(ghostHpRatio, targetHpRatio);
+        bool lowHpPulsing = !isDead && targetHpRatio > 0f && targetHpRatio <= 0.28f;
+
+        if (sliderAtTarget && ghostAtTarget && hpFlashTimer <= 0f && !lowHpPulsing)
+        {
+            if (healthFillImage != null && lastAppliedFillColor != currentTargetFillColor)
+            {
+                lastAppliedFillColor = currentTargetFillColor;
+                healthFillImage.color = currentTargetFillColor;
+                if (crestGemImage != null) crestGemImage.color = currentTargetFillColor;
+            }
+            return;
+        }
+
         float dt = Time.unscaledDeltaTime;
 
-        if (!Mathf.Approximately(healthSlider.value, currentHealth))
+        if (!sliderAtTarget)
         {
             healthSlider.value = Mathf.Lerp(healthSlider.value, currentHealth, dt * barSmoothSpeed);
             if (Mathf.Abs(healthSlider.value - currentHealth) < 0.05f)
@@ -122,24 +139,43 @@ public class PlayerHealth : MonoBehaviour
 
         if (healthFillImage != null)
         {
-            Color resolvedColor = currentTargetFillColor;
             if (hpFlashTimer > 0f)
             {
                 hpFlashTimer = Mathf.Max(0f, hpFlashTimer - dt);
-                resolvedColor = Color.Lerp(currentTargetFillColor, hpFlashColor, Mathf.Clamp01(hpFlashTimer / 0.16f));
+                Color flashCol = Color.Lerp(currentTargetFillColor, hpFlashColor, Mathf.Clamp01(hpFlashTimer / 0.16f));
+                if (flashCol != lastAppliedFillColor)
+                {
+                    lastAppliedFillColor = flashCol;
+                    healthFillImage.color = flashCol;
+                    if (crestGemImage != null) crestGemImage.color = flashCol;
+                }
             }
-            else if (!isDead && targetHpRatio > 0f && targetHpRatio <= 0.28f)
+            else if (lowHpPulsing)
             {
-                float pulse = 0.84f + 0.16f * Mathf.Sin(Time.unscaledTime * 7f);
-                resolvedColor = new Color(
-                    Mathf.Clamp01(currentTargetFillColor.r * pulse),
-                    Mathf.Clamp01(currentTargetFillColor.g * pulse),
-                    Mathf.Clamp01(currentTargetFillColor.b * pulse),
-                    1f);
+                lowHpPulseTimer -= dt;
+                if (lowHpPulseTimer <= 0f)
+                {
+                    lowHpPulseTimer = 0.05f;
+                    float pulse = 0.84f + 0.16f * Mathf.Sin(Time.unscaledTime * 7f);
+                    Color pulseCol = new Color(
+                        Mathf.Clamp01(currentTargetFillColor.r * pulse),
+                        Mathf.Clamp01(currentTargetFillColor.g * pulse),
+                        Mathf.Clamp01(currentTargetFillColor.b * pulse),
+                        1f);
+                    if (pulseCol != lastAppliedFillColor)
+                    {
+                        lastAppliedFillColor = pulseCol;
+                        healthFillImage.color = pulseCol;
+                        if (crestGemImage != null) crestGemImage.color = pulseCol;
+                    }
+                }
             }
-
-            healthFillImage.color = resolvedColor;
-            if (crestGemImage != null) crestGemImage.color = resolvedColor;
+            else if (lastAppliedFillColor != currentTargetFillColor)
+            {
+                lastAppliedFillColor = currentTargetFillColor;
+                healthFillImage.color = currentTargetFillColor;
+                if (crestGemImage != null) crestGemImage.color = currentTargetFillColor;
+            }
         }
     }
 
@@ -232,6 +268,7 @@ public class PlayerHealth : MonoBehaviour
             healthText.text = $"{currentHealth} / {maxHealth}";
         }
 
+        lastAppliedFillColor = currentTargetFillColor;
         if (healthFillImage != null)
         {
             healthFillImage.color = currentTargetFillColor;

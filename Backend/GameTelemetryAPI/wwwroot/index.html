@@ -41,6 +41,7 @@
         }
 
         .font-fantasy { font-family: 'Cinzel', serif; letter-spacing: 0.04em; }
+        .brand-title { line-height: 1; padding-top: 0.2em; }
         .font-mono { font-family: 'JetBrains Mono', monospace; }
 
         .app-shell {
@@ -344,10 +345,7 @@
                         <i class="bi bi-shield-shaded"></i>
                     </div>
                     <div>
-                        <h1 class="h5 mb-0 fw-bold font-fantasy text-white">VANGUARD // TELEMETRY</h1>
-                        <div class="small text-muted">
-                            1 Map = 1 Level (Lv 1–3) • Chiến Đấu &amp; Cửa Hàng Lò Rèn
-                        </div>
+                        <h1 class="h5 mb-0 fw-bold font-fantasy text-white brand-title">VANGUARD // TELEMETRY</h1>
                     </div>
                 </div>
 
@@ -780,6 +778,24 @@
             simulatorModalInstance.show();
         }
 
+        function parseUtcDate(value) {
+            if (!value) return null;
+            if (value instanceof Date) return value;
+            if (typeof value === 'string') {
+                const trimmed = value.trim();
+                const hasZone = /([zZ]|[+-]\d{2}:?\d{2})$/.test(trimmed);
+                return new Date(hasZone ? trimmed : `${trimmed}Z`);
+            }
+            return new Date(value);
+        }
+
+        function formatLocalDateInput(date) {
+            const y = date.getFullYear();
+            const m = String(date.getMonth() + 1).padStart(2, '0');
+            const d = String(date.getDate()).padStart(2, '0');
+            return `${y}-${m}-${d}`;
+        }
+
         function setTimePreset(preset) {
             document.querySelectorAll('#timePresetGroup .filter-chip').forEach(btn => {
                 btn.classList.toggle('active', btn.dataset.preset === preset);
@@ -793,11 +809,11 @@
                 toEl.value = '';
             } else {
                 const now = new Date();
-                const toStr = now.toISOString().slice(0, 10);
+                const toStr = formatLocalDateInput(now);
                 const start = new Date(now);
-                if (preset === '7d') start.setUTCDate(start.getUTCDate() - 6);
-                else if (preset === '30d') start.setUTCDate(start.getUTCDate() - 29);
-                fromEl.value = start.toISOString().slice(0, 10);
+                if (preset === '7d') start.setDate(start.getDate() - 6);
+                else if (preset === '30d') start.setDate(start.getDate() - 29);
+                fromEl.value = formatLocalDateInput(start);
                 toEl.value = toStr;
             }
 
@@ -818,6 +834,7 @@
 
         function buildFilterQuery(extraParams = {}) {
             const params = new URLSearchParams();
+            params.set('tzOffset', String(-new Date().getTimezoneOffset()));
             for (const [k, v] of Object.entries(extraParams)) {
                 if (v !== null && v !== undefined && v !== '') params.set(k, String(v));
             }
@@ -1130,9 +1147,11 @@
 
             tbody.innerHTML = list.map(s => {
                 const info = classifyResult(s.result);
-                const dt = new Date(s.startTime);
-                const timeStr = dt.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }) + ' ' +
-                                dt.toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit' });
+                const dt = parseUtcDate(s.startTime);
+                const timeStr = dt && !isNaN(dt.getTime())
+                    ? dt.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }) + ' ' +
+                      dt.toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit' })
+                    : '--';
                 const duration = s.durationMinutes != null ? `${s.durationMinutes}m` : '--';
                 const lvlBadge = s.level != null
                     ? `<span class="badge bg-info bg-opacity-10 text-info border border-info border-opacity-25 font-mono">Lv ${s.level}</span>`
@@ -1416,13 +1435,17 @@
                 alert('Chưa có dữ liệu phiên chơi để xuất CSV.');
                 return;
             }
+            const formatCsvTime = (val) => {
+                const dt = parseUtcDate(val);
+                return dt && !isNaN(dt.getTime()) ? dt.toLocaleString('vi-VN') : '';
+            };
             const headers = ['SessionId', 'PlayerName', 'Level', 'StartTime', 'EndTime', 'DurationMinutes', 'Result', 'TotalEvents'];
             const rows = cachedRecentSessions.map(s => [
                 s.sessionId,
                 `"${(s.playerName || '').replace(/"/g, '""')}"`,
                 s.level ?? '',
-                s.startTime,
-                s.endTime || '',
+                `"${formatCsvTime(s.startTime).replace(/"/g, '""')}"`,
+                `"${formatCsvTime(s.endTime).replace(/"/g, '""')}"`,
                 s.durationMinutes ?? '',
                 s.result || 'In-Progress',
                 s.totalEvents
@@ -1433,7 +1456,7 @@
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;
-            a.download = `Vanguard_Telemetry_Sessions_${new Date().toISOString().slice(0, 10)}.csv`;
+            a.download = `Vanguard_Telemetry_Sessions_${formatLocalDateInput(new Date())}.csv`;
             a.click();
             URL.revokeObjectURL(url);
         }

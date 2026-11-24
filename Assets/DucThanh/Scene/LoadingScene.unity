@@ -176,10 +176,10 @@ MonoBehaviour:
   m_OnCullStateChanged:
     m_PersistentCalls:
       m_Calls: []
-  m_text: RAID OF THE ORC WOODS
+  m_text: CUỘC TRUY QUÉT RỪNG ORC
   m_isRightToLeft: 0
-  m_fontAsset: {fileID: 11400000, guid: 8f586378b4e144a9851e7b34d9b748ee, type: 2}
-  m_sharedMaterial: {fileID: 2180264, guid: 8f586378b4e144a9851e7b34d9b748ee, type: 2}
+  m_fontAsset: {fileID: 11400000, guid: 493771b1653e377439b43f0d270cfc05, type: 2}
+  m_sharedMaterial: {fileID: 4890388625845477302, guid: 493771b1653e377439b43f0d270cfc05, type: 2}
   m_fontSharedMaterials: []
   m_fontMaterial: {fileID: 0}
   m_fontMaterials: []
@@ -331,8 +331,8 @@ MonoBehaviour:
       m_Calls: []
   m_text: VANGUARD
   m_isRightToLeft: 0
-  m_fontAsset: {fileID: 11400000, guid: 8f586378b4e144a9851e7b34d9b748ee, type: 2}
-  m_sharedMaterial: {fileID: 2180264, guid: 8f586378b4e144a9851e7b34d9b748ee, type: 2}
+  m_fontAsset: {fileID: 11400000, guid: 493771b1653e377439b43f0d270cfc05, type: 2}
+  m_sharedMaterial: {fileID: 4890388625845477302, guid: 493771b1653e377439b43f0d270cfc05, type: 2}
   m_fontSharedMaterials: []
   m_fontMaterial: {fileID: 0}
   m_fontMaterials: []
@@ -980,10 +980,10 @@ MonoBehaviour:
   m_OnCullStateChanged:
     m_PersistentCalls:
       m_Calls: []
-  m_text: GAME LOADING
+  m_text: ĐANG TẢI GAME
   m_isRightToLeft: 0
-  m_fontAsset: {fileID: 11400000, guid: 8f586378b4e144a9851e7b34d9b748ee, type: 2}
-  m_sharedMaterial: {fileID: 2180264, guid: 8f586378b4e144a9851e7b34d9b748ee, type: 2}
+  m_fontAsset: {fileID: 11400000, guid: 493771b1653e377439b43f0d270cfc05, type: 2}
+  m_sharedMaterial: {fileID: 4890388625845477302, guid: 493771b1653e377439b43f0d270cfc05, type: 2}
   m_fontSharedMaterials: []
   m_fontMaterial: {fileID: 0}
   m_fontMaterials: []
@@ -1528,8 +1528,8 @@ MonoBehaviour:
       m_Calls: []
   m_text: 35%
   m_isRightToLeft: 0
-  m_fontAsset: {fileID: 11400000, guid: 8f586378b4e144a9851e7b34d9b748ee, type: 2}
-  m_sharedMaterial: {fileID: 2180264, guid: 8f586378b4e144a9851e7b34d9b748ee, type: 2}
+  m_fontAsset: {fileID: 11400000, guid: 493771b1653e377439b43f0d270cfc05, type: 2}
+  m_sharedMaterial: {fileID: 4890388625845477302, guid: 493771b1653e377439b43f0d270cfc05, type: 2}
   m_fontSharedMaterials: []
   m_fontMaterial: {fileID: 0}
   m_fontMaterials: []
@@ -1648,7 +1648,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: UnityEngine.UI::UnityEngine.UI.Image
   m_Material: {fileID: 0}
-  m_Color: {r: 0.03, g: 0.05, b: 0.09, a: 1}
+  m_Color: {r: 0.03, g: 0.05, b: 0.09, a: 0}
   m_RaycastTarget: 0
   m_RaycastPadding: {x: 0, y: 0, z: 0, w: 0}
   m_Maskable: 1
@@ -1716,8 +1716,8 @@ MonoBehaviour:
     \u0111\xFAng l\xFAc s\u1EBD Parry \u0111\u1EA9y cho\xE1ng qu\xE1i & h\u1ED3i
     5% HP!"
   m_isRightToLeft: 0
-  m_fontAsset: {fileID: 11400000, guid: 8f586378b4e144a9851e7b34d9b748ee, type: 2}
-  m_sharedMaterial: {fileID: 2180264, guid: 8f586378b4e144a9851e7b34d9b748ee, type: 2}
+  m_fontAsset: {fileID: 11400000, guid: 493771b1653e377439b43f0d270cfc05, type: 2}
+  m_sharedMaterial: {fileID: 4890388625845477302, guid: 493771b1653e377439b43f0d270cfc05, type: 2}
   m_fontSharedMaterials: []
   m_fontMaterial: {fileID: 0}
   m_fontMaterials: []
@@ -2037,8 +2037,8 @@ MonoBehaviour:
       m_Calls: []
   m_text: "ACTION ROGUELITE  \u2022  DARK FANTASY"
   m_isRightToLeft: 0
-  m_fontAsset: {fileID: 11400000, guid: 8f586378b4e144a9851e7b34d9b748ee, type: 2}
-  m_sharedMaterial: {fileID: 2180264, guid: 8f586378b4e144a9851e7b34d9b748ee, type: 2}
+  m_fontAsset: {fileID: 11400000, guid: 493771b1653e377439b43f0d270cfc05, type: 2}
+  m_sharedMaterial: {fileID: 4890388625845477302, guid: 493771b1653e377439b43f0d270cfc05, type: 2}
   m_fontSharedMaterials: []
   m_fontMaterial: {fileID: 0}
   m_fontMaterials: []
@@ -2302,8 +2302,8 @@ MonoBehaviour:
       m_Calls: []
   m_text: "\u0110ang n\u1EA1p th\u1EBF gi\u1EDBi R\u1EEBng Orc..."
   m_isRightToLeft: 0
-  m_fontAsset: {fileID: 11400000, guid: 8f586378b4e144a9851e7b34d9b748ee, type: 2}
-  m_sharedMaterial: {fileID: 2180264, guid: 8f586378b4e144a9851e7b34d9b748ee, type: 2}
+  m_fontAsset: {fileID: 11400000, guid: 493771b1653e377439b43f0d270cfc05, type: 2}
+  m_sharedMaterial: {fileID: 4890388625845477302, guid: 493771b1653e377439b43f0d270cfc05, type: 2}
   m_fontSharedMaterials: []
   m_fontMaterial: {fileID: 0}
   m_fontMaterials: []

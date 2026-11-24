@@ -151,10 +151,11 @@ public class ThirdPersonCamera : MonoBehaviour
 
         if (Cursor.lockState == CursorLockMode.Locked)
         {
+            float sens = mouseSensitivity * GameSettingsManager.MouseSensitivityMultiplier;
             mouseX = Input.GetAxisRaw("Mouse X");
             mouseY = Input.GetAxisRaw("Mouse Y");
-            targetYaw += mouseX * mouseSensitivity;
-            targetPitch = Mathf.Clamp(targetPitch - mouseY * mouseSensitivity, minPitch, maxPitch);
+            targetYaw += mouseX * sens;
+            targetPitch = Mathf.Clamp(targetPitch - mouseY * sens, minPitch, maxPitch);
 
             float scroll = Input.GetAxis("Mouse ScrollWheel");
             if (Mathf.Abs(scroll) > 0.001f)
@@ -225,8 +226,23 @@ public class ThirdPersonCamera : MonoBehaviour
 
         float unscaledDt = Time.unscaledDeltaTime;
         bool isMoving = playerController != null && playerController.HasMovementInput;
-        fovPunch = Mathf.Lerp(fovPunch, 0f, 1f - Mathf.Exp(-10f * unscaledDt));
+        if (Mathf.Abs(fovPunch) > 0.001f)
+        {
+            fovPunch = Mathf.Lerp(fovPunch, 0f, 1f - Mathf.Exp(-10f * unscaledDt));
+        }
+        else
+        {
+            fovPunch = 0f;
+        }
+
         float targetFov = baseFov + (isMoving ? moveFovBoost : 0f) + fovPunch;
+        float delta = Mathf.Abs(cam.fieldOfView - targetFov);
+        if (delta <= 0.005f)
+        {
+            if (delta > 0f) cam.fieldOfView = targetFov;
+            return;
+        }
+
         float t = 1f - Mathf.Exp(-fovSmooth * unscaledDt);
         cam.fieldOfView = Mathf.Lerp(cam.fieldOfView, targetFov, t);
     }

@@ -105,6 +105,9 @@ public class StoryGuideManager : MonoBehaviour
     private PlayerController playerController;
     private PlayerAttack playerAttack;
     private StoryChestPickup nearestChest;
+    private StoryChestPickup lastPromptChest;
+    private float lastAppliedToastAlpha = -1f;
+    private float toastOutlinePulseTimer;
 
     // UI 1: Lời dẫn cốt truyện mờ mịn sát đáy màn hình (không chặn thao tác)
     private GameObject whisperRoot;
@@ -368,6 +371,12 @@ public class StoryGuideManager : MonoBehaviour
             {
                 DismissContextualTipSmooth();
             }
+            HidePromptImmediate();
+            return;
+        }
+
+        if (GameMenuManager.IsMenuOpen)
+        {
             HidePromptImmediate();
             return;
         }
@@ -721,25 +730,38 @@ public class StoryGuideManager : MonoBehaviour
             liveToastRoot.SetActive(shouldBeActive);
         }
 
-        if (!shouldBeActive) return;
-
-        float eased = Mathf.SmoothStep(0f, 1f, toastCurrentAlpha);
-        if (liveToastCanvasGroup != null)
+        if (!shouldBeActive)
         {
-            liveToastCanvasGroup.alpha = eased;
+            lastAppliedToastAlpha = -1f;
+            return;
         }
 
-        if (liveToastRect != null)
+        if (Mathf.Abs(toastCurrentAlpha - lastAppliedToastAlpha) > 0.0005f)
         {
-            float y = Mathf.Lerp(4f, 18f, eased);
-            liveToastRect.anchoredPosition = new Vector2(0f, y);
+            lastAppliedToastAlpha = toastCurrentAlpha;
+            float eased = Mathf.SmoothStep(0f, 1f, toastCurrentAlpha);
+            if (liveToastCanvasGroup != null)
+            {
+                liveToastCanvasGroup.alpha = eased;
+            }
+
+            if (liveToastRect != null)
+            {
+                float y = Mathf.Lerp(4f, 18f, eased);
+                liveToastRect.anchoredPosition = new Vector2(0f, y);
+            }
         }
 
         // Nhấp nháy nhẹ viền phím tắt cho thân thiện, dễ chú ý
         if (!toastVisualCompleted && !tipCompletedVisual && liveKeyBadgeOutline != null)
         {
-            float pulse = 0.62f + 0.38f * Mathf.Sin(Time.unscaledTime * 3.4f);
-            liveKeyBadgeOutline.effectColor = new Color(activeToastAccent.r, activeToastAccent.g, activeToastAccent.b, pulse);
+            toastOutlinePulseTimer -= Time.deltaTime;
+            if (toastOutlinePulseTimer <= 0f)
+            {
+                toastOutlinePulseTimer = 0.05f;
+                float pulse = 0.62f + 0.38f * Mathf.Sin(Time.unscaledTime * 3.4f);
+                liveKeyBadgeOutline.effectColor = new Color(activeToastAccent.r, activeToastAccent.g, activeToastAccent.b, pulse);
+            }
         }
     }
 
@@ -751,8 +773,9 @@ public class StoryGuideManager : MonoBehaviour
 
         if (nearestChest != null)
         {
-            if (promptText != null)
+            if (promptText != null && nearestChest != lastPromptChest)
             {
+                lastPromptChest = nearestChest;
                 promptText.text = $"<color=#FFD85C><b>[F]</b></color>  Mở Rương Cổ — <color=#FFE49A>{nearestChest.chapterTitle}</color>  <color=#7BE5FF>(+{nearestChest.goldReward} Vàng)</color>";
             }
 
@@ -766,6 +789,7 @@ public class StoryGuideManager : MonoBehaviour
         }
         else
         {
+            lastPromptChest = null;
             promptAlpha = Mathf.MoveTowards(promptAlpha, 0f, Time.deltaTime * 5.0f);
         }
 
@@ -824,6 +848,7 @@ public class StoryGuideManager : MonoBehaviour
     private void HidePromptImmediate()
     {
         promptAlpha = 0f;
+        lastPromptChest = null;
         if (promptRoot != null && promptRoot.activeSelf)
         {
             promptRoot.SetActive(false);
@@ -871,6 +896,7 @@ public class StoryGuideManager : MonoBehaviour
         }
 
         GameAudioManager.PlayUiClick();
+        GameMenuManager.SuppressEscapeThisFrame();
         ResumeGameplayIfNoModal();
     }
 
@@ -923,6 +949,7 @@ public class StoryGuideManager : MonoBehaviour
         }
 
         GameAudioManager.PlayUiClick();
+        GameMenuManager.SuppressEscapeThisFrame();
         ResumeGameplayIfNoModal();
     }
 
@@ -959,7 +986,7 @@ public class StoryGuideManager : MonoBehaviour
     private void ResumeGameplayIfNoModal()
     {
         bool shopActualOpen = WeaponShopManager.Instance != null && WeaponShopManager.Instance.IsActualShopOpen;
-        if (!GameOverManager.IsGameOver && !IsAnyModalOpen && !shopActualOpen)
+        if (!GameOverManager.IsGameOver && !IsAnyModalOpen && !shopActualOpen && !GameMenuManager.IsMenuOpen)
         {
             Time.timeScale = 1f;
             Cursor.lockState = CursorLockMode.Locked;
@@ -1181,7 +1208,7 @@ public class StoryGuideManager : MonoBehaviour
 
     private void EnsureAllUiBuilt()
     {
-        Canvas canvas = FindFirstObjectByType<Canvas>();
+        Canvas canvas = FantasyUiThemeHelper.FindSceneCanvas(gameObject);
         if (canvas == null) return;
 
         if (canvas.GetComponent<GraphicRaycaster>() == null)

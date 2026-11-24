@@ -50,6 +50,11 @@ public class WeaponElementalVfx : MonoBehaviour
     private float baseCrownRate;
 
     private readonly List<Material> runtimeMaterials = new List<Material>(4);
+    private readonly List<Material> emissionMaterials = new List<Material>(4);
+    private readonly Gradient[] cachedTrailGradients = new Gradient[3];
+    private float pulseUpdateTimer;
+    private float lastAppliedSurgeWeight = -1f;
+    private float qualityRateMult = 1f;
 
     public WeaponVfxProfile Profile
     {
@@ -73,43 +78,95 @@ public class WeaponElementalVfx : MonoBehaviour
         }
     }
 
+    private void OnEnable()
+    {
+        GameSettingsManager.OnSettingsChanged += HandleGraphicsSettingsChanged;
+        ApplyQualityTierScaling();
+    }
+
+    private void OnDisable()
+    {
+        GameSettingsManager.OnSettingsChanged -= HandleGraphicsSettingsChanged;
+    }
+
+    private void HandleGraphicsSettingsChanged()
+    {
+        ApplyQualityTierScaling();
+    }
+
+    private void ApplyQualityTierScaling()
+    {
+        qualityRateMult = GameSettingsManager.CurrentGraphicsPreset switch
+        {
+            GraphicsPreset.Low => 0.50f,
+            GraphicsPreset.Medium => 0.78f,
+            _ => 1.0f
+        };
+
+        if (weaponPointLight != null)
+        {
+            weaponPointLight.enabled = GameSettingsManager.CurrentGraphicsPreset != GraphicsPreset.Low;
+        }
+
+        lastAppliedSurgeWeight = -1f;
+    }
+
     private void Update()
     {
         if (!hasProfile) return;
 
+        float dt = Time.deltaTime;
         float targetSurge = attackSurgeActive ? 1f : 0f;
-        surgeWeight = Mathf.MoveTowards(surgeWeight, targetSurge, Time.deltaTime * (attackSurgeActive ? 14f : 5f));
-        pulsePhase += Time.deltaTime * (2.6f + profile.tier * 0.45f);
+        surgeWeight = Mathf.MoveTowards(surgeWeight, targetSurge, dt * (attackSurgeActive ? 14f : 5f));
+        pulsePhase += dt * (2.6f + profile.tier * 0.45f);
 
-        float pulse01 = 0.5f + 0.5f * Mathf.Sin(pulsePhase);
-        float secondaryBlend = profile.tier >= 4
-            ? 0.25f + 0.45f * pulse01
-            : 0.15f + 0.25f * pulse01;
+        bool surgeChanged = Mathf.Abs(surgeWeight - lastAppliedSurgeWeight) > 0.005f;
+        bool majorSurgeDelta = Mathf.Abs(surgeWeight - lastAppliedSurgeWeight) > 0.01f;
 
-        Color glowTint = Color.Lerp(profile.primaryColor, profile.secondaryColor, secondaryBlend);
-        float glowPower = profile.baseEmissionStrength * (0.84f + 0.28f * pulse01 + 0.72f * surgeWeight);
-        Color hdrEmission = new Color(glowTint.r * glowPower, glowTint.g * glowPower, glowTint.b * glowPower, 1f);
-
-        for (int i = 0; i < runtimeMaterials.Count; i++)
+        pulseUpdateTimer -= dt;
+        if (pulseUpdateTimer <= 0f || majorSurgeDelta)
         {
-            Material mat = runtimeMaterials[i];
-            if (mat != null && mat.HasProperty(EmissionColorId))
+            pulseUpdateTimer = 0.05f;
+
+            float pulse01 = 0.5f + 0.5f * Mathf.Sin(pulsePhase);
+            float secondaryBlend = profile.tier >= 4
+                ? 0.25f + 0.45f * pulse01
+                : 0.15f + 0.25f * pulse01;
+
+            Color glowTint = Color.Lerp(profile.primaryColor, profile.secondaryColor, secondaryBlend);
+            float glowPower = profile.baseEmissionStrength * (0.84f + 0.28f * pulse01 + 0.72f * surgeWeight);
+            Color hdrEmission = new Color(glowTint.r * glowPower, glowTint.g * glowPower, glowTint.b * glowPower, 1f);
+
+            for (int i = 0; i < emissionMaterials.Count; i++)
             {
-                mat.SetColor(EmissionColorId, hdrEmission);
+                Material mat = emissionMaterials[i];
+                if (mat != null)
+                {
+                    mat.SetColor(EmissionColorId, hdrEmission);
+                }
+            }
+
+            if (weaponPointLight != null && weaponPointLight.enabled)
+            {
+                weaponPointLight.color = Color.Lerp(profile.primaryColor, profile.coreColor, 0.22f * surgeWeight);
+                weaponPointLight.intensity = profile.lightIntensity * (0.86f + 0.24f * pulse01 + 0.95f * surgeWeight);
             }
         }
 
-        if (weaponPointLight != null)
+        if (surgeChanged)
         {
-            weaponPointLight.color = Color.Lerp(profile.primaryColor, profile.coreColor, 0.22f * surgeWeight);
-            weaponPointLight.intensity = profile.lightIntensity * (0.86f + 0.24f * pulse01 + 0.95f * surgeWeight);
+            lastAppliedSurgeWeight = surgeWeight;
+            float surgeBoostMotes = (1f + 0.95f * surgeWeight) * qualityRateMult;
+            float surgeBoostSparks = (1f + 1.25f * surgeWeight) * qualityRateMult;
+            float surgeBoostCore = (1f + 1.10f * surgeWeight) * qualityRateMult;
+            float surgeBoostRunes = (1f + 0.85f * surgeWeight) * qualityRateMult;
+            float surgeBoostCrown = (1f + 1.15f * surgeWeight) * qualityRateMult;
+            UpdateEmissionRate(bladeMotesPs, baseMotesRate, surgeBoostMotes);
+            UpdateEmissionRate(bladeSparksPs, baseSparksRate, surgeBoostSparks);
+            UpdateEmissionRate(bladeCoreFlarePs, baseCoreFlareRate, surgeBoostCore);
+            UpdateEmissionRate(orbitingRunesPs, baseRunesRate, surgeBoostRunes);
+            UpdateEmissionRate(mythicCrownPs, baseCrownRate, surgeBoostCrown);
         }
-
-        UpdateEmissionRate(bladeMotesPs, baseMotesRate, 1f + 0.95f * surgeWeight);
-        UpdateEmissionRate(bladeSparksPs, baseSparksRate, 1f + 1.25f * surgeWeight);
-        UpdateEmissionRate(bladeCoreFlarePs, baseCoreFlareRate, 1f + 1.10f * surgeWeight);
-        UpdateEmissionRate(orbitingRunesPs, baseRunesRate, 1f + 0.85f * surgeWeight);
-        UpdateEmissionRate(mythicCrownPs, baseCrownRate, 1f + 1.15f * surgeWeight);
     }
 
     private void OnDestroy()
@@ -291,10 +348,12 @@ public class WeaponElementalVfx : MonoBehaviour
         profile = ResolveProfile(gameObject.name, tierOverride, shopSlotIndex);
         hasProfile = true;
         pulsePhase = UnityEngine.Random.Range(0f, Mathf.PI * 2f);
+        Array.Clear(cachedTrailGradients, 0, cachedTrailGradients.Length);
 
         ClearEffectsAndMaterials();
         ApplyBladeMaterialGlow();
         BuildTieredAuraHierarchy();
+        ApplyQualityTierScaling();
     }
 
     // Tăng cường độ hào quang và mật độ tia lửa trong lúc nhân vật đang vung đòn đánh
@@ -306,10 +365,13 @@ public class WeaponElementalVfx : MonoBehaviour
     // Tạo dải màu vệt kiếm phù hợp với màu nguyên tố và biến thể đòn chém
     public Gradient BuildTrailGradient(int attackVariant)
     {
+        int idx = Mathf.Clamp(attackVariant, 0, cachedTrailGradients.Length - 1);
+        if (cachedTrailGradients[idx] != null) return cachedTrailGradients[idx];
+
         WeaponVfxProfile p = Profile;
-        Color tailCol = attackVariant == 2
+        Color tailCol = idx == 2
             ? Color.Lerp(p.secondaryColor, p.primaryColor, 0.30f)
-            : Color.Lerp(p.primaryColor, p.secondaryColor, attackVariant == 1 ? 0.65f : 0.35f);
+            : Color.Lerp(p.primaryColor, p.secondaryColor, idx == 1 ? 0.65f : 0.35f);
         Color midCol = Color.Lerp(p.coreColor, p.primaryColor, 0.62f);
 
         float alphaHead = Mathf.Clamp(0.84f + p.tier * 0.04f, 0.85f, 0.99f);
@@ -329,6 +391,7 @@ public class WeaponElementalVfx : MonoBehaviour
                 new GradientAlphaKey(alphaMid, 0.52f),
                 new GradientAlphaKey(0f, 1f)
             });
+        cachedTrailGradients[idx] = grad;
         return grad;
     }
 
@@ -373,6 +436,7 @@ public class WeaponElementalVfx : MonoBehaviour
                     {
                         Color initialGlow = profile.primaryColor * profile.baseEmissionStrength;
                         inst.SetColor(EmissionColorId, initialGlow);
+                        emissionMaterials.Add(inst);
                     }
 
                     clonedMap[src] = inst;
@@ -795,5 +859,8 @@ public class WeaponElementalVfx : MonoBehaviour
             }
         }
         runtimeMaterials.Clear();
+        emissionMaterials.Clear();
+        lastAppliedSurgeWeight = -1f;
+        pulseUpdateTimer = 0f;
     }
 }

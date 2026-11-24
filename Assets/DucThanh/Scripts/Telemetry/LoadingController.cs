@@ -1,4 +1,4 @@
-using System.Collections;
+﻿using System.Collections;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 using UnityEngine.UI;
@@ -89,15 +89,36 @@ public class LoadingController : MonoBehaviour
         StartCoroutine(LoadSceneAsync());
     }
 
+    private Canvas ResolveLoadingCanvas()
+    {
+        if (progressBar != null)
+        {
+            Canvas barCanvas = progressBar.GetComponentInParent<Canvas>(true);
+            if (barCanvas != null && barCanvas.rootCanvas != null && barCanvas.rootCanvas.gameObject.name != "GameMenuCanvas")
+            {
+                return barCanvas.rootCanvas;
+            }
+        }
+        return FantasyUiThemeHelper.FindSceneCanvas(gameObject);
+    }
+
     private void EnsureLoadingVisuals()
     {
-        Canvas canvas = FindFirstObjectByType<Canvas>();
+        Canvas canvas = ResolveLoadingCanvas();
         if (canvas == null) return;
 
         Transform bakedArt = canvas.transform.Find("LoadingKeyArt");
         if (bakedArt != null)
         {
             if (keyArtRect == null) keyArtRect = bakedArt.GetComponent<RectTransform>();
+            FantasyUiThemeHelper.RefreshKeyArtTexture(bakedArt, "UI/LoadingBg");
+
+            Image veil = canvas.transform.Find("LoadingGradientVeil")?.GetComponent<Image>();
+            if (veil != null)
+            {
+                FantasyUiThemeHelper.EnsureGradientOverlaySprite(veil, false, new Color(0.03f, 0.05f, 0.09f, 1f));
+            }
+
             if (tipText == null)
             {
                 Transform tipTf = canvas.transform.Find("LoadingFooterHUD/GameplayTipText");
@@ -105,7 +126,7 @@ public class LoadingController : MonoBehaviour
             }
 
             TMP_Text bakedBadge = canvas.transform.Find("GameBrandHeader/Badge")?.GetComponent<TMP_Text>();
-            if (bakedBadge != null) bakedBadge.text = "ACTION ROGUELITE  •  DARK FANTASY";
+            if (bakedBadge != null) bakedBadge.text = "HÀNH ĐỘNG SINH TỒN  •  DARK FANTASY";
 
             if (canvas.transform.Find("LoadingEmbers") == null)
             {
@@ -135,7 +156,7 @@ public class LoadingController : MonoBehaviour
 
     private void ApplyLoadingTheme()
     {
-        Canvas canvas = FindFirstObjectByType<Canvas>();
+        Canvas canvas = ResolveLoadingCanvas();
         if (canvas == null) return;
 
         FantasyUiThemeHelper.ConfigureResponsiveCanvas(canvas);
@@ -169,7 +190,7 @@ public class LoadingController : MonoBehaviour
         brandRt.anchoredPosition = new Vector2(88f, -64f);
         brandRt.sizeDelta = new Vector2(680f, 160f);
 
-        TMP_Text badge = FantasyUiThemeHelper.CreateText(brandGroup.transform, "Badge", "ACTION ROGUELITE  •  DARK FANTASY",
+        TMP_Text badge = FantasyUiThemeHelper.CreateText(brandGroup.transform, "Badge", "HÀNH ĐỘNG SINH TỒN  •  DARK FANTASY",
             15f, FontStyles.Bold, FantasyUiThemeHelper.GoldBright, TextAlignmentOptions.Left, sharedFont);
         SetTopLeftRect(badge.rectTransform, 0f, 0f, 650f, 24f);
         badge.characterSpacing = 6f;
@@ -186,7 +207,7 @@ public class LoadingController : MonoBehaviour
             new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(0f, 1f),
             new Vector2(0f, -104f), new Vector2(220f, 3f), FantasyUiThemeHelper.GoldPrimary);
 
-        TMP_Text sub = FantasyUiThemeHelper.CreateText(brandGroup.transform, "GameSubtitle", "RAID OF THE ORC WOODS",
+        TMP_Text sub = FantasyUiThemeHelper.CreateText(brandGroup.transform, "GameSubtitle", "CUỘC TRUY QUÉT RỪNG ORC",
             21f, FontStyles.Bold, new Color(0.88f, 0.80f, 0.62f, 0.96f), TextAlignmentOptions.Left, sharedFont);
         SetTopLeftRect(sub.rectTransform, 0f, -114f, 650f, 32f);
         sub.characterSpacing = 5f;
@@ -481,6 +502,7 @@ public class LoadingController : MonoBehaviour
         return sceneName switch
         {
             "LoginScene" => "Đăng Nhập",
+            "MainMenuScene" => "Menu Chính",
             "PickCharacter" => "Chọn Nhân Vật",
             "PickMap" => "Chọn Bản Đồ",
             "Lv1" => "Rừng Orc (Map 1)",

@@ -1,4 +1,4 @@
-using System.Collections;
+﻿using System.Collections;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 using UnityEngine.UI;
@@ -64,21 +64,56 @@ public class AuthUIController : MonoBehaviour
         Cursor.visible = true;
 
         EnsureLoginVisuals();
-        ShowLoginPanel();
+        if (GameMenuManager.ConsumePendingMainMenuOnLoginScene())
+        {
+            if (Application.CanStreamedLevelBeLoaded("MainMenuScene"))
+            {
+                SceneManager.LoadScene("MainMenuScene");
+                return;
+            }
+
+            if (loginPanel != null) loginPanel.SetActive(false);
+            if (registerPanel != null) registerPanel.SetActive(false);
+            GameMenuManager.OpenMainMenu(GameMenuManager.LoggedInPlayerName, GameMenuManager.MainMenuPlayTargetScene);
+        }
+        else
+        {
+            ShowLoginPanel();
+        }
+    }
+
+    private Canvas ResolveLoginCanvas()
+    {
+        if (loginPanel != null)
+        {
+            Canvas panelCanvas = loginPanel.GetComponentInParent<Canvas>(true);
+            if (panelCanvas != null && panelCanvas.rootCanvas != null && panelCanvas.rootCanvas.gameObject.name != "GameMenuCanvas")
+            {
+                return panelCanvas.rootCanvas;
+            }
+        }
+        return FantasyUiThemeHelper.FindSceneCanvas(gameObject);
     }
 
     private void EnsureLoginVisuals()
     {
-        Canvas canvas = FindFirstObjectByType<Canvas>();
+        Canvas canvas = ResolveLoginCanvas();
         if (canvas == null) return;
 
         Transform bakedArt = canvas.transform.Find("LoginKeyArt");
         if (bakedArt != null)
         {
             if (keyArtRect == null) keyArtRect = bakedArt.GetComponent<RectTransform>();
+            FantasyUiThemeHelper.RefreshKeyArtTexture(bakedArt, "UI/LoginBg");
+
+            Image rightVeil = canvas.transform.Find("LoginRightGradient")?.GetComponent<Image>();
+            if (rightVeil != null)
+            {
+                FantasyUiThemeHelper.EnsureGradientOverlaySprite(rightVeil, true, new Color(0.03f, 0.045f, 0.08f, 1f));
+            }
 
             TMP_Text bakedBadge = canvas.transform.Find("HeroBrandGroup/BrandBadge")?.GetComponent<TMP_Text>();
-            if (bakedBadge != null) bakedBadge.text = "ACTION ROGUELITE  •  DARK FANTASY";
+            if (bakedBadge != null) bakedBadge.text = "HÀNH ĐỘNG SINH TỒN  •  DARK FANTASY";
 
             TMP_Text bakedFooter = canvas.transform.Find("LoginFooterTag")?.GetComponent<TMP_Text>();
             if (bakedFooter != null) bakedFooter.text = "3 CỨ ĐIỂM CHIẾN DỊCH   •   ĐẤU TRƯỜNG BOSS   •   VANGUARD";
@@ -108,7 +143,7 @@ public class AuthUIController : MonoBehaviour
             keyArtRect.localScale = new Vector3(scale, scale, 1f);
         }
 
-        if (authApiClient != null && authApiClient.IsBusy) return;
+        if (GameMenuManager.IsMenuOpen || (authApiClient != null && authApiClient.IsBusy)) return;
 
         if (Input.GetKeyDown(KeyCode.Tab))
         {
@@ -124,7 +159,7 @@ public class AuthUIController : MonoBehaviour
     // Dựng ảnh nền, bố cục thẻ đăng nhập/đăng ký và hiệu ứng tàn lửa bay
     private void ApplyLoginTheme()
     {
-        Canvas canvas = FindFirstObjectByType<Canvas>();
+        Canvas canvas = ResolveLoginCanvas();
         if (canvas == null) return;
 
         FantasyUiThemeHelper.ConfigureResponsiveCanvas(canvas);
@@ -155,7 +190,7 @@ public class AuthUIController : MonoBehaviour
         brandRt.anchoredPosition = new Vector2(82f, -56f);
         brandRt.sizeDelta = new Vector2(720f, 165f);
 
-        TMP_Text badge = FantasyUiThemeHelper.CreateText(brandGroup.transform, "BrandBadge", "ACTION ROGUELITE  •  DARK FANTASY",
+        TMP_Text badge = FantasyUiThemeHelper.CreateText(brandGroup.transform, "BrandBadge", "HÀNH ĐỘNG SINH TỒN  •  DARK FANTASY",
             15f, FontStyles.Bold, FantasyUiThemeHelper.GoldBright, TextAlignmentOptions.Left, sharedFont);
         SetTopLeftRect(badge.rectTransform, 0f, 0f, 680f, 24f);
         badge.characterSpacing = 6f;
@@ -172,7 +207,7 @@ public class AuthUIController : MonoBehaviour
             new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(0f, 1f),
             new Vector2(0f, -106f), new Vector2(230f, 3f), FantasyUiThemeHelper.GoldPrimary);
 
-        TMP_Text heroSub = FantasyUiThemeHelper.CreateText(brandGroup.transform, "HeroSubtitle", "RAID OF THE ORC WOODS",
+        TMP_Text heroSub = FantasyUiThemeHelper.CreateText(brandGroup.transform, "HeroSubtitle", "CUỘC TRUY QUÉT RỪNG ORC",
             22f, FontStyles.Bold, new Color(0.90f, 0.82f, 0.64f, 0.96f), TextAlignmentOptions.Left, sharedFont);
         SetTopLeftRect(heroSub.rectTransform, 0f, -118f, 680f, 34f);
         heroSub.characterSpacing = 5f;
@@ -377,6 +412,15 @@ public class AuthUIController : MonoBehaviour
         panelFadeRoutine = null;
     }
 
+    // Hiển thị lại biểu mẫu đăng nhập khi người chơi đăng xuất từ Menu Chính
+    public void ReturnToLoginForm()
+    {
+        SetInteractable(true);
+        ClearPasswordInputs();
+        ShowLoginPanel();
+        SetMessage(loginMessageText, "Đã đăng xuất. Mời đăng nhập lại!", InfoColor);
+    }
+
     // Chuyển giao diện sang chế độ Đăng nhập
     public void ShowLoginPanel()
     {
@@ -441,10 +485,21 @@ public class AuthUIController : MonoBehaviour
         {
             if (success)
             {
+                SetInteractable(true);
                 SetMessage(loginMessageText, message, SuccessColor);
                 Debug.Log($"[AuthUI] Đăng nhập thành công: #{response.playerId} ({response.playerName})");
                 string targetScene = Application.CanStreamedLevelBeLoaded(nextSceneName) ? nextSceneName : "Lv1";
-                LoadingController.LoadScene(targetScene);
+                GameMenuManager.SetLoggedInSession(response.playerName, targetScene);
+                if (Application.CanStreamedLevelBeLoaded("MainMenuScene"))
+                {
+                    SceneManager.LoadScene("MainMenuScene");
+                }
+                else
+                {
+                    if (loginPanel != null) loginPanel.SetActive(false);
+                    if (registerPanel != null) registerPanel.SetActive(false);
+                    GameMenuManager.OpenMainMenu(response.playerName, targetScene);
+                }
             }
             else
             {

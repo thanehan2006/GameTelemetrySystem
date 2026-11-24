@@ -47,7 +47,7 @@ namespace GameTelemetryAPI.Controllers
             }
 
             string eventType = dto.EventType.Trim();
-            DateTime eventTime = dto.EventTime ?? DateTime.UtcNow;
+            DateTime eventTime = NormalizeUtc(dto.EventTime);
 
             var createdEvent = ApplyEventToSession(session, eventType, eventTime, dto.Value);
             await _context.SaveChangesAsync();
@@ -88,7 +88,7 @@ namespace GameTelemetryAPI.Controllers
             foreach (var item in dto.Events)
             {
                 if (string.IsNullOrWhiteSpace(item.EventType)) continue;
-                ApplyEventToSession(session, item.EventType.Trim(), item.EventTime ?? DateTime.UtcNow, item.Value);
+                ApplyEventToSession(session, item.EventType.Trim(), NormalizeUtc(item.EventTime), item.Value);
                 processedCount++;
             }
 
@@ -203,6 +203,18 @@ namespace GameTelemetryAPI.Controllers
             }
 
             return null;
+        }
+
+        private static DateTime NormalizeUtc(DateTime? value)
+        {
+            if (!value.HasValue) return DateTime.UtcNow;
+            var dt = value.Value;
+            return dt.Kind switch
+            {
+                DateTimeKind.Utc => dt,
+                DateTimeKind.Local => dt.ToUniversalTime(),
+                _ => DateTime.SpecifyKind(dt, DateTimeKind.Utc)
+            };
         }
     }
 }

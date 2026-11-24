@@ -263,11 +263,16 @@ public class CharacterSelectController : MonoBehaviour
         }
     }
 
-    // Quay lại màn hình đăng nhập
+    // Quay lại màn hình Menu Chính (hoặc Đăng nhập nếu chưa có MainMenuScene)
     public void GoBackToLogin()
     {
         GameAudioManager.PlayUiClick();
-        string target = string.IsNullOrWhiteSpace(backSceneName) ? "LoginScene" : backSceneName;
+        string target = string.IsNullOrWhiteSpace(backSceneName) ? "MainMenuScene" : backSceneName;
+        if (string.Equals(target, "LoginScene", StringComparison.OrdinalIgnoreCase)
+            && Application.CanStreamedLevelBeLoaded("MainMenuScene"))
+        {
+            target = "MainMenuScene";
+        }
         if (Application.CanStreamedLevelBeLoaded(target))
         {
             SceneManager.LoadScene(target);
@@ -276,6 +281,7 @@ public class CharacterSelectController : MonoBehaviour
 
     private void HandleKeyboardInput()
     {
+        if (GameMenuManager.IsMenuOpen) return;
         if (Input.GetKeyDown(KeyCode.LeftArrow) || Input.GetKeyDown(KeyCode.A))
         {
             CycleCharacter(-1);

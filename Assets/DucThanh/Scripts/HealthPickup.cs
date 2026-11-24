@@ -28,11 +28,13 @@ public class HealthPickup : MonoBehaviour
     private Transform visualTransform;
     private Transform groundRingTransform;
     private Light glowLight;
+    private ParticleSystem sparklePs;
 
     private Vector3 basePosition;
     private float baseLightIntensity = 2.4f;
     private float phaseOffset;
     private bool collected;
+    private float nextFarCheckTime;
 
     // Đăng ký prefab bình máu được nạp trước từ Preloader
     public static void RegisterPreloadedPrefab(GameObject potionPrefab)
@@ -163,6 +165,7 @@ public class HealthPickup : MonoBehaviour
             glowLight = lightObj.AddComponent<Light>();
             glowLight.type = LightType.Point;
         }
+        glowLight.shadows = LightShadows.None;
         glowLight.color = new Color(1f, 0.34f, 0.56f);
         glowLight.range = 5.2f;
         glowLight.intensity = baseLightIntensity;
@@ -251,7 +254,15 @@ public class HealthPickup : MonoBehaviour
 
             var rend = ps.GetComponent<ParticleSystemRenderer>();
             rend.sharedMaterial = CombatVfxManager.GetAdditiveStarMaterial();
+            rend.shadowCastingMode = ShadowCastingMode.Off;
+            rend.receiveShadows = false;
+            sparklePs = ps;
             ps.Play();
+        }
+        else
+        {
+            Transform existingPs = transform.Find("PotionSparkles");
+            if (existingPs != null) sparklePs = existingPs.GetComponent<ParticleSystem>();
         }
     }
 
@@ -259,6 +270,9 @@ public class HealthPickup : MonoBehaviour
     void Update()
     {
         if (collected || GameOverManager.IsGameOver || WeaponShopManager.IsShopOpen) return;
+
+        float now = Time.time;
+        if (now < nextFarCheckTime) return;
 
         if (playerTransform == null || playerHealth == null)
         {
@@ -273,14 +287,24 @@ public class HealthPickup : MonoBehaviour
 
         const float activeVisualRadiusSqr = 26f * 26f;
         bool inVisualRange = horizSqrDist <= activeVisualRadiusSqr;
-        if (glowLight != null && glowLight.enabled != inVisualRange)
+        if (glowLight != null)
         {
-            glowLight.enabled = inVisualRange;
+            bool allowLight = inVisualRange && GameSettingsManager.CurrentGraphicsPreset != GraphicsPreset.Low;
+            if (glowLight.enabled != allowLight) glowLight.enabled = allowLight;
         }
-        if (!inVisualRange) return;
+        if (sparklePs != null)
+        {
+            if (inVisualRange && !sparklePs.isPlaying) sparklePs.Play(false);
+            else if (!inVisualRange && sparklePs.isPlaying) sparklePs.Stop(false, ParticleSystemStopBehavior.StopEmitting);
+        }
+        if (!inVisualRange)
+        {
+            nextFarCheckTime = now + 0.22f;
+            return;
+        }
+        nextFarCheckTime = 0f;
 
         float dt = Time.deltaTime;
-        float now = Time.time;
 
         if (visualTransform != null && visualTransform != transform)
         {

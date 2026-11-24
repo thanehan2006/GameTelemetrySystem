@@ -10,6 +10,8 @@ public class GoldPickup : MonoBehaviour
 {
     private static readonly int BaseColorId = Shader.PropertyToID("_BaseColor");
     private static readonly int ColorId = Shader.PropertyToID("_Color");
+    private static readonly int MetallicId = Shader.PropertyToID("_Metallic");
+    private static readonly int SmoothnessId = Shader.PropertyToID("_Smoothness");
 
     public int goldAmount = 20;
     public float magnetRadius = 2.35f;
@@ -65,6 +67,7 @@ public class GoldPickup : MonoBehaviour
     private float spawnTime;
     private int poolVariant = -1;
     private bool isPooled;
+    private float nextCullCheckTime;
 
     // Tung ra nhiều đồng vàng hoặc rương vàng tại vị trí quái vừa bị hạ
     public static void SpawnGoldBurst(Vector3 origin, int totalGold, int coinCount = 3, bool isBossDrop = false)
@@ -186,13 +189,14 @@ public class GoldPickup : MonoBehaviour
 
             Light l = null;
             float baseInt = isChest ? 3.0f : 2.2f;
-            if (isChest || isBag)
+            if ((isChest || isBag) && GameSettingsManager.CurrentGraphicsPreset != GraphicsPreset.Low)
             {
                 GameObject lightObj = new GameObject("GoldGlow");
                 lightObj.transform.SetParent(root.transform, false);
                 lightObj.transform.localPosition = Vector3.up * 0.45f;
                 l = lightObj.AddComponent<Light>();
                 l.type = LightType.Point;
+                l.shadows = LightShadows.None;
                 l.color = isChest ? new Color(1f, 0.76f, 0.2f) : new Color(1f, 0.84f, 0.28f);
                 l.range = isChest ? 6.0f : 4.5f;
                 l.intensity = baseInt;
@@ -233,11 +237,12 @@ public class GoldPickup : MonoBehaviour
         landed = false;
         bounceCount = 0;
         velocity = Vector3.zero;
+        nextCullCheckTime = 0f;
         if (visualPivot != null) visualPivot.localRotation = Quaternion.identity;
         if (groundRingTransform != null) groundRingTransform.localRotation = Quaternion.identity;
         if (glowLight != null)
         {
-            glowLight.enabled = true;
+            glowLight.enabled = GameSettingsManager.CurrentGraphicsPreset != GraphicsPreset.Low;
             glowLight.intensity = baseLightIntensity;
         }
         cachedTerrain = Terrain.activeTerrain;
@@ -324,6 +329,8 @@ public class GoldPickup : MonoBehaviour
 
         var rend = ps.GetComponent<ParticleSystemRenderer>();
         rend.sharedMaterial = CombatVfxManager.GetAdditiveStarMaterial();
+        rend.shadowCastingMode = ShadowCastingMode.Off;
+        rend.receiveShadows = false;
         ps.Play();
         return ps;
     }
@@ -375,10 +382,12 @@ public class GoldPickup : MonoBehaviour
             Shader sh = Shader.Find("Universal Render Pipeline/Lit") ?? Shader.Find("Standard");
             Material mat = new Material(sh);
             mat.color = new Color(1f, 0.82f, 0.16f, 1f);
-            if (mat.HasProperty("_BaseColor")) mat.SetColor("_BaseColor", new Color(1f, 0.84f, 0.18f, 1f));
-            if (mat.HasProperty("_Metallic")) mat.SetFloat("_Metallic", 0.90f);
-            if (mat.HasProperty("_Smoothness")) mat.SetFloat("_Smoothness", 0.85f);
-            r.material = mat;
+            if (mat.HasProperty(BaseColorId)) mat.SetColor(BaseColorId, new Color(1f, 0.84f, 0.18f, 1f));
+            if (mat.HasProperty(MetallicId)) mat.SetFloat(MetallicId, 0.90f);
+            if (mat.HasProperty(SmoothnessId)) mat.SetFloat(SmoothnessId, 0.85f);
+            r.sharedMaterial = mat;
+            r.shadowCastingMode = ShadowCastingMode.Off;
+            r.receiveShadows = false;
         }
     }
 
@@ -415,17 +424,23 @@ public class GoldPickup : MonoBehaviour
 
         if (landed && playerTransform != null)
         {
+            if (now < nextCullCheckTime) return;
+
             const float activeCullSqrDist = 26f * 26f;
             Vector3 playerTarget = playerTransform.position + Vector3.up * 0.9f;
             float cullSqrDist = (playerTarget - transform.position).sqrMagnitude;
             if (cullSqrDist > activeCullSqrDist)
             {
+                nextCullCheckTime = now + 0.20f;
                 if (glowLight != null && glowLight.enabled) glowLight.enabled = false;
                 if (sparklePs != null && sparklePs.isPlaying) sparklePs.Stop(false, ParticleSystemStopBehavior.StopEmitting);
                 return;
             }
 
-            if (glowLight != null && !glowLight.enabled) glowLight.enabled = true;
+            if (glowLight != null && glowLight.enabled != (GameSettingsManager.CurrentGraphicsPreset != GraphicsPreset.Low))
+            {
+                glowLight.enabled = GameSettingsManager.CurrentGraphicsPreset != GraphicsPreset.Low;
+            }
             if (sparklePs != null && !sparklePs.isPlaying) sparklePs.Play(false);
         }
 

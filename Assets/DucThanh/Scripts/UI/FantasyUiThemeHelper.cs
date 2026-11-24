@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.SceneManagement;
 using UnityEngine.UI;
 using TMPro;
 
@@ -31,6 +32,26 @@ public static class FantasyUiThemeHelper
         scaler.referenceResolution = new Vector2(1920f, 1080f);
         scaler.screenMatchMode = CanvasScaler.ScreenMatchMode.MatchWidthOrHeight;
         scaler.matchWidthOrHeight = 0.5f;
+    }
+
+    // Tìm Canvas thuộc đúng scene hiện tại, bỏ qua GameMenuCanvas ở DontDestroyOnLoad
+    public static Canvas FindSceneCanvas(GameObject context = null)
+    {
+        Scene targetScene = context != null && context.scene.IsValid()
+            ? context.scene
+            : SceneManager.GetActiveScene();
+
+        Canvas[] canvases = UnityEngine.Object.FindObjectsByType<Canvas>(FindObjectsSortMode.None);
+        Canvas fallback = null;
+        for (int i = 0; i < canvases.Length; i++)
+        {
+            Canvas c = canvases[i];
+            if (c == null || !c.isRootCanvas) continue;
+            if (c.gameObject.name == "GameMenuCanvas" || c.GetComponentInParent<GameMenuManager>() != null) continue;
+            if (c.gameObject.scene == targetScene) return c;
+            if (fallback == null && c.gameObject.scene.name != "DontDestroyOnLoad") fallback = c;
+        }
+        return fallback;
     }
 
     // Tạo ảnh nền toàn màn hình từ thư mục Resources
@@ -70,10 +91,36 @@ public static class FantasyUiThemeHelper
         StretchFull(obj.GetComponent<RectTransform>());
 
         Image img = obj.GetComponent<Image>();
+        EnsureGradientOverlaySprite(img, horizontal, tint);
+        return img;
+    }
+
+    public static void EnsureGradientOverlaySprite(Image img, bool horizontal, Color tint)
+    {
+        if (img == null) return;
         img.sprite = horizontal ? GetHorizontalGradientSprite() : GetVerticalGradientSprite();
         img.color = tint;
         img.raycastTarget = false;
-        return img;
+    }
+
+    public static void RefreshKeyArtTexture(Transform keyArtTransform, string resourcePath)
+    {
+        if (keyArtTransform == null) return;
+        RawImage raw = keyArtTransform.GetComponent<RawImage>();
+        if (raw == null) return;
+
+        Texture2D tex = raw.texture as Texture2D
+            ?? GameAssetPreloader.GetAsset<Texture2D>(resourcePath)
+            ?? Resources.Load<Texture2D>(resourcePath);
+        if (tex == null) return;
+
+        raw.texture = tex;
+        raw.color = Color.white;
+
+        if (keyArtTransform.TryGetComponent(out AspectRatioFitter fitter) && tex.height > 0)
+        {
+            fitter.aspectRatio = (float)tex.width / tex.height;
+        }
     }
 
     public static GameObject CreateAccentLine(Transform parent, string name, Vector2 anchorMin, Vector2 anchorMax, Vector2 pivot, Vector2 pos, Vector2 size, Color color)
@@ -106,7 +153,15 @@ public static class FantasyUiThemeHelper
         GameObject go = new GameObject(name, typeof(RectTransform), typeof(TextMeshProUGUI));
         go.transform.SetParent(parent, false);
         TextMeshProUGUI tmp = go.GetComponent<TextMeshProUGUI>();
-        if (fontAsset != null) tmp.font = fontAsset;
+        if (fontAsset != null && !fontAsset.name.StartsWith("LiberationSans", System.StringComparison.OrdinalIgnoreCase))
+        {
+            tmp.font = fontAsset;
+            tmp.fontSharedMaterial = fontAsset.material;
+        }
+        else
+        {
+            ClassicFontRuntimeManager.ApplyFont(tmp);
+        }
         tmp.text = content;
         tmp.fontSize = fontSize;
         tmp.fontStyle = style;
@@ -393,6 +448,8 @@ public class FloatingEmbersUI : MonoBehaviour
 
     private void Update()
     {
+        if (GameMenuManager.IsMenuOpen) return;
+
         float dt = Time.unscaledDeltaTime;
         float t = Time.unscaledTime;
 
