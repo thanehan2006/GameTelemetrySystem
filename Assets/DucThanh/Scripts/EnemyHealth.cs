@@ -21,7 +21,8 @@ public class EnemyHealth : MonoBehaviour
     private static readonly int AlphaClipId = Shader.PropertyToID("_AlphaClip");
     private static readonly int CullId = Shader.PropertyToID("_Cull");
     private static readonly int DeathStateHash = Animator.StringToHash("Death");
-    private static readonly WaitForSeconds HitFlashWait = new WaitForSeconds(0.1f);
+    private static readonly WaitForSeconds BossFallWait = new WaitForSeconds(1.65f);
+    private static readonly WaitForSeconds NormalFallWait = new WaitForSeconds(1.1f);
     private const float HpBarVisibleSqrDist = 18f * 18f;
 
     private static Mesh sharedBarQuadMesh;
@@ -49,7 +50,7 @@ public class EnemyHealth : MonoBehaviour
     private bool isDead = false;
     private Renderer[] cachedRenderers;
     private MaterialPropertyBlock hitFlashBlock;
-    private Coroutine hitFlashRoutine;
+    private float hitFlashTimer;
 
     private Transform hpBarRoot;
     private Transform borderQuadT;
@@ -73,6 +74,10 @@ public class EnemyHealth : MonoBehaviour
     private bool wasLockedTarget;
     private Transform cachedCamTransform;
     private OrcEnemyAI cachedEnemyAI;
+    private NavMeshAgent cachedNavAgent;
+    private Animator cachedAnimator;
+    private OrcWeaponHitbox[] cachedWeaponHitboxes;
+    private Collider[] cachedColliders;
     private float lastAppliedBarScale = -1f;
     private float lowHpPulseTimer;
     private float nextBarVisCheckTime;
@@ -92,6 +97,10 @@ public class EnemyHealth : MonoBehaviour
         isDead = false;
         cachedRenderers = GetComponentsInChildren<Renderer>(true);
         cachedEnemyAI = GetComponent<OrcEnemyAI>();
+        cachedNavAgent = GetComponent<NavMeshAgent>();
+        cachedAnimator = GetComponentInChildren<Animator>(true);
+        cachedWeaponHitboxes = GetComponentsInChildren<OrcWeaponHitbox>(true);
+        cachedColliders = GetComponentsInChildren<Collider>(true);
         for (int i = 0; i < cachedRenderers.Length; i++)
         {
             if (cachedRenderers[i] is SkinnedMeshRenderer smr)
@@ -113,6 +122,16 @@ public class EnemyHealth : MonoBehaviour
     // Cập nhật hướng thanh máu nhìn thẳng về camera và hiệu ứng nháy sát thương
     private void LateUpdate()
     {
+        if (hitFlashTimer > 0f)
+        {
+            hitFlashTimer -= Time.deltaTime;
+            if (hitFlashTimer <= 0f)
+            {
+                hitFlashTimer = 0f;
+                ClearTintFromRenderers();
+            }
+        }
+
         if (hpBarRoot == null) return;
         if (isDead)
         {
@@ -266,16 +285,11 @@ public class EnemyHealth : MonoBehaviour
     private void TriggerHitFlash()
     {
         if (cachedRenderers == null || cachedRenderers.Length == 0) return;
-        if (hitFlashRoutine != null) StopCoroutine(hitFlashRoutine);
-        hitFlashRoutine = StartCoroutine(HitFlashCoroutine());
-    }
-
-    private IEnumerator HitFlashCoroutine()
-    {
-        ApplyTintToRenderers(new Color(1f, 0.32f, 0.28f, 1f));
-        yield return HitFlashWait;
-        ClearTintFromRenderers();
-        hitFlashRoutine = null;
+        if (hitFlashTimer <= 0f)
+        {
+            ApplyTintToRenderers(new Color(1f, 0.32f, 0.28f, 1f));
+        }
+        hitFlashTimer = 0.1f;
     }
 
     private void ApplyTintToRenderers(Color tint)
@@ -308,11 +322,7 @@ public class EnemyHealth : MonoBehaviour
         isDead = true;
         if (hpBarRoot != null) hpBarRoot.gameObject.SetActive(false);
 
-        if (hitFlashRoutine != null)
-        {
-            StopCoroutine(hitFlashRoutine);
-            hitFlashRoutine = null;
-        }
+        hitFlashTimer = 0f;
         ClearTintFromRenderers();
 
         if (TelemetryManager.Instance != null)
@@ -350,36 +360,48 @@ public class EnemyHealth : MonoBehaviour
     private IEnumerator DeathSequenceCoroutine()
     {
 
-        OrcEnemyAI ai = GetComponent<OrcEnemyAI>();
+        OrcEnemyAI ai = cachedEnemyAI != null ? cachedEnemyAI : GetComponent<OrcEnemyAI>();
         if (ai != null) ai.enabled = false;
 
-        NavMeshAgent agent = GetComponent<NavMeshAgent>();
+        NavMeshAgent agent = cachedNavAgent != null ? cachedNavAgent : GetComponent<NavMeshAgent>();
         if (agent != null) agent.enabled = false;
 
-        foreach (OrcWeaponHitbox hitbox in GetComponentsInChildren<OrcWeaponHitbox>(true))
+        if (cachedWeaponHitboxes != null)
         {
-            hitbox.DisableHitbox();
-            hitbox.enabled = false;
+            for (int i = 0; i < cachedWeaponHitboxes.Length; i++)
+            {
+                OrcWeaponHitbox hitbox = cachedWeaponHitboxes[i];
+                if (hitbox == null) continue;
+                hitbox.DisableHitbox();
+                hitbox.enabled = false;
+            }
         }
 
-        foreach (Collider col in GetComponentsInChildren<Collider>(true))
+        if (cachedColliders != null)
         {
-            col.enabled = false;
+            for (int i = 0; i < cachedColliders.Length; i++)
+            {
+                if (cachedColliders[i] != null) cachedColliders[i].enabled = false;
+            }
+        }
+
+        foreach (Light l in GetComponentsInChildren<Light>(false))
+        {
+            l.enabled = false;
         }
 
         Vector3 vfxCenter = transform.position + Vector3.up * (isBoss ? 1.35f : 0.9f);
         CombatVfxManager.SpawnEnemyDeathEffect(vfxCenter, isBoss);
         GameAudioManager.PlayEnemyDeath(isBoss);
 
-        Animator animator = GetComponentInChildren<Animator>();
+        Animator animator = cachedAnimator != null ? cachedAnimator : GetComponentInChildren<Animator>();
         if (animator != null && animator.HasState(0, DeathStateHash))
         {
             animator.speed = 1f;
             animator.Play(DeathStateHash, 0, 0f);
         }
 
-        float fallWait = isBoss ? 1.65f : 1.1f;
-        yield return new WaitForSeconds(fallWait);
+        yield return isBoss ? BossFallWait : NormalFallWait;
 
         CombatVfxManager.SpawnDissolvePuff(transform.position + Vector3.up * 0.4f, isBoss);
 

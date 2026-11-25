@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Rendering;
+using UnityEngine.SceneManagement;
 #if UNITY_EDITOR
 using UnityEditor;
 #endif
@@ -35,6 +36,7 @@ public class GoldPickup : MonoBehaviour
         new Stack<GoldPickup>(4)
     };
     private static readonly int[] MaxPoolPerVariant = { 24, 24, 8, 4 };
+    private static readonly RaycastHit[] GroundSampleHitBuffer = new RaycastHit[12];
 
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
     private static void ResetStaticPoolState()
@@ -47,6 +49,16 @@ public class GoldPickup : MonoBehaviour
         for (int i = 0; i < SharedBeamMats.Length; i++) SharedBeamMats[i] = null;
         for (int i = 0; i < SharedRingMats.Length; i++) SharedRingMats[i] = null;
         cachedSparkleGradient = null;
+        SceneManager.sceneUnloaded -= OnSceneUnloaded;
+        SceneManager.sceneUnloaded += OnSceneUnloaded;
+    }
+
+    private static void OnSceneUnloaded(Scene _)
+    {
+        for (int i = 0; i < PickupPools.Length; i++)
+        {
+            PickupPools[i].Clear();
+        }
     }
 
     private Transform playerTransform;
@@ -63,11 +75,13 @@ public class GoldPickup : MonoBehaviour
     private float groundHoverHeight = 0.35f;
     private int bounceCount;
     private bool landed;
+    private bool isMagnetized;
     private bool collected;
     private float spawnTime;
     private int poolVariant = -1;
     private bool isPooled;
     private float nextCullCheckTime;
+    private float nextGroundSampleTime;
 
     // Tung ra nhiều đồng vàng hoặc rương vàng tại vị trí quái vừa bị hạ
     public static void SpawnGoldBurst(Vector3 origin, int totalGold, int coinCount = 3, bool isBossDrop = false)
@@ -153,24 +167,20 @@ public class GoldPickup : MonoBehaviour
                 CreateFallbackCoinMesh(pivot.transform);
             }
 
-            GameObject beam = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
-            beam.name = "LootBeam";
+            GameObject beam = new GameObject("LootBeam");
             beam.transform.SetParent(root.transform, false);
-            Collider beamCol = beam.GetComponent<Collider>();
-            if (beamCol != null) Destroy(beamCol);
+            MeshFilter bmf = beam.AddComponent<MeshFilter>();
+            bmf.sharedMesh = CombatVfxManager.GetCylinderMesh();
 
             float beamHeight = isChest ? 3.2f : isBag ? 2.4f : 1.75f;
             float beamWidth = isChest ? 0.34f : isBag ? 0.22f : 0.15f;
             beam.transform.localPosition = new Vector3(0f, beamHeight * 0.5f, 0f);
             beam.transform.localScale = new Vector3(beamWidth, beamHeight * 0.5f, beamWidth);
 
-            Renderer br = beam.GetComponent<Renderer>();
-            if (br != null)
-            {
-                br.sharedMaterial = GetSharedBeamMaterial(isChest ? 2 : isBag ? 1 : 0);
-                br.shadowCastingMode = ShadowCastingMode.Off;
-                br.receiveShadows = false;
-            }
+            MeshRenderer br = beam.AddComponent<MeshRenderer>();
+            br.sharedMaterial = GetSharedBeamMaterial(isChest ? 2 : isBag ? 1 : 0);
+            br.shadowCastingMode = ShadowCastingMode.Off;
+            br.receiveShadows = false;
 
             GameObject ringObj = new GameObject("GroundRing");
             ringObj.transform.SetParent(root.transform, false);
@@ -189,7 +199,7 @@ public class GoldPickup : MonoBehaviour
 
             Light l = null;
             float baseInt = isChest ? 3.0f : 2.2f;
-            if ((isChest || isBag) && GameSettingsManager.CurrentGraphicsPreset != GraphicsPreset.Low)
+            if (isChest && GameSettingsManager.CurrentGraphicsPreset != GraphicsPreset.Low)
             {
                 GameObject lightObj = new GameObject("GoldGlow");
                 lightObj.transform.SetParent(root.transform, false);
@@ -235,9 +245,11 @@ public class GoldPickup : MonoBehaviour
         goldAmount = amount;
         collected = false;
         landed = false;
+        isMagnetized = false;
         bounceCount = 0;
         velocity = Vector3.zero;
         nextCullCheckTime = 0f;
+        nextGroundSampleTime = 0f;
         if (visualPivot != null) visualPivot.localRotation = Quaternion.identity;
         if (groundRingTransform != null) groundRingTransform.localRotation = Quaternion.identity;
         if (glowLight != null)
@@ -399,12 +411,14 @@ public class GoldPickup : MonoBehaviour
         float upSpeed = Random.Range(5.4f, 7.6f);
         velocity = horizontalDir.normalized * outSpeed + Vector3.up * upSpeed;
         settledGroundY = SampleGroundHeight(transform.position) + groundHoverHeight;
+        nextGroundSampleTime = Time.time + 0.15f;
     }
 
     private void Start()
     {
         ResolvePlayer();
         cachedTerrain = Terrain.activeTerrain;
+        isMagnetized = false;
         if (spawnTime == 0f) spawnTime = Time.time;
     }
 
@@ -464,11 +478,16 @@ public class GoldPickup : MonoBehaviour
             velocity.y -= 17.5f * dt;
             transform.position += velocity * dt;
 
-            float groundAtPos = SampleGroundHeight(transform.position) + groundHoverHeight;
-            if (transform.position.y <= groundAtPos && velocity.y < 0f)
+            if (now >= nextGroundSampleTime || transform.position.y <= settledGroundY)
+            {
+                settledGroundY = SampleGroundHeight(transform.position) + groundHoverHeight;
+                nextGroundSampleTime = now + 0.15f;
+            }
+
+            if (transform.position.y <= settledGroundY && velocity.y < 0f)
             {
                 Vector3 p = transform.position;
-                p.y = groundAtPos;
+                p.y = settledGroundY;
                 transform.position = p;
 
                 if (bounceCount < 1)
@@ -480,13 +499,12 @@ public class GoldPickup : MonoBehaviour
                 }
                 else
                 {
-                    settledGroundY = groundAtPos;
                     velocity = Vector3.zero;
                     landed = true;
                 }
             }
         }
-        else
+        else if (!isMagnetized)
         {
             Vector3 p = transform.position;
             p.y = settledGroundY + Mathf.Sin(age * 3.4f) * 0.09f;
@@ -502,9 +520,16 @@ public class GoldPickup : MonoBehaviour
 
         if (sqrDist <= magnetRadius * magnetRadius)
         {
+            isMagnetized = true;
             landed = true;
             transform.position = Vector3.MoveTowards(transform.position, targetPos, magnetSpeed * dt);
             sqrDist = (targetPos - transform.position).sqrMagnitude;
+        }
+        else if (isMagnetized)
+        {
+            isMagnetized = false;
+            landed = false;
+            velocity = Vector3.zero;
         }
 
         if (sqrDist <= pickupRadius * pickupRadius)
@@ -545,16 +570,47 @@ public class GoldPickup : MonoBehaviour
 
     private float SampleGroundHeight(Vector3 pos)
     {
-        if (cachedTerrain == null) cachedTerrain = Terrain.activeTerrain;
-        if (cachedTerrain != null)
+        bool hasRayHit = false;
+        float rayY = float.MinValue;
+        Vector3 rayOrigin = new Vector3(pos.x, pos.y + 2.5f, pos.z);
+        int hitCount = Physics.RaycastNonAlloc(rayOrigin, Vector3.down, GroundSampleHitBuffer, 60f, ~0, QueryTriggerInteraction.Ignore);
+        for (int i = 0; i < hitCount; i++)
         {
-            return cachedTerrain.SampleHeight(pos) + cachedTerrain.transform.position.y;
+            Collider col = GroundSampleHitBuffer[i].collider;
+            if (col == null) continue;
+            if (!(col is TerrainCollider))
+            {
+                if (col.transform == transform || col.transform.IsChildOf(transform)) continue;
+                if (col.GetComponentInParent<PlayerController>() != null || col.GetComponentInParent<PlayerHealth>() != null) continue;
+                if (col.GetComponentInParent<OrcEnemyAI>() != null || col.GetComponentInParent<EnemyHealth>() != null) continue;
+            }
+
+            float ptY = GroundSampleHitBuffer[i].point.y;
+            if (ptY > rayY)
+            {
+                rayY = ptY;
+                hasRayHit = true;
+            }
         }
 
-        if (Physics.Raycast(new Vector3(pos.x, pos.y + 40f, pos.z), Vector3.down, out RaycastHit hit, 120f, ~0, QueryTriggerInteraction.Ignore))
+        bool hasTerrainHit = false;
+        float terrainY = float.MinValue;
+        if (cachedTerrain == null) cachedTerrain = Terrain.activeTerrain;
+        if (cachedTerrain != null && cachedTerrain.terrainData != null)
         {
-            return hit.point.y;
+            Vector3 tPos = cachedTerrain.transform.position;
+            Vector3 tSize = cachedTerrain.terrainData.size;
+            if (pos.x >= tPos.x && pos.x <= tPos.x + tSize.x
+                && pos.z >= tPos.z && pos.z <= tPos.z + tSize.z)
+            {
+                terrainY = cachedTerrain.SampleHeight(pos) + tPos.y;
+                hasTerrainHit = true;
+            }
         }
+
+        if (hasRayHit && hasTerrainHit) return Mathf.Max(rayY, terrainY);
+        if (hasRayHit) return rayY;
+        if (hasTerrainHit) return terrainY;
 
         return pos.y - groundHoverHeight;
     }

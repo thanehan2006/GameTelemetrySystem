@@ -316,7 +316,11 @@ public class GameMenuManager : MonoBehaviour
 
         if (Time.frameCount == suppressEscapeFrame) return;
         if (cachedIsLoadingScene) return;
-        if (GameOverManager.IsGameOver) return;
+        if (GameOverManager.IsGameOver)
+        {
+            if (isMenuOpen) HideMenuInternal(false);
+            return;
+        }
         if (WeaponShopManager.Instance != null && WeaponShopManager.Instance.IsActualShopOpen) return;
         if (StoryGuideManager.IsAnyModalOpen) return;
 

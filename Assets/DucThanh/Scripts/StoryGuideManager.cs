@@ -107,6 +107,10 @@ public class StoryGuideManager : MonoBehaviour
     private StoryChestPickup nearestChest;
     private StoryChestPickup lastPromptChest;
     private float lastAppliedToastAlpha = -1f;
+    private float lastAppliedLiveProgress = -1f;
+    private float lastAppliedPromptAlpha = -1f;
+    private float lastAppliedPromptY = float.NaN;
+    private float lastAppliedWhisperAlpha = -1f;
     private float toastOutlinePulseTimer;
 
     // UI 1: Lời dẫn cốt truyện mờ mịn sát đáy màn hình (không chặn thao tác)
@@ -798,11 +802,17 @@ public class StoryGuideManager : MonoBehaviour
         {
             promptRoot.SetActive(active);
         }
-        if (!active) return;
-
-        if (promptCanvasGroup != null)
+        if (!active)
         {
-            promptCanvasGroup.alpha = Mathf.SmoothStep(0f, 1f, promptAlpha);
+            lastAppliedPromptAlpha = 0f;
+            return;
+        }
+
+        float targetAlpha = Mathf.SmoothStep(0f, 1f, promptAlpha);
+        if (promptCanvasGroup != null && Mathf.Abs(targetAlpha - lastAppliedPromptAlpha) > 0.002f)
+        {
+            lastAppliedPromptAlpha = targetAlpha;
+            promptCanvasGroup.alpha = targetAlpha;
         }
 
         if (promptRect != null)
@@ -810,12 +820,19 @@ public class StoryGuideManager : MonoBehaviour
             // Nằm sát đáy (18px) khi đứng một mình, nhích lên (92px) chỉ khi thanh hướng dẫn cũng đang hiện
             float desiredY = toastCurrentAlpha > 0.08f ? 92f : 18f;
             promptCurrentY = Mathf.MoveTowards(promptCurrentY, desiredY, Time.deltaTime * 360f);
-            promptRect.anchoredPosition = new Vector2(0f, promptCurrentY);
+            if (float.IsNaN(lastAppliedPromptY) || Mathf.Abs(promptCurrentY - lastAppliedPromptY) > 0.05f)
+            {
+                lastAppliedPromptY = promptCurrentY;
+                promptRect.anchoredPosition = new Vector2(0f, promptCurrentY);
+            }
         }
     }
 
     private void ApplyWhisperTransformAndAlpha(float alpha)
     {
+        if (Mathf.Abs(alpha - lastAppliedWhisperAlpha) < 0.002f) return;
+        lastAppliedWhisperAlpha = alpha;
+
         if (whisperCanvasGroup != null)
         {
             whisperCanvasGroup.alpha = alpha;
@@ -829,6 +846,7 @@ public class StoryGuideManager : MonoBehaviour
     private void HideWhisperImmediate()
     {
         whisperAlpha = 0f;
+        lastAppliedWhisperAlpha = -1f;
         if (whisperRoot != null && whisperRoot.activeSelf)
         {
             whisperRoot.SetActive(false);
@@ -839,6 +857,7 @@ public class StoryGuideManager : MonoBehaviour
     {
         toastCurrentAlpha = 0f;
         toastTargetAlpha = 0f;
+        lastAppliedLiveProgress = -1f;
         if (liveToastRoot != null && liveToastRoot.activeSelf)
         {
             liveToastRoot.SetActive(false);
@@ -849,6 +868,8 @@ public class StoryGuideManager : MonoBehaviour
     {
         promptAlpha = 0f;
         lastPromptChest = null;
+        lastAppliedPromptAlpha = -1f;
+        lastAppliedPromptY = float.NaN;
         if (promptRoot != null && promptRoot.activeSelf)
         {
             promptRoot.SetActive(false);
@@ -1085,9 +1106,13 @@ public class StoryGuideManager : MonoBehaviour
     private void SetLiveProgress(float ratio)
     {
         if (liveProgressFill == null) return;
+        float clamped = Mathf.Clamp01(ratio);
+        if (Mathf.Abs(clamped - lastAppliedLiveProgress) < 0.005f) return;
+        lastAppliedLiveProgress = clamped;
+
         RectTransform rt = liveProgressFill.rectTransform;
         rt.anchorMin = Vector2.zero;
-        rt.anchorMax = new Vector2(Mathf.Clamp01(ratio), 1f);
+        rt.anchorMax = new Vector2(clamped, 1f);
         rt.offsetMin = Vector2.zero;
         rt.offsetMax = Vector2.zero;
     }
@@ -1225,10 +1250,19 @@ public class StoryGuideManager : MonoBehaviour
         if (promptRoot == null) BuildInteractPrompt(canvas.transform, font);
     }
 
+    private static void EnsureNestedCanvas(GameObject root)
+    {
+        if (root != null && root.GetComponent<Canvas>() == null)
+        {
+            root.AddComponent<Canvas>();
+        }
+    }
+
     private void BuildBottomWhisper(Transform canvasTransform, TMP_FontAsset font)
     {
         whisperRoot = new GameObject("BottomStoryWhisper", typeof(RectTransform), typeof(Image), typeof(CanvasGroup));
         whisperRoot.transform.SetParent(canvasTransform, false);
+        EnsureNestedCanvas(whisperRoot);
         whisperRect = whisperRoot.GetComponent<RectTransform>();
         whisperRect.anchorMin = new Vector2(0.5f, 0f);
         whisperRect.anchorMax = new Vector2(0.5f, 0f);
@@ -1277,6 +1311,7 @@ public class StoryGuideManager : MonoBehaviour
     {
         liveToastRoot = new GameObject("LiveTutorialToast", typeof(RectTransform), typeof(Image), typeof(CanvasGroup));
         liveToastRoot.transform.SetParent(canvasTransform, false);
+        EnsureNestedCanvas(liveToastRoot);
         liveToastRect = liveToastRoot.GetComponent<RectTransform>();
         liveToastRect.anchorMin = new Vector2(0.5f, 0f);
         liveToastRect.anchorMax = new Vector2(0.5f, 0f);
@@ -1635,6 +1670,7 @@ public class StoryGuideManager : MonoBehaviour
     {
         promptRoot = new GameObject("StoryChestInteractPrompt", typeof(RectTransform), typeof(Image), typeof(CanvasGroup));
         promptRoot.transform.SetParent(canvasTransform, false);
+        EnsureNestedCanvas(promptRoot);
         promptRect = promptRoot.GetComponent<RectTransform>();
         promptRect.anchorMin = new Vector2(0.5f, 0f);
         promptRect.anchorMax = new Vector2(0.5f, 0f);

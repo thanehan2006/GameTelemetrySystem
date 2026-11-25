@@ -1,3 +1,4 @@
+using System.Collections;
 using UnityEngine;
 using UnityEngine.UI;
 using TMPro;
@@ -10,6 +11,7 @@ public class PlayerHealth : MonoBehaviour
     [Header("Health Settings")]
     public int maxHealth = 190;
     public int currentHealth;
+    [SerializeField] private float gameOverScreenDelay = 1.6f;
 
     [Header("UI")]
     public TMP_Text healthText;
@@ -34,6 +36,7 @@ public class PlayerHealth : MonoBehaviour
 
     public bool IsAlive => !isDead && currentHealth > 0;
     public bool IsInvulnerable => Time.time < invulnerableUntil;
+    public static bool IsPlayerDead => Instance != null && Instance.isDead;
 
     // Kích hoạt trạng thái bất tử ngắn sau khi parry hoặc qua cửa
     public void SetInvulnerable(float duration)
@@ -214,6 +217,15 @@ public class PlayerHealth : MonoBehaviour
         }
 
         if (GameOverManager.Instance != null)
+        {
+            StartCoroutine(ShowGameOverDelayed());
+        }
+    }
+
+    private IEnumerator ShowGameOverDelayed()
+    {
+        yield return new WaitForSecondsRealtime(Mathf.Max(0f, gameOverScreenDelay));
+        if (!GameOverManager.IsGameOver && GameOverManager.Instance != null)
         {
             GameOverManager.Instance.ShowGameOver();
         }

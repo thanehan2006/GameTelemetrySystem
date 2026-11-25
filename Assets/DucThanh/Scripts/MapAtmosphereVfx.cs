@@ -47,8 +47,12 @@ public class MapAtmosphereVfx : MonoBehaviour
 
     private readonly List<ParticleSystem> culledParticles = new List<ParticleSystem>();
     private readonly List<Vector3> culledParticlePositions = new List<Vector3>();
+    private readonly List<float> culledParticleBaseRates = new List<float>();
     private readonly List<ParticleSystem> weatherParticles = new List<ParticleSystem>(4);
     private readonly List<float> weatherBaseRates = new List<float>(4);
+    private readonly int[] closestLightIndices = new int[6];
+    private readonly float[] closestLightSqrDists = new float[6];
+    private int maxActiveSceneLights = 4;
     private float cullTimer;
     private float auroraColorTimer;
     private float auroraPosTimer;
@@ -89,6 +93,7 @@ public class MapAtmosphereVfx : MonoBehaviour
         bool enableNoise = preset != GraphicsPreset.Low;
         float lightDist = preset == GraphicsPreset.Low ? 22f : (preset == GraphicsPreset.Medium ? 32f : 42f);
         activeLightCullSqrDist = lightDist * lightDist;
+        maxActiveSceneLights = preset == GraphicsPreset.Low ? 2 : (preset == GraphicsPreset.Medium ? 4 : 6);
 
         for (int i = 0; i < weatherParticles.Count; i++)
         {
@@ -99,6 +104,14 @@ public class MapAtmosphereVfx : MonoBehaviour
             var noise = ps.noise;
             noise.enabled = enableNoise;
             if (enableNoise) noise.quality = ParticleSystemNoiseQuality.Low;
+        }
+
+        for (int i = 0; i < culledParticles.Count; i++)
+        {
+            ParticleSystem ps = culledParticles[i];
+            if (ps == null) continue;
+            var emission = ps.emission;
+            emission.rateOverTime = culledParticleBaseRates[i] * rateMult;
         }
     }
 
@@ -135,6 +148,7 @@ public class MapAtmosphereVfx : MonoBehaviour
         for (int i = 0; i < flickeringLights.Length; i++)
         {
             Light l = flickeringLights[i];
+            if (l != null) l.shadows = LightShadows.None;
             baseLightIntensities[i] = l != null ? l.intensity : 1f;
             lightPositions[i] = l != null ? l.transform.position : Vector3.zero;
         }
@@ -144,6 +158,7 @@ public class MapAtmosphereVfx : MonoBehaviour
     {
         culledParticles.Clear();
         culledParticlePositions.Clear();
+        culledParticleBaseRates.Clear();
 
         ParticleSystem[] allPs = GetComponentsInChildren<ParticleSystem>(true);
         for (int i = 0; i < allPs.Length; i++)
@@ -154,6 +169,7 @@ public class MapAtmosphereVfx : MonoBehaviour
 
             culledParticles.Add(ps);
             culledParticlePositions.Add(ps.transform.position);
+            culledParticleBaseRates.Add(ps.emission.rateOverTime.constant);
         }
     }
 
@@ -684,13 +700,59 @@ public class MapAtmosphereVfx : MonoBehaviour
     {
         if (flickeringLights != null && lightPositions != null)
         {
+            int maxLights = Mathf.Clamp(maxActiveSceneLights, 0, closestLightIndices.Length);
+            int pickedCount = 0;
+
             for (int i = 0; i < flickeringLights.Length; i++)
             {
                 Light l = flickeringLights[i];
                 if (l == null) continue;
                 float dx = lightPositions[i].x - viewerPos.x;
                 float dz = lightPositions[i].z - viewerPos.z;
-                bool enableLight = (dx * dx + dz * dz) <= activeLightCullSqrDist;
+                float sqr = dx * dx + dz * dz;
+                if (sqr > activeLightCullSqrDist || maxLights <= 0) continue;
+
+                if (pickedCount < maxLights)
+                {
+                    int insert = pickedCount;
+                    while (insert > 0 && sqr < closestLightSqrDists[insert - 1])
+                    {
+                        closestLightSqrDists[insert] = closestLightSqrDists[insert - 1];
+                        closestLightIndices[insert] = closestLightIndices[insert - 1];
+                        insert--;
+                    }
+                    closestLightSqrDists[insert] = sqr;
+                    closestLightIndices[insert] = i;
+                    pickedCount++;
+                }
+                else if (sqr < closestLightSqrDists[maxLights - 1])
+                {
+                    int insert = maxLights - 1;
+                    while (insert > 0 && sqr < closestLightSqrDists[insert - 1])
+                    {
+                        closestLightSqrDists[insert] = closestLightSqrDists[insert - 1];
+                        closestLightIndices[insert] = closestLightIndices[insert - 1];
+                        insert--;
+                    }
+                    closestLightSqrDists[insert] = sqr;
+                    closestLightIndices[insert] = i;
+                }
+            }
+
+            for (int i = 0; i < flickeringLights.Length; i++)
+            {
+                Light l = flickeringLights[i];
+                if (l == null) continue;
+
+                bool enableLight = false;
+                for (int k = 0; k < pickedCount; k++)
+                {
+                    if (closestLightIndices[k] == i)
+                    {
+                        enableLight = true;
+                        break;
+                    }
+                }
                 if (l.enabled != enableLight) l.enabled = enableLight;
             }
         }

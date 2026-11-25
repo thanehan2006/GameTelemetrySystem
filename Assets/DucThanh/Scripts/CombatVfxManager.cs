@@ -22,10 +22,11 @@ public class CombatVfxManager : MonoBehaviour
     private static readonly int ZWriteId = Shader.PropertyToID("_ZWrite");
     private static readonly int CullId = Shader.PropertyToID("_Cull");
 
-    private static readonly WaitForSeconds WaitSlashNormal = new WaitForSeconds(0.09f);
-    private static readonly WaitForSeconds WaitSlashSpin = new WaitForSeconds(0.12f);
-    private static readonly WaitForSeconds WaitBloodReturn = new WaitForSeconds(0.95f);
+    private static readonly WaitForSecondsRealtime WaitSlashNormal = new WaitForSecondsRealtime(0.09f);
+    private static readonly WaitForSecondsRealtime WaitSlashSpin = new WaitForSecondsRealtime(0.12f);
+    private static readonly WaitForSecondsRealtime WaitBloodReturn = new WaitForSecondsRealtime(0.95f);
     private static readonly ParticleSystem.Burst[] SingleBurstBuffer = new ParticleSystem.Burst[1];
+    private static Mesh sharedCylinderMesh;
 
     private const float FloatingTextBaseFontSize = 2.35f;
     private const int MaxConcurrentFlashLights = 3;
@@ -93,6 +94,7 @@ public class CombatVfxManager : MonoBehaviour
         public Transform coreTransform;
         public MeshRenderer coreRenderer;
         public ParticleSystem sparksPs;
+        public ParticleSystem shockwavePs;
         public MaterialPropertyBlock propBlock;
     }
 
@@ -106,16 +108,27 @@ public class CombatVfxManager : MonoBehaviour
     private int activeElementalHits;
     private int activeSlashArcs;
     private ParticleSystem footstepDustPs;
+    private GameObject lowSpinDustRoot;
+    private ParticleSystem lowSpinDustRingPs;
+    private ParticleSystem lowSpinDustEmbersPs;
+    private GameObject goldCollectRoot;
+    private ParticleSystem goldCollectSparkPs;
+    private ParticleSystem goldCollectRingPs;
     private Transform cachedMainCamTransform;
 
+    private CanvasGroup screenFlashCanvasGroup;
     private Image screenFlashImage;
     private Color screenFlashColor = new Color(0.85f, 0.04f, 0.04f, 0f);
     private float screenFlashAlpha;
     private float screenFlashFadeSpeed = 1.6f;
 
     private bool hitStopActive;
+    private float hitStopStartUnscaledTime;
     private float hitStopEndUnscaledTime;
+    private float nextAllowedHitStopUnscaledTime;
+    private float activeHitStopScale = 1f;
     private bool postProcessingChecked;
+    private bool poolsPrewarmed;
 
     // Lấy hoặc tạo instance CombatVfxManager duy nhất trong scene
     public static CombatVfxManager EnsureInstance()
@@ -145,6 +158,41 @@ public class CombatVfxManager : MonoBehaviour
         instance = this;
         EnsureMaterials();
         EnsurePostProcessing();
+        PrewarmCombatPools();
+    }
+
+    private void PrewarmCombatPools()
+    {
+        if (poolsPrewarmed) return;
+        poolsPrewarmed = true;
+
+        EnsureScreenFlashOverlay();
+
+        for (int i = 0; i < 4; i++)
+        {
+            bloodHitPool.Enqueue(CreatePooledBloodHit());
+        }
+        for (int i = 0; i < 4; i++)
+        {
+            elementalHitPool.Enqueue(CreatePooledElementalHit());
+        }
+        for (int i = 0; i < 3; i++)
+        {
+            slashArcPool.Enqueue(CreatePooledSlashArc());
+        }
+        for (int i = 0; i < 8; i++)
+        {
+            FloatingTextAnim ft = CreatePooledFloatingText();
+            ft.gameObject.SetActive(false);
+            floatingTextPool.Enqueue(ft);
+        }
+        for (int i = 0; i < MaxConcurrentFlashLights; i++)
+        {
+            ReturnFlashLight(CreatePooledFlashLight());
+        }
+
+        EnsureLowSpinDustPool();
+        EnsureGoldCollectPool();
     }
 
     private void Update()
@@ -152,24 +200,36 @@ public class CombatVfxManager : MonoBehaviour
         if (hitStopActive && Time.unscaledTime >= hitStopEndUnscaledTime)
         {
             hitStopActive = false;
+            activeHitStopScale = 1f;
+            nextAllowedHitStopUnscaledTime = Time.unscaledTime + 0.14f;
             if (!GameOverManager.IsGameOver && !WeaponShopManager.IsShopOpen)
             {
                 Time.timeScale = 1f;
             }
         }
 
-        if (screenFlashImage != null && screenFlashAlpha > 0.001f)
+        if (screenFlashCanvasGroup != null && screenFlashAlpha > 0.001f)
         {
             screenFlashAlpha = Mathf.MoveTowards(screenFlashAlpha, 0f, Time.unscaledDeltaTime * screenFlashFadeSpeed);
-            Color c = screenFlashColor;
-            c.a = screenFlashAlpha;
-            screenFlashImage.color = c;
+            screenFlashCanvasGroup.alpha = screenFlashAlpha;
 
             if (screenFlashAlpha <= 0.001f)
             {
-                screenFlashImage.enabled = false;
+                screenFlashAlpha = 0f;
+                screenFlashCanvasGroup.alpha = 0f;
+                screenFlashCanvasGroup.gameObject.SetActive(false);
             }
         }
+    }
+
+    private void OnDisable()
+    {
+        if (hitStopActive && !GameOverManager.IsGameOver && !WeaponShopManager.IsShopOpen)
+        {
+            Time.timeScale = 1f;
+        }
+        hitStopActive = false;
+        activeHitStopScale = 1f;
     }
 
     private void OnDestroy()
@@ -178,6 +238,9 @@ public class CombatVfxManager : MonoBehaviour
         {
             Time.timeScale = 1f;
         }
+        hitStopActive = false;
+        activeHitStopScale = 1f;
+        poolsPrewarmed = false;
 
         DestroyIfNotNull(additiveSoftMat);
         DestroyIfNotNull(additiveSparkMat);
@@ -238,6 +301,18 @@ public class CombatVfxManager : MonoBehaviour
     public static Material GetAdditiveStarMaterial() => EnsureInstance().additiveStarMat;
     public static Material GetAdditiveBeamMaterial() => EnsureInstance().additiveBeamMat;
     public static Mesh GetHorizontalQuadMesh() => EnsureInstance().horizontalQuadMesh;
+
+    public static Mesh GetCylinderMesh()
+    {
+        if (sharedCylinderMesh == null)
+        {
+            GameObject temp = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+            MeshFilter mf = temp.GetComponent<MeshFilter>();
+            if (mf != null) sharedCylinderMesh = mf.sharedMesh;
+            Destroy(temp);
+        }
+        return sharedCylinderMesh;
+    }
 
     // Hiển thị tia máu và chớp sáng khi đòn đánh trúng kẻ địch
     public static void SpawnBloodHit(Vector3 position, Vector3 hitDirection, bool heavy = false)
@@ -451,35 +526,63 @@ public class CombatVfxManager : MonoBehaviour
         if (GameOverManager.IsGameOver || WeaponShopManager.IsShopOpen) return;
         if (duration <= 0.005f) return;
 
-        Time.timeScale = Mathf.Clamp(slowScale, 0.02f, 0.5f);
+        float now = Time.unscaledTime;
+        if (!hitStopActive && now < nextAllowedHitStopUnscaledTime) return;
+
+        float clampedScale = Mathf.Clamp(slowScale, 0.06f, 0.5f);
+        if (!hitStopActive)
+        {
+            hitStopStartUnscaledTime = now;
+            activeHitStopScale = clampedScale;
+            hitStopEndUnscaledTime = now + Mathf.Min(duration, 0.08f);
+        }
+        else
+        {
+            activeHitStopScale = Mathf.Min(activeHitStopScale, clampedScale);
+            hitStopEndUnscaledTime = Mathf.Min(
+                hitStopStartUnscaledTime + 0.085f,
+                Mathf.Max(hitStopEndUnscaledTime, now + duration));
+        }
+
+        Time.timeScale = activeHitStopScale;
         hitStopActive = true;
-        hitStopEndUnscaledTime = Mathf.Max(hitStopEndUnscaledTime, Time.unscaledTime + duration);
     }
 
     private void TriggerScreenFlashInternal(Color color, float intensity, float fadeSpeed)
     {
         EnsureScreenFlashOverlay();
-        if (screenFlashImage == null) return;
+        if (screenFlashImage == null || screenFlashCanvasGroup == null) return;
 
         screenFlashColor = color;
+        screenFlashColor.a = 1f;
         screenFlashFadeSpeed = Mathf.Max(0.8f, fadeSpeed);
         screenFlashAlpha = Mathf.Clamp(Mathf.Max(screenFlashAlpha * 0.5f, intensity), 0f, 0.62f);
-        Color c = screenFlashColor;
-        c.a = screenFlashAlpha;
-        screenFlashImage.color = c;
-        screenFlashImage.enabled = true;
+
+        screenFlashImage.color = screenFlashColor;
+        screenFlashCanvasGroup.alpha = screenFlashAlpha;
+        if (!screenFlashCanvasGroup.gameObject.activeSelf)
+        {
+            screenFlashCanvasGroup.gameObject.SetActive(true);
+        }
     }
 
     private void EnsureScreenFlashOverlay()
     {
         if (screenFlashImage != null) return;
 
-        Canvas canvas = FantasyUiThemeHelper.FindSceneCanvas(gameObject);
-        if (canvas == null) return;
+        GameObject canvasGo = new GameObject("PlayerScreenVignetteCanvas", typeof(Canvas), typeof(CanvasGroup));
+        canvasGo.transform.SetParent(transform, false);
+        Canvas overlayCanvas = canvasGo.GetComponent<Canvas>();
+        overlayCanvas.renderMode = RenderMode.ScreenSpaceOverlay;
+        overlayCanvas.sortingOrder = 5;
+
+        screenFlashCanvasGroup = canvasGo.GetComponent<CanvasGroup>();
+        screenFlashCanvasGroup.alpha = 0f;
+        screenFlashCanvasGroup.blocksRaycasts = false;
+        screenFlashCanvasGroup.interactable = false;
 
         GameObject go = new GameObject("PlayerScreenVignetteFX", typeof(RectTransform), typeof(Image));
-        go.transform.SetParent(canvas.transform, false);
-        go.transform.SetAsFirstSibling();
+        go.transform.SetParent(canvasGo.transform, false);
 
         RectTransform rt = go.GetComponent<RectTransform>();
         rt.anchorMin = Vector2.zero;
@@ -489,9 +592,9 @@ public class CombatVfxManager : MonoBehaviour
 
         screenFlashImage = go.GetComponent<Image>();
         screenFlashImage.sprite = GetOrCreateVignetteSprite();
-        screenFlashImage.color = new Color(0.85f, 0.04f, 0.04f, 0f);
+        screenFlashImage.color = Color.white;
         screenFlashImage.raycastTarget = false;
-        screenFlashImage.enabled = false;
+        canvasGo.SetActive(false);
     }
 
     private void SpawnFloatingTextInternal(Vector3 worldPos, string text, Color color, float scale, float duration)
@@ -514,6 +617,11 @@ public class CombatVfxManager : MonoBehaviour
             }
         }
 
+        return CreatePooledFloatingText();
+    }
+
+    private FloatingTextAnim CreatePooledFloatingText()
+    {
         GameObject go = new GameObject("VFX_FloatingText");
         go.transform.SetParent(transform, false);
 
@@ -544,6 +652,11 @@ public class CombatVfxManager : MonoBehaviour
     private void ReturnFloatingText(FloatingTextAnim anim)
     {
         if (anim == null) return;
+        if (floatingTextPool.Count >= 24)
+        {
+            Destroy(anim.gameObject);
+            return;
+        }
         anim.gameObject.SetActive(false);
         floatingTextPool.Enqueue(anim);
     }
@@ -558,6 +671,7 @@ public class CombatVfxManager : MonoBehaviour
         private float elapsed;
         private float riseSpeed;
         private float lastAppliedAlpha = 1f;
+        private bool scaleSettled;
 
         public void Bind(TextMeshPro textComp)
         {
@@ -574,6 +688,7 @@ public class CombatVfxManager : MonoBehaviour
             elapsed = 0f;
             riseSpeed = 1.15f;
             lastAppliedAlpha = color.a;
+            scaleSettled = false;
 
             if (tmp != null)
             {
@@ -594,12 +709,21 @@ public class CombatVfxManager : MonoBehaviour
 
             transform.position += Vector3.up * (riseSpeed * (1f - t * 0.55f) * dt);
 
-            float pop = t < 0.16f
-                ? Mathf.Lerp(0.55f, 1.12f, t / 0.16f)
-                : t < 0.30f
-                    ? Mathf.Lerp(1.12f, 1.0f, (t - 0.16f) / 0.14f)
-                    : 1.0f;
-            transform.localScale = Vector3.one * (baseScale * pop);
+            if (!scaleSettled)
+            {
+                if (t < 0.30f)
+                {
+                    float pop = t < 0.16f
+                        ? Mathf.Lerp(0.55f, 1.12f, t / 0.16f)
+                        : Mathf.Lerp(1.12f, 1.0f, (t - 0.16f) / 0.14f);
+                    transform.localScale = Vector3.one * (baseScale * pop);
+                }
+                else
+                {
+                    transform.localScale = Vector3.one * baseScale;
+                    scaleSettled = true;
+                }
+            }
 
             Transform camT = owner != null ? owner.GetMainCameraTransform() : null;
             if (camT != null)
@@ -610,7 +734,7 @@ public class CombatVfxManager : MonoBehaviour
             if (tmp != null)
             {
                 float nextAlpha = t < 0.62f ? baseColor.a : baseColor.a * Mathf.Clamp01(1f - (t - 0.62f) / 0.38f);
-                if (Mathf.Abs(nextAlpha - lastAppliedAlpha) > 0.005f || (t >= 1f && lastAppliedAlpha > 0f))
+                if (Mathf.Abs(nextAlpha - lastAppliedAlpha) > 0.045f || (t >= 1f && lastAppliedAlpha > 0f))
                 {
                     lastAppliedAlpha = nextAlpha;
                     Color c = baseColor;
@@ -648,7 +772,7 @@ public class CombatVfxManager : MonoBehaviour
         fx.droplets.Play();
         fx.mist.Play();
 
-        StartCoroutine(FlashPointLight(position, heavy ? new Color(1f, 0.55f, 0.18f) : new Color(1f, 0.78f, 0.42f), heavy ? 5.2f : 3.2f, heavy ? 5.5f : 3.6f, heavy ? 0.18f : 0.12f));
+        TryFlashPointLight(position, heavy ? new Color(1f, 0.55f, 0.18f) : new Color(1f, 0.78f, 0.42f), heavy ? 5.2f : 3.2f, heavy ? 5.5f : 3.6f, heavy ? 0.18f : 0.12f);
         StartCoroutine(ReturnBloodHitAfter(fx));
     }
 
@@ -796,6 +920,8 @@ public class CombatVfxManager : MonoBehaviour
         GameObject go = new GameObject(objName);
         go.transform.SetParent(parent, false);
         ParticleSystem ps = go.AddComponent<ParticleSystem>();
+        var main = ps.main;
+        main.playOnAwake = false;
         ps.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
         var rend = ps.GetComponent<ParticleSystemRenderer>();
         rend.sharedMaterial = mat;
@@ -881,12 +1007,6 @@ public class CombatVfxManager : MonoBehaviour
         if (tier >= 2 || heavy)
         {
             fx.shockRing.Play();
-            StartCoroutine(FlashPointLight(
-                position,
-                Color.Lerp(primaryColor, coreColor, 0.22f),
-                3.0f + tier * 0.85f,
-                heavy ? 5.6f : 3.1f + tier * 0.55f,
-                heavy ? 0.20f : 0.14f));
         }
 
         StartCoroutine(ReturnElementalHitAfter(fx));
@@ -1200,9 +1320,9 @@ public class CombatVfxManager : MonoBehaviour
             TriggerScreenFlash(new Color(1f, 0.78f, 0.28f, 1f), 0.28f, 1.2f);
         }
 
-        StartCoroutine(FlashPointLight(position + Vector3.up * 0.4f,
+        TryFlashPointLight(position + Vector3.up * 0.4f,
             isBoss ? new Color(1f, 0.48f, 0.16f) : new Color(1f, 0.68f, 0.25f),
-            isBoss ? 18f : 8f, isBoss ? 12f : 5.2f, isBoss ? 0.75f : 0.38f));
+            isBoss ? 18f : 8f, isBoss ? 12f : 5.2f, isBoss ? 0.75f : 0.38f);
 
         ThirdPersonCamera cam = ThirdPersonCamera.Instance;
         if (cam != null)
@@ -1391,12 +1511,19 @@ public class CombatVfxManager : MonoBehaviour
             Color shockwaveCol = useCustomPalette
                 ? new Color(customPrimary.r * 2.0f, customPrimary.g * 2.0f, customPrimary.b * 2.0f, 0.88f)
                 : new Color(2.0f, 0.85f, 0.25f, 0.85f);
-            SpawnGroundShockwave(arc.rootTransform, new Vector3(0f, -0.45f, 0f), 5.6f * scaleMult, 0.36f, shockwaveCol);
+            if (arc.shockwavePs != null)
+            {
+                arc.shockwavePs.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
+                var swMain = arc.shockwavePs.main;
+                swMain.startSize = 5.6f * scaleMult;
+                swMain.startColor = shockwaveCol;
+                arc.shockwavePs.Play();
+            }
         }
 
         Color coreSparkColor = useCustomPalette ? coreStart : new Color(2.2f, 2.1f, 1.7f, 1f);
         TriggerPooledSlashSparks(arc.sparksPs, outerStart, coreSparkColor, attackVariant == 2);
-        StartCoroutine(FlashPointLight(centerPos + forwardDir * 0.6f, lightColor, attackVariant == 2 ? 7.5f : 5.2f, attackVariant == 2 ? 5.2f : 3.4f, duration));
+        TryFlashPointLight(centerPos + forwardDir * 0.6f, lightColor, attackVariant == 2 ? 7.5f : 5.2f, attackVariant == 2 ? 5.2f : 3.4f, duration);
 
         float elapsed = 0f;
         while (elapsed < duration)
@@ -1431,6 +1558,10 @@ public class CombatVfxManager : MonoBehaviour
             yield return WaitSlashNormal;
         }
 
+        if (arc.shockwavePs != null)
+        {
+            arc.shockwavePs.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
+        }
         arc.outerRenderer.enabled = true;
         arc.coreRenderer.enabled = true;
         arc.root.SetActive(false);
@@ -1475,6 +1606,28 @@ public class CombatVfxManager : MonoBehaviour
         rend.velocityScale = 0.08f;
         rend.lengthScale = 2.2f;
 
+        ParticleSystem shockwavePs = CreateChildPs(root.transform, "GroundShockwave", additiveRingMat);
+        shockwavePs.transform.localPosition = new Vector3(0f, -0.45f, 0f);
+        var swMain = shockwavePs.main;
+        swMain.duration = 0.46f;
+        swMain.loop = false;
+        swMain.playOnAwake = false;
+        swMain.startLifetime = 0.36f;
+        swMain.startSpeed = 0f;
+        swMain.startSize = 5.6f;
+        var swEmission = shockwavePs.emission;
+        swEmission.rateOverTime = 0f;
+        SetSingleBurst(shockwavePs, 0f, 1);
+        var swSizeOver = shockwavePs.sizeOverLifetime;
+        swSizeOver.enabled = true;
+        swSizeOver.size = new ParticleSystem.MinMaxCurve(1f, AnimationCurve.EaseInOut(0f, 0.1f, 1f, 1f));
+        var swColOver = shockwavePs.colorOverLifetime;
+        swColOver.enabled = true;
+        swColOver.color = CreateFadeOutGradient(Color.white, new Color(1f, 0.55f, 0.2f), 0.85f);
+        var swRend = shockwavePs.GetComponent<ParticleSystemRenderer>();
+        swRend.renderMode = ParticleSystemRenderMode.Mesh;
+        swRend.mesh = horizontalQuadMesh;
+
         root.SetActive(false);
         return new PooledSlashArc
         {
@@ -1485,6 +1638,7 @@ public class CombatVfxManager : MonoBehaviour
             coreTransform = coreQuad.transform,
             coreRenderer = coreMr,
             sparksPs = ps,
+            shockwavePs = shockwavePs,
             propBlock = new MaterialPropertyBlock()
         };
     }
@@ -1534,76 +1688,60 @@ public class CombatVfxManager : MonoBehaviour
 
     private void SpawnLowSpinDust(Vector3 groundPos)
     {
-        GameObject root = new GameObject("VFX_LowSpinDust");
-        root.transform.position = groundPos;
+        EnsureLowSpinDustPool();
+        lowSpinDustRoot.transform.position = groundPos;
+        lowSpinDustRingPs.Emit(22);
+        lowSpinDustEmbersPs.Emit(18);
+    }
 
-        {
-            GameObject go = new GameObject("DustRing");
-            go.transform.SetParent(root.transform, false);
-            ParticleSystem ps = go.AddComponent<ParticleSystem>();
-            ps.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
+    private void EnsureLowSpinDustPool()
+    {
+        if (lowSpinDustRoot != null) return;
 
-            var main = ps.main;
-            main.duration = 0.65f;
-            main.loop = false;
-            main.startLifetime = new ParticleSystem.MinMaxCurve(0.38f, 0.72f);
-            main.startSpeed = new ParticleSystem.MinMaxCurve(2.6f, 6.2f);
-            main.startSize = new ParticleSystem.MinMaxCurve(0.45f, 1.05f);
-            main.gravityModifier = -0.16f;
-            main.simulationSpace = ParticleSystemSimulationSpace.World;
-            main.startColor = new Color(0.76f, 0.66f, 0.50f, 0.58f);
+        lowSpinDustRoot = new GameObject("VFX_LowSpinDust_Pooled");
+        lowSpinDustRoot.transform.SetParent(transform, false);
 
-            var emission = ps.emission;
-            emission.rateOverTime = 0f;
-            SetSingleBurst(ps, 0f, 22);
+        lowSpinDustRingPs = CreateChildPs(lowSpinDustRoot.transform, "DustRing", alphaSoftMat);
+        var ringMain = lowSpinDustRingPs.main;
+        ringMain.duration = 1f;
+        ringMain.loop = true;
+        ringMain.maxParticles = 64;
+        ringMain.startLifetime = new ParticleSystem.MinMaxCurve(0.38f, 0.72f);
+        ringMain.startSpeed = new ParticleSystem.MinMaxCurve(2.6f, 6.2f);
+        ringMain.startSize = new ParticleSystem.MinMaxCurve(0.45f, 1.05f);
+        ringMain.gravityModifier = -0.16f;
+        ringMain.simulationSpace = ParticleSystemSimulationSpace.World;
+        ringMain.startColor = new Color(0.76f, 0.66f, 0.50f, 0.58f);
+        var ringEmission = lowSpinDustRingPs.emission;
+        ringEmission.enabled = false;
+        var ringShape = lowSpinDustRingPs.shape;
+        ringShape.shapeType = ParticleSystemShapeType.Circle;
+        ringShape.radius = 0.9f;
+        ringShape.rotation = new Vector3(90f, 0f, 0f);
+        var ringColOver = lowSpinDustRingPs.colorOverLifetime;
+        ringColOver.enabled = true;
+        ringColOver.color = CreateFadeOutGradient(new Color(0.84f, 0.72f, 0.54f), new Color(0.45f, 0.38f, 0.30f), 0.62f);
 
-            var shape = ps.shape;
-            shape.shapeType = ParticleSystemShapeType.Circle;
-            shape.radius = 0.9f;
-            shape.rotation = new Vector3(90f, 0f, 0f);
-
-            var colOver = ps.colorOverLifetime;
-            colOver.enabled = true;
-            colOver.color = CreateFadeOutGradient(new Color(0.84f, 0.72f, 0.54f), new Color(0.45f, 0.38f, 0.30f), 0.62f);
-
-            ConfigureParticleRenderer(ps, alphaSoftMat);
-            ps.Play();
-        }
-
-        {
-            GameObject go = new GameObject("SpinEmbers");
-            go.transform.SetParent(root.transform, false);
-            ParticleSystem ps = go.AddComponent<ParticleSystem>();
-            ps.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
-
-            var main = ps.main;
-            main.duration = 0.55f;
-            main.loop = false;
-            main.startLifetime = new ParticleSystem.MinMaxCurve(0.3f, 0.65f);
-            main.startSpeed = new ParticleSystem.MinMaxCurve(3.2f, 7.2f);
-            main.startSize = new ParticleSystem.MinMaxCurve(0.08f, 0.18f);
-            main.gravityModifier = -0.35f;
-            main.simulationSpace = ParticleSystemSimulationSpace.World;
-            main.startColor = new Color(2.1f, 1.15f, 0.25f, 1f);
-
-            var emission = ps.emission;
-            emission.rateOverTime = 0f;
-            SetSingleBurst(ps, 0f, 18);
-
-            var shape = ps.shape;
-            shape.shapeType = ParticleSystemShapeType.Circle;
-            shape.radius = 1.0f;
-            shape.rotation = new Vector3(90f, 0f, 0f);
-
-            var colOver = ps.colorOverLifetime;
-            colOver.enabled = true;
-            colOver.color = CreateFadeOutGradient(Color.white, new Color(1f, 0.38f, 0.08f), 1f);
-
-            ConfigureParticleRenderer(ps, additiveStarMat);
-            ps.Play();
-        }
-
-        Destroy(root, 1.3f);
+        lowSpinDustEmbersPs = CreateChildPs(lowSpinDustRoot.transform, "SpinEmbers", additiveStarMat);
+        var embMain = lowSpinDustEmbersPs.main;
+        embMain.duration = 1f;
+        embMain.loop = true;
+        embMain.maxParticles = 48;
+        embMain.startLifetime = new ParticleSystem.MinMaxCurve(0.3f, 0.65f);
+        embMain.startSpeed = new ParticleSystem.MinMaxCurve(3.2f, 7.2f);
+        embMain.startSize = new ParticleSystem.MinMaxCurve(0.08f, 0.18f);
+        embMain.gravityModifier = -0.35f;
+        embMain.simulationSpace = ParticleSystemSimulationSpace.World;
+        embMain.startColor = new Color(2.1f, 1.15f, 0.25f, 1f);
+        var embEmission = lowSpinDustEmbersPs.emission;
+        embEmission.enabled = false;
+        var embShape = lowSpinDustEmbersPs.shape;
+        embShape.shapeType = ParticleSystemShapeType.Circle;
+        embShape.radius = 1.0f;
+        embShape.rotation = new Vector3(90f, 0f, 0f);
+        var embColOver = lowSpinDustEmbersPs.colorOverLifetime;
+        embColOver.enabled = true;
+        embColOver.color = CreateFadeOutGradient(Color.white, new Color(1f, 0.38f, 0.08f), 1f);
     }
 
     private void SpawnBlockSparkInternal(Vector3 position, Vector3 normalDir, bool perfectParry)
@@ -1731,9 +1869,9 @@ public class CombatVfxManager : MonoBehaviour
             }
         }
 
-        StartCoroutine(FlashPointLight(position,
+        TryFlashPointLight(position,
             perfectParry ? new Color(1f, 0.86f, 0.28f) : new Color(0.55f, 0.88f, 1f),
-            perfectParry ? 11f : 6f, perfectParry ? 8.5f : 4.2f, perfectParry ? 0.34f : 0.2f));
+            perfectParry ? 11f : 6f, perfectParry ? 8.5f : 4.2f, perfectParry ? 0.34f : 0.2f);
         Destroy(root, 1.15f);
     }
 
@@ -1885,7 +2023,7 @@ public class CombatVfxManager : MonoBehaviour
         SpawnGroundShockwave(root.transform, new Vector3(0f, 0.12f, 0f), isParryHeal ? 2.8f : 3.6f, 0.55f,
             new Color(0.55f, 2.1f, 1.05f, 0.9f));
 
-        StartCoroutine(FlashPointLight(target.position + Vector3.up * 1.1f, new Color(0.32f, 1f, 0.58f), 6.5f, 4.5f, 0.45f));
+        TryFlashPointLight(target.position + Vector3.up * 1.1f, new Color(0.32f, 1f, 0.58f), 6.5f, 4.5f, 0.45f);
 
         if (!isParryHeal)
         {
@@ -1902,80 +2040,66 @@ public class CombatVfxManager : MonoBehaviour
 
     private void SpawnGoldCollectInternal(Vector3 position, int goldAmount)
     {
-        GameObject root = new GameObject("VFX_GoldCollect");
-        root.transform.position = position;
-
-        {
-            GameObject go = new GameObject("GoldStars");
-            go.transform.SetParent(root.transform, false);
-            ParticleSystem ps = go.AddComponent<ParticleSystem>();
-            ps.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
-
-            var main = ps.main;
-            main.duration = 0.4f;
-            main.loop = false;
-            main.startLifetime = new ParticleSystem.MinMaxCurve(0.25f, 0.52f);
-            main.startSpeed = new ParticleSystem.MinMaxCurve(2.0f, 5.2f);
-            main.startSize = new ParticleSystem.MinMaxCurve(0.12f, 0.26f);
-            main.gravityModifier = 0.25f;
-            main.simulationSpace = ParticleSystemSimulationSpace.World;
-            main.startColor = new ParticleSystem.MinMaxGradient(
-                new Color(2.3f, 1.9f, 0.45f, 1f),
-                new Color(2.4f, 2.25f, 1.35f, 1f));
-
-            var emission = ps.emission;
-            emission.rateOverTime = 0f;
-            SetSingleBurst(ps, 0f, 16);
-
-            var shape = ps.shape;
-            shape.shapeType = ParticleSystemShapeType.Sphere;
-            shape.radius = 0.22f;
-
-            var colOver = ps.colorOverLifetime;
-            colOver.enabled = true;
-            colOver.color = CreateFadeOutGradient(Color.white, new Color(1f, 0.78f, 0.15f), 1f);
-
-            ConfigureParticleRenderer(ps, additiveStarMat);
-            ps.Play();
-        }
-
-        {
-            GameObject go = new GameObject("GoldRing");
-            go.transform.SetParent(root.transform, false);
-            ParticleSystem ps = go.AddComponent<ParticleSystem>();
-            ps.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
-
-            var main = ps.main;
-            main.duration = 0.28f;
-            main.loop = false;
-            main.startLifetime = 0.26f;
-            main.startSpeed = 0f;
-            main.startSize = 1.45f;
-            main.startColor = new Color(2.1f, 1.75f, 0.4f, 0.9f);
-
-            var emission = ps.emission;
-            emission.rateOverTime = 0f;
-            SetSingleBurst(ps, 0f, 1);
-
-            var sizeOver = ps.sizeOverLifetime;
-            sizeOver.enabled = true;
-            sizeOver.size = new ParticleSystem.MinMaxCurve(1f, AnimationCurve.EaseInOut(0f, 0.2f, 1f, 1f));
-
-            var colOver = ps.colorOverLifetime;
-            colOver.enabled = true;
-            colOver.color = CreateFadeOutGradient(Color.white, new Color(1f, 0.75f, 0.18f), 0.9f);
-
-            ConfigureParticleRenderer(ps, additiveRingMat);
-            ps.Play();
-        }
+        EnsureGoldCollectPool();
+        goldCollectRoot.transform.position = position;
+        goldCollectSparkPs.Emit(14);
+        goldCollectRingPs.Emit(1);
 
         if (goldAmount > 0)
         {
             SpawnFloatingTextInternal(position + Vector3.up * 0.65f, $"+{goldAmount} G", new Color(1f, 0.88f, 0.32f), goldAmount >= 40 ? 1.15f : 0.95f, 0.88f);
         }
 
-        StartCoroutine(FlashPointLight(position, new Color(1f, 0.84f, 0.24f), 4.5f, 3.2f, 0.2f));
-        Destroy(root, 0.85f);
+        TryFlashPointLight(position, new Color(1f, 0.84f, 0.24f), 4.5f, 3.2f, 0.2f);
+    }
+
+    private void EnsureGoldCollectPool()
+    {
+        if (goldCollectRoot != null) return;
+
+        goldCollectRoot = new GameObject("VFX_GoldCollect_Pooled");
+        goldCollectRoot.transform.SetParent(transform, false);
+
+        goldCollectSparkPs = CreateChildPs(goldCollectRoot.transform, "GoldStars", additiveStarMat);
+        var sparkMain = goldCollectSparkPs.main;
+        sparkMain.duration = 1f;
+        sparkMain.loop = true;
+        sparkMain.maxParticles = 96;
+        sparkMain.startLifetime = new ParticleSystem.MinMaxCurve(0.25f, 0.52f);
+        sparkMain.startSpeed = new ParticleSystem.MinMaxCurve(2.0f, 5.2f);
+        sparkMain.startSize = new ParticleSystem.MinMaxCurve(0.12f, 0.26f);
+        sparkMain.gravityModifier = 0.25f;
+        sparkMain.simulationSpace = ParticleSystemSimulationSpace.World;
+        sparkMain.startColor = new ParticleSystem.MinMaxGradient(
+            new Color(2.3f, 1.9f, 0.45f, 1f),
+            new Color(2.4f, 2.25f, 1.35f, 1f));
+        var sparkEmission = goldCollectSparkPs.emission;
+        sparkEmission.enabled = false;
+        var sparkShape = goldCollectSparkPs.shape;
+        sparkShape.shapeType = ParticleSystemShapeType.Sphere;
+        sparkShape.radius = 0.22f;
+        var sparkColOver = goldCollectSparkPs.colorOverLifetime;
+        sparkColOver.enabled = true;
+        sparkColOver.color = CreateFadeOutGradient(Color.white, new Color(1f, 0.78f, 0.15f), 1f);
+
+        goldCollectRingPs = CreateChildPs(goldCollectRoot.transform, "GoldRing", additiveRingMat);
+        var ringMain = goldCollectRingPs.main;
+        ringMain.duration = 1f;
+        ringMain.loop = true;
+        ringMain.maxParticles = 12;
+        ringMain.startLifetime = 0.26f;
+        ringMain.startSpeed = 0f;
+        ringMain.startSize = 1.45f;
+        ringMain.simulationSpace = ParticleSystemSimulationSpace.World;
+        ringMain.startColor = new Color(2.1f, 1.75f, 0.4f, 0.9f);
+        var ringEmission = goldCollectRingPs.emission;
+        ringEmission.enabled = false;
+        var ringSizeOver = goldCollectRingPs.sizeOverLifetime;
+        ringSizeOver.enabled = true;
+        ringSizeOver.size = new ParticleSystem.MinMaxCurve(1f, AnimationCurve.EaseInOut(0f, 0.2f, 1f, 1f));
+        var ringColOver = goldCollectRingPs.colorOverLifetime;
+        ringColOver.enabled = true;
+        ringColOver.color = CreateFadeOutGradient(Color.white, new Color(1f, 0.75f, 0.18f), 0.9f);
     }
 
     private static int GetCurrentMapBiomeIndex()
@@ -2054,7 +2178,7 @@ public class CombatVfxManager : MonoBehaviour
         }
 
         Color flashLightCol = isFrost ? new Color(0.35f, 0.90f, 1f) : new Color(1f, 0.32f, 0.14f);
-        StartCoroutine(FlashPointLight(groundPos + Vector3.up * 1.1f, flashLightCol, isBoss ? 14f : 6.5f, isBoss ? 8f : 3.6f, isBoss ? 0.75f : 0.38f));
+        TryFlashPointLight(groundPos + Vector3.up * 1.1f, flashLightCol, isBoss ? 14f : 6.5f, isBoss ? 8f : 3.6f, isBoss ? 0.75f : 0.38f);
         Destroy(root, 1.9f);
     }
 
@@ -2076,7 +2200,7 @@ public class CombatVfxManager : MonoBehaviour
         SpawnGroundShockwave(root.transform, new Vector3(0f, 0.18f, 0f), 11.0f, 0.75f, outerRing);
         SpawnGroundShockwave(root.transform, new Vector3(0f, 0.22f, 0f), 7.6f, 0.55f, innerRing, 0.1f);
         StartCoroutine(SpawnVerticalEnergyPillar(pos, pillarCol, 2.5f, 16f, 0.95f));
-        StartCoroutine(FlashPointLight(pos + Vector3.up * 1.8f, lightCol, 18f, 12f, 0.85f));
+        TryFlashPointLight(pos + Vector3.up * 1.8f, lightCol, 18f, 12f, 0.85f);
         TriggerScreenFlash(screenCol, 0.30f, 1.35f);
 
         if (ThirdPersonCamera.Instance != null)
@@ -2225,7 +2349,7 @@ public class CombatVfxManager : MonoBehaviour
             ps.Play();
         }
 
-        StartCoroutine(FlashPointLight(pos + Vector3.up * 1.4f, new Color(1f, 0.82f, 0.32f), 14f, 8f, 0.85f));
+        TryFlashPointLight(pos + Vector3.up * 1.4f, new Color(1f, 0.82f, 0.32f), 14f, 8f, 0.85f);
         TriggerScreenFlash(new Color(1f, 0.82f, 0.32f, 1f), 0.18f, 1.4f);
         Destroy(root, 2.4f);
     }
@@ -2273,7 +2397,7 @@ public class CombatVfxManager : MonoBehaviour
             ps.Play();
         }
 
-        StartCoroutine(FlashPointLight(playerTransform.position + Vector3.up * 1.2f, rarityColor, 7f, 5.5f, 0.45f));
+        TryFlashPointLight(playerTransform.position + Vector3.up * 1.2f, rarityColor, 7f, 5.5f, 0.45f);
         Destroy(root, 1.5f);
     }
 
@@ -2428,6 +2552,7 @@ public class CombatVfxManager : MonoBehaviour
         ps.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
 
         var main = ps.main;
+        main.playOnAwake = false;
         main.startDelay = delay;
         main.duration = lifetime + delay + 0.1f;
         main.loop = false;
@@ -2457,20 +2582,20 @@ public class CombatVfxManager : MonoBehaviour
 
     private IEnumerator SpawnVerticalEnergyPillar(Vector3 basePos, Color hdrColor, float radius, float height, float duration)
     {
-        GameObject pillar = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
-        pillar.name = "VFX_EnergyPillar";
-        Collider col = pillar.GetComponent<Collider>();
-        if (col != null) Destroy(col);
-
+        GameObject pillar = new GameObject("VFX_EnergyPillar");
         pillar.transform.position = basePos + Vector3.up * (height * 0.5f);
         pillar.transform.localScale = new Vector3(radius, height * 0.5f, radius);
 
-        Renderer r = pillar.GetComponent<Renderer>();
-        Material mat = new Material(additiveBeamMat);
-        SetMaterialColor(mat, hdrColor);
-        r.sharedMaterial = mat;
+        MeshFilter mf = pillar.AddComponent<MeshFilter>();
+        mf.sharedMesh = GetCylinderMesh();
+
+        MeshRenderer r = pillar.AddComponent<MeshRenderer>();
+        r.sharedMaterial = additiveBeamMat;
         r.shadowCastingMode = ShadowCastingMode.Off;
         r.receiveShadows = false;
+
+        MaterialPropertyBlock block = new MaterialPropertyBlock();
+        SetRendererPropertyColor(r, block, hdrColor);
 
         float elapsed = 0f;
         while (elapsed < duration)
@@ -2482,12 +2607,21 @@ public class CombatVfxManager : MonoBehaviour
 
             Color c = hdrColor;
             c.a = hdrColor.a * (1f - t);
-            SetMaterialColor(mat, c);
+            SetRendererPropertyColor(r, block, c);
             yield return null;
         }
 
-        Destroy(mat);
         Destroy(pillar);
+    }
+
+    private Light CreatePooledFlashLight()
+    {
+        GameObject lightGo = new GameObject("VFX_FlashLight");
+        lightGo.transform.SetParent(transform, false);
+        Light lightComp = lightGo.AddComponent<Light>();
+        lightComp.type = LightType.Point;
+        lightComp.shadows = LightShadows.None;
+        return lightComp;
     }
 
     private Light RentFlashLight()
@@ -2503,12 +2637,7 @@ public class CombatVfxManager : MonoBehaviour
             }
         }
 
-        GameObject lightGo = new GameObject("VFX_FlashLight");
-        lightGo.transform.SetParent(transform, false);
-        Light lightComp = lightGo.AddComponent<Light>();
-        lightComp.type = LightType.Point;
-        lightComp.shadows = LightShadows.None;
-        return lightComp;
+        return CreatePooledFlashLight();
     }
 
     private void ReturnFlashLight(Light lightComp)
@@ -2519,9 +2648,14 @@ public class CombatVfxManager : MonoBehaviour
         flashLightPool.Enqueue(lightComp);
     }
 
+    private void TryFlashPointLight(Vector3 pos, Color color, float range, float startIntensity, float duration)
+    {
+        if (GameSettingsManager.CurrentGraphicsPreset == GraphicsPreset.Low || activeFlashLights >= MaxConcurrentFlashLights) return;
+        StartCoroutine(FlashPointLight(pos, color, range, startIntensity, duration));
+    }
+
     private IEnumerator FlashPointLight(Vector3 pos, Color color, float range, float startIntensity, float duration)
     {
-
         if (GameSettingsManager.CurrentGraphicsPreset == GraphicsPreset.Low || activeFlashLights >= MaxConcurrentFlashLights) yield break;
 
         activeFlashLights++;

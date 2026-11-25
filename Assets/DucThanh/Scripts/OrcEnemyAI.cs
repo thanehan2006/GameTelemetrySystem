@@ -8,6 +8,7 @@ using UnityEngine.AI;
 public class OrcEnemyAI : MonoBehaviour
 {
     private static readonly List<OrcEnemyAI> ActiveEnemies = new List<OrcEnemyAI>();
+    public static int ActiveEnemyCount => ActiveEnemies.Count;
     private static readonly RaycastHit[] GroundHitBuffer = new RaycastHit[16];
     private static readonly float[] SteeringAngles = { 35f, -35f, 65f, -65f, 95f, -95f };
     private const float DestinationUpdateInterval = 0.22f;
@@ -106,10 +107,12 @@ public class OrcEnemyAI : MonoBehaviour
     private float cachedCooldown = -1f;
     private int navMeshFailCount;
     private Vector3 cachedSteeringDir;
+    private Vector3 lastSteerTargetDir;
     private float nextSteerProbeTime;
     private float cachedWalkGroundY;
     private bool hasCachedWalkGroundY;
     private float nextGroundProbeTime;
+    private Vector3 lastGroundProbePos;
     private float nextDistantNonAggroTime;
     private float lastSqrDistToPlayer = float.MaxValue;
 
@@ -342,6 +345,7 @@ public class OrcEnemyAI : MonoBehaviour
             }
 
             if (col is CharacterController) continue;
+            if (col.CompareTag("Player")) continue;
             if (col.GetComponentInParent<OrcEnemyAI>() != null) continue;
             if (col.GetComponentInParent<PlayerController>() != null) continue;
 
@@ -442,7 +446,7 @@ public class OrcEnemyAI : MonoBehaviour
         if (player == null || playerHealth == null)
         {
             FindPlayerTarget();
-            if (player == null)
+            if (player == null || playerHealth == null)
             {
                 lastSqrDistToPlayer = float.MaxValue;
                 Idle();
@@ -458,6 +462,7 @@ public class OrcEnemyAI : MonoBehaviour
         }
 
         Vector3 toPlayer = player.position - transform.position;
+        float verticalDiff = Mathf.Abs(toPlayer.y);
         toPlayer.y = 0f;
         float sqrDistance = toPlayer.sqrMagnitude;
         lastSqrDistToPlayer = sqrDistance;
@@ -472,7 +477,7 @@ public class OrcEnemyAI : MonoBehaviour
                 }
                 else
                 {
-                    if (sqrDistance > 36f * 36f && AgentReady)
+                    if (sqrDistance > 36f * 36f)
                     {
                         if (Time.time >= nextDistantNonAggroTime)
                         {
@@ -508,7 +513,7 @@ public class OrcEnemyAI : MonoBehaviour
             animator.speed = 1f;
         }
 
-        if (sqrDistance <= attackRange * attackRange)
+        if (sqrDistance <= attackRange * attackRange && verticalDiff <= 2.4f)
         {
             StopAgent();
             FaceDirection(toPlayer, rotationSpeed);
@@ -527,7 +532,7 @@ public class OrcEnemyAI : MonoBehaviour
         PlayAnimation(runStateHash);
 
         Vector3 flatDir = toPlayer.sqrMagnitude > 0.0001f ? toPlayer / Mathf.Sqrt(sqrDistance) : transform.forward;
-        if (!AgentReady && navMeshFailCount < 3 && Time.time >= nextDestinationTime)
+        if (!AgentReady && Time.time >= nextDestinationTime)
         {
             if (EnsureOnNavMesh(6f))
             {
@@ -535,12 +540,8 @@ public class OrcEnemyAI : MonoBehaviour
             }
             else
             {
-                navMeshFailCount++;
-                nextDestinationTime = Time.time + 2.0f * navMeshFailCount;
-                if (navMeshFailCount >= 3 && navAgent != null && navAgent.enabled)
-                {
-                    navAgent.enabled = false;
-                }
+                if (navMeshFailCount < 3) navMeshFailCount++;
+                nextDestinationTime = Time.time + Mathf.Min(4.0f, 1.5f * Mathf.Max(1, navMeshFailCount));
             }
         }
 
@@ -552,17 +553,20 @@ public class OrcEnemyAI : MonoBehaviour
             if (!Mathf.Approximately(navAgent.stoppingDistance, combatStop)) navAgent.stoppingDistance = combatStop;
 
             Vector3 targetPos = player.position;
-            if (Time.time >= nextDestinationTime || (targetPos - lastDestinationTarget).sqrMagnitude >= DestinationMoveThresholdSqr)
+            if (Time.time >= nextDestinationTime)
             {
                 nextDestinationTime = Time.time + DestinationUpdateInterval;
-                lastDestinationTarget = targetPos;
-
-                Vector3 dest = targetPos;
-                if (NavMesh.SamplePosition(targetPos, out NavMeshHit hit, 6f, NavMesh.AllAreas))
+                if ((targetPos - lastDestinationTarget).sqrMagnitude >= 0.49f || !navAgent.hasPath)
                 {
-                    dest = hit.position;
+                    lastDestinationTarget = targetPos;
+
+                    Vector3 dest = targetPos;
+                    if (NavMesh.SamplePosition(targetPos, out NavMeshHit hit, 6f, NavMesh.AllAreas))
+                    {
+                        dest = hit.position;
+                    }
+                    navAgent.SetDestination(dest);
                 }
-                navAgent.SetDestination(dest);
             }
 
             if ((transform.position - lastProgressPos).sqrMagnitude > 0.015f)
@@ -713,7 +717,8 @@ public class OrcEnemyAI : MonoBehaviour
             if (!Mathf.Approximately(navAgent.speed, moveSpd)) navAgent.speed = moveSpd;
             if (!Mathf.Approximately(navAgent.stoppingDistance, 0.25f)) navAgent.stoppingDistance = 0.25f;
 
-            if (Time.time >= nextDestinationTime || (targetPoint - lastDestinationTarget).sqrMagnitude >= DestinationMoveThresholdSqr)
+            if ((targetPoint - lastDestinationTarget).sqrMagnitude >= DestinationMoveThresholdSqr
+                || (!navAgent.pathPending && !navAgent.hasPath && Time.time >= nextDestinationTime))
             {
                 nextDestinationTime = Time.time + DestinationUpdateInterval;
                 lastDestinationTarget = targetPoint;
@@ -748,20 +753,24 @@ public class OrcEnemyAI : MonoBehaviour
     private void MoveWithObstacleAvoidance(Vector3 flatDirToTarget, float sqrDistance, float speed, float stopDist)
     {
         float now = Time.time;
-        if (cachedSteeringDir.sqrMagnitude < 0.01f
+        if (lastSteerTargetDir.sqrMagnitude < 0.01f
             || now >= nextSteerProbeTime
-            || Vector3.Dot(cachedSteeringDir, flatDirToTarget) < 0.90f)
+            || Vector3.Dot(lastSteerTargetDir, flatDirToTarget) < 0.90f)
         {
             cachedSteeringDir = ChooseClearSteeringDirection(flatDirToTarget);
+            lastSteerTargetDir = flatDirToTarget;
             nextSteerProbeTime = now + 0.12f;
         }
 
         Vector3 moveDir = cachedSteeringDir;
-        FaceDirection(moveDir, rotationSpeed);
-
-        if (sqrDistance > stopDist * stopDist)
+        if (moveDir.sqrMagnitude > 0.001f)
         {
-            transform.position += moveDir * (speed * Time.deltaTime);
+            FaceDirection(moveDir, rotationSpeed);
+
+            if (sqrDistance > stopDist * stopDist)
+            {
+                ApplyFallbackDisplacement(moveDir * (speed * Time.deltaTime));
+            }
         }
 
         if (!hasCachedWalkGroundY || now >= nextGroundProbeTime)
@@ -779,6 +788,42 @@ public class OrcEnemyAI : MonoBehaviour
             Vector3 pos = transform.position;
             pos.y = cachedWalkGroundY;
             transform.position = pos;
+        }
+    }
+
+    // Dịch chuyển an toàn khi tắt NavMeshAgent: chặn đâm xuyên vật cản và giữ quái trên mặt đất hợp lệ
+    private void ApplyFallbackDisplacement(Vector3 displacement)
+    {
+        Vector3 flatStep = new Vector3(displacement.x, 0f, displacement.z);
+        float stepDist = flatStep.magnitude;
+        if (stepDist <= 0.0001f) return;
+
+        Vector3 dir = flatStep / stepDist;
+        Vector3 probeOrigin = transform.position + Vector3.up * 0.9f;
+        if (HasBlockingPropAhead(probeOrigin, dir, Mathf.Max(0.85f, stepDist + 0.5f)))
+        {
+            return;
+        }
+
+        Vector3 targetPos = transform.position + flatStep;
+        float now = Time.time;
+        if (hasCachedWalkGroundY
+            && now < nextGroundProbeTime
+            && (targetPos - lastGroundProbePos).sqrMagnitude < 0.36f)
+        {
+            targetPos.y = cachedWalkGroundY;
+            transform.position = targetPos;
+            return;
+        }
+
+        if (TrySampleWalkableGroundY(targetPos, out float sampledY))
+        {
+            targetPos.y = sampledY;
+            transform.position = targetPos;
+            cachedWalkGroundY = sampledY;
+            hasCachedWalkGroundY = true;
+            lastGroundProbePos = targetPos;
+            nextGroundProbeTime = now + 0.12f;
         }
     }
 
@@ -803,7 +848,7 @@ public class OrcEnemyAI : MonoBehaviour
             }
         }
 
-        return desiredDir;
+        return Vector3.zero;
     }
 
     private bool HasBlockingPropAhead(Vector3 origin, Vector3 dir, float distance)
@@ -813,8 +858,9 @@ public class OrcEnemyAI : MonoBehaviour
         {
             Collider col = GroundHitBuffer[i].collider;
             if (col == null) continue;
-            if (col.transform == transform || col.transform.IsChildOf(transform)) continue;
             if (col is TerrainCollider || col is CharacterController) continue;
+            if (col.transform == transform || col.transform.IsChildOf(transform)) continue;
+            if (col.CompareTag("Player")) continue;
             if (col.GetComponentInParent<OrcEnemyAI>() != null) continue;
             if (col.GetComponentInParent<PlayerController>() != null) continue;
             return true;
@@ -911,7 +957,7 @@ public class OrcEnemyAI : MonoBehaviour
         }
         else
         {
-            transform.position += displacement;
+            ApplyFallbackDisplacement(displacement);
         }
 
         knockbackVelocity = Vector3.MoveTowards(knockbackVelocity, Vector3.zero, knockbackDamping * Time.deltaTime);
@@ -975,7 +1021,7 @@ public class OrcEnemyAI : MonoBehaviour
         }
         else
         {
-            transform.position += step;
+            ApplyFallbackDisplacement(step);
         }
     }
 
@@ -1091,11 +1137,17 @@ public class OrcEnemyAI : MonoBehaviour
     private void OnDisable()
     {
         ActiveEnemies.Remove(this);
+        if (attackRoutine != null)
+        {
+            StopCoroutine(attackRoutine);
+            attackRoutine = null;
+        }
         if (weaponHitbox != null)
         {
             weaponHitbox.DisableHitbox();
         }
         isAttacking = false;
+        hitStunTimer = 0f;
         parryStunTimer = 0f;
         if (animator != null)
         {

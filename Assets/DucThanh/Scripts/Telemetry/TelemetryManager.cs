@@ -3,6 +3,7 @@ using System.Collections;
 using System.Collections.Generic;
 using System.IO;
 using System.Text;
+using System.Threading.Tasks;
 using UnityEngine;
 using UnityEngine.Networking;
 
@@ -51,6 +52,10 @@ public class OfflineEventStore
 public class TelemetryManager : MonoBehaviour
 {
     private const int ImmediateBatchSize = 10;
+    private const int MaxPendingEvents = 200;
+    private const int MaxEventsPerBatch = 25;
+    private const float OfflineSaveIntervalSeconds = 20f;
+    private static readonly object OfflineFileLock = new object();
 
     public static TelemetryManager Instance { get; private set; }
 
@@ -58,6 +63,7 @@ public class TelemetryManager : MonoBehaviour
     [SerializeField] private string baseUrl = ApiConfig.DEFAULT_BASE_URL;
     [SerializeField] private bool sendToBackend = true;
     [SerializeField] private SessionApiClient sessionApiClient;
+    [SerializeField] private bool verboseDebugLogs = false;
 
     [Header("Level & Fallback Settings")]
     [SerializeField] private int currentLevel = 1;
@@ -77,9 +83,12 @@ public class TelemetryManager : MonoBehaviour
     private readonly CreateBatchGameEventsRequest reusableBatchDto = new CreateBatchGameEventsRequest();
     private readonly List<PendingEndSessionRequest> pendingEndSessions = new List<PendingEndSessionRequest>(4);
     private readonly HashSet<long> inFlightEndSessions = new HashSet<long>();
+    private readonly HashSet<CreateGameEventRequest> sentBatchSet = new HashSet<CreateGameEventRequest>();
 
     private string offlineQueuePath;
     private bool hasOfflineFileOnDisk;
+    private bool offlineQueueDirty;
+    private float nextOfflineSaveUnscaledTime;
     private bool isSending;
     private bool isStartingSession;
     private bool isFlushingEndSessions;
@@ -92,6 +101,10 @@ public class TelemetryManager : MonoBehaviour
     private int failedLevel = -1;
     private Coroutine scheduledFlushRoutine;
     private Coroutine retryEndSessionsRoutine;
+    private WaitForSecondsRealtime cachedRetryWait;
+    private float cachedRetryWaitSeconds = -1f;
+    private WaitForSecondsRealtime cachedBatchWait;
+    private float cachedBatchWaitSeconds = -1f;
 
     public string BaseUrl
     {
@@ -253,6 +266,11 @@ public class TelemetryManager : MonoBehaviour
 
         long numericSessionId = long.TryParse(SessionId, out long parsed) && parsed > 0 ? parsed : 0;
 
+        if (pendingEvents.Count >= MaxPendingEvents)
+        {
+            pendingEvents.RemoveAt(0);
+        }
+
         pendingEvents.Add(new CreateGameEventRequest
         {
             sessionId = numericSessionId,
@@ -261,9 +279,13 @@ public class TelemetryManager : MonoBehaviour
             value = eventValue,
             clientEventId = Guid.NewGuid().ToString("N")
         });
+        offlineQueueDirty = true;
 
 #if UNITY_EDITOR
-        Debug.Log($"[TelemetryManager] Tracked: {normalizedType} (value: {eventValue})");
+        if (verboseDebugLogs)
+        {
+            Debug.Log($"[TelemetryManager] Tracked: {normalizedType} (value: {eventValue})");
+        }
 #endif
 
         if (IsCriticalEvent(normalizedType) || pendingEvents.Count >= ImmediateBatchSize)
@@ -295,9 +317,31 @@ public class TelemetryManager : MonoBehaviour
         scheduledFlushRoutine = StartCoroutine(DebouncedFlushCoroutine());
     }
 
+    private WaitForSecondsRealtime GetBatchWait()
+    {
+        float delay = Mathf.Max(0.2f, batchFlushDelay);
+        if (cachedBatchWait == null || !Mathf.Approximately(cachedBatchWaitSeconds, delay))
+        {
+            cachedBatchWaitSeconds = delay;
+            cachedBatchWait = new WaitForSecondsRealtime(delay);
+        }
+        return cachedBatchWait;
+    }
+
+    private WaitForSecondsRealtime GetRetryWait()
+    {
+        float delay = Mathf.Max(1f, retryInterval);
+        if (cachedRetryWait == null || !Mathf.Approximately(cachedRetryWaitSeconds, delay))
+        {
+            cachedRetryWaitSeconds = delay;
+            cachedRetryWait = new WaitForSecondsRealtime(delay);
+        }
+        return cachedRetryWait;
+    }
+
     private IEnumerator DebouncedFlushCoroutine()
     {
-        yield return new WaitForSecondsRealtime(Mathf.Max(0.2f, batchFlushDelay));
+        yield return GetBatchWait();
         scheduledFlushRoutine = null;
         FlushPendingEvents();
     }
@@ -409,7 +453,8 @@ public class TelemetryManager : MonoBehaviour
         if (endingSessionId > 0)
         {
             EnqueueEndSession(endingSessionId, normalizedResult);
-            SaveOfflineQueue();
+            offlineQueueDirty = true;
+            SaveOfflineQueue(synchronous: false);
             FlushPendingEndSessions();
         }
         else
@@ -431,7 +476,7 @@ public class TelemetryManager : MonoBehaviour
         if (!gameObject.activeInHierarchy)
         {
             TrackGameEnded(sessionResult);
-            SaveOfflineQueue();
+            SaveOfflineQueue(synchronous: true);
             onComplete?.Invoke();
             return;
         }
@@ -452,7 +497,7 @@ public class TelemetryManager : MonoBehaviour
             yield return null;
         }
 
-        SaveOfflineQueue();
+        SaveOfflineQueue(synchronous: true);
         onComplete?.Invoke();
     }
 
@@ -496,7 +541,8 @@ public class TelemetryManager : MonoBehaviour
             sessionApiClient = FindFirstObjectByType<SessionApiClient>();
             if (sessionApiClient == null)
             {
-                SaveOfflineQueue();
+                offlineQueueDirty = true;
+                SaveOfflineQueue(synchronous: false);
                 return;
             }
         }
@@ -518,14 +564,16 @@ public class TelemetryManager : MonoBehaviour
                 if (success)
                 {
                     pendingEndSessions.Remove(req);
+                    offlineQueueDirty = true;
                     if (hasOfflineFileOnDisk)
                     {
-                        SaveOfflineQueue();
+                        SaveOfflineQueue(synchronous: false);
                     }
                 }
                 else
                 {
-                    SaveOfflineQueue();
+                    offlineQueueDirty = true;
+                    SaveOfflineQueue(synchronous: false);
                     ScheduleRetryEndSessions();
                 }
 
@@ -554,7 +602,7 @@ public class TelemetryManager : MonoBehaviour
 
     private IEnumerator RetryEndSessionsCoroutine()
     {
-        yield return new WaitForSecondsRealtime(Mathf.Max(1f, retryInterval));
+        yield return GetRetryWait();
         retryEndSessionsRoutine = null;
         if (pendingEndSessions.Count > 0 && !isFlushingEndSessions)
         {
@@ -608,6 +656,7 @@ public class TelemetryManager : MonoBehaviour
                 if (pendingEvents[i].sessionId == targetSessionId)
                 {
                     sendBatch.Add(pendingEvents[i]);
+                    if (sendBatch.Count >= MaxEventsPerBatch) break;
                 }
             }
 
@@ -665,37 +714,58 @@ public class TelemetryManager : MonoBehaviour
                 {
                     removeBatch = true;
 #if UNITY_EDITOR
-                    Debug.Log($"[TelemetryManager] Sent {sendBatch.Count} event(s) successfully.");
+                    if (verboseDebugLogs)
+                    {
+                        Debug.Log($"[TelemetryManager] Sent {sendBatch.Count} event(s) successfully.");
+                    }
 #endif
                 }
                 else if (request.responseCode == 400 || request.responseCode == 404)
                 {
                     removeBatch = true;
+#if UNITY_EDITOR
                     Debug.LogWarning($"[TelemetryManager] Dropped {sendBatch.Count} invalid/orphan event(s) (HTTP {request.responseCode}): {request.downloadHandler?.text}");
+#endif
                 }
                 else
                 {
-                    Debug.LogWarning($"[TelemetryManager] Network/Server error ({request.error}), sẽ thử gửi lại sau {retryInterval}s.");
+#if UNITY_EDITOR
+                    if (verboseDebugLogs)
+                    {
+                        Debug.LogWarning($"[TelemetryManager] Network/Server error ({request.error}), sẽ thử gửi lại sau {retryInterval}s.");
+                    }
+#endif
                 }
             }
 
             if (removeBatch)
             {
+                sentBatchSet.Clear();
                 for (int i = 0; i < sendBatch.Count; i++)
                 {
-                    pendingEvents.Remove(sendBatch[i]);
+                    sentBatchSet.Add(sendBatch[i]);
                 }
+                for (int i = pendingEvents.Count - 1; i >= 0; i--)
+                {
+                    if (sentBatchSet.Contains(pendingEvents[i]))
+                    {
+                        pendingEvents.RemoveAt(i);
+                    }
+                }
+                sentBatchSet.Clear();
+                offlineQueueDirty = true;
 
                 if (hasOfflineFileOnDisk)
                 {
-                    SaveOfflineQueue();
+                    SaveOfflineQueue(synchronous: false);
                 }
             }
             else
             {
-                SaveOfflineQueue();
+                offlineQueueDirty = true;
+                SaveOfflineQueue(synchronous: false);
                 if (isQuitting) break;
-                yield return new WaitForSecondsRealtime(Mathf.Max(1f, retryInterval));
+                yield return GetRetryWait();
             }
         }
 
@@ -755,9 +825,18 @@ public class TelemetryManager : MonoBehaviour
     }
 
     // Lưu tạm hàng đợi sự kiện và phiên chờ đóng xuống thiết bị để tránh mất dữ liệu khi mất kết nối
-    private void SaveOfflineQueue()
+    private void SaveOfflineQueue(bool synchronous = false)
     {
         if (string.IsNullOrEmpty(offlineQueuePath)) return;
+        if (!synchronous && (!offlineQueueDirty || Time.unscaledTime < nextOfflineSaveUnscaledTime))
+        {
+            return;
+        }
+
+        if (!synchronous)
+        {
+            nextOfflineSaveUnscaledTime = Time.unscaledTime + OfflineSaveIntervalSeconds;
+        }
 
         try
         {
@@ -778,19 +857,63 @@ public class TelemetryManager : MonoBehaviour
                 }
             }
 
+            offlineQueueDirty = false;
+            string path = offlineQueuePath;
+
             if (store.pendingEvents.Count == 0 && store.pendingEndSessions.Count == 0)
             {
-                if (hasOfflineFileOnDisk && File.Exists(offlineQueuePath))
-                {
-                    File.Delete(offlineQueuePath);
-                }
+                bool hadFile = hasOfflineFileOnDisk;
                 hasOfflineFileOnDisk = false;
+                if (!hadFile) return;
+
+                if (synchronous)
+                {
+                    lock (OfflineFileLock)
+                    {
+                        if (File.Exists(path)) File.Delete(path);
+                    }
+                }
+                else
+                {
+                    Task.Run(() =>
+                    {
+                        try
+                        {
+                            lock (OfflineFileLock)
+                            {
+                                if (File.Exists(path)) File.Delete(path);
+                            }
+                        }
+                        catch { }
+                    });
+                }
                 return;
             }
 
             string json = JsonUtility.ToJson(store);
-            File.WriteAllText(offlineQueuePath, json, Encoding.UTF8);
             hasOfflineFileOnDisk = true;
+
+            if (synchronous)
+            {
+                lock (OfflineFileLock)
+                {
+                    File.WriteAllText(path, json, Encoding.UTF8);
+                }
+            }
+            else
+            {
+                Task.Run(() =>
+                {
+                    try
+                    {
+                        lock (OfflineFileLock)
+                        {
+                            File.WriteAllText(path, json, Encoding.UTF8);
+                        }
+                    }
+                    catch { }
+                });
+            }
         }
         catch (Exception ex)
         {
@@ -802,7 +925,7 @@ public class TelemetryManager : MonoBehaviour
     {
         if (pauseStatus && (pendingEvents.Count > 0 || pendingEndSessions.Count > 0))
         {
-            SaveOfflineQueue();
+            SaveOfflineQueue(synchronous: true);
         }
     }
 
@@ -812,14 +935,14 @@ public class TelemetryManager : MonoBehaviour
         {
             TrackGameEnded("Quit");
         }
-        SaveOfflineQueue();
+        SaveOfflineQueue(synchronous: true);
     }
 
     private void OnDestroy()
     {
         if (Instance == this)
         {
-            SaveOfflineQueue();
+            SaveOfflineQueue(synchronous: true);
             Instance = null;
         }
     }

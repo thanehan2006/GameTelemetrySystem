@@ -83,6 +83,7 @@ public class StageManager : MonoBehaviour
     public float enemyDamageMultiplier = 1f;
     public Color stage2UnitAuraColor = new Color(0.3f, 0.7f, 1f);
     public Color bossAuraColor = new Color(1f, 0.18f, 0.12f);
+    [SerializeField] private float victoryScreenDelay = 3.2f;
 
     [Header("Cân bằng Số lượng Quái mỗi Đợt")]
     public int stage1Wave1Count = 3;
@@ -685,13 +686,22 @@ public class StageManager : MonoBehaviour
 
         ShowBanner(bossVictoryBanner, new Color(0.2f, 1f, 0.45f), 4.0f);
         CombatVfxManager.SpawnVictoryCelebration(playerTransform != null ? playerTransform.position : stage3Center);
+
+        PlayerHealth ph = PlayerHealth.Instance != null
+            ? PlayerHealth.Instance
+            : (playerTransform != null ? playerTransform.GetComponent<PlayerHealth>() : null);
+        if (ph != null)
+        {
+            ph.SetInvulnerable(victoryScreenDelay + 1f);
+        }
+
         StartCoroutine(ShowVictoryDelayed());
     }
 
     private IEnumerator ShowVictoryDelayed()
     {
-        yield return new WaitForSecondsRealtime(1.5f);
-        if (GameOverManager.Instance != null)
+        yield return new WaitForSecondsRealtime(Mathf.Max(0f, victoryScreenDelay));
+        if (!GameOverManager.IsGameOver && GameOverManager.Instance != null)
         {
             GameOverManager.Instance.ShowVictory();
         }
@@ -1329,6 +1339,10 @@ public class StageManager : MonoBehaviour
             out bossFillImage,
             out bossGhostFillImage,
             out bossFrameImage);
+        if (bossBarRoot != null && bossBarRoot.GetComponent<Canvas>() == null)
+        {
+            bossBarRoot.AddComponent<Canvas>();
+        }
         bossBarRoot.SetActive(false);
 
         Transform existingBanner = canvas.transform.Find("StageBannerHUD");
@@ -1350,6 +1364,10 @@ public class StageManager : MonoBehaviour
                 "", 21, FontStyles.Bold, Color.white, TextAlignmentOptions.Center);
         }
         CombatHudStyler.StyleStageBanner(bannerRoot, bannerText, out bannerCanvasGroup);
+        if (bannerRoot != null && bannerRoot.GetComponent<Canvas>() == null)
+        {
+            bannerRoot.AddComponent<Canvas>();
+        }
         bannerRoot.SetActive(false);
     }
 

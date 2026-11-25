@@ -68,11 +68,13 @@ public class WeaponElementalVfx : MonoBehaviour
         }
     }
 
+    private static bool suppressAwakeConfigure;
+
     public int WeaponTier => Profile.tier;
 
     private void Awake()
     {
-        if (!hasProfile)
+        if (!suppressAwakeConfigure && !hasProfile)
         {
             Configure(configuredTierOverride, configuredShopSlot);
         }
@@ -98,8 +100,8 @@ public class WeaponElementalVfx : MonoBehaviour
     {
         qualityRateMult = GameSettingsManager.CurrentGraphicsPreset switch
         {
-            GraphicsPreset.Low => 0.50f,
-            GraphicsPreset.Medium => 0.78f,
+            GraphicsPreset.Low => 0.35f,
+            GraphicsPreset.Medium => 0.65f,
             _ => 1.0f
         };
 
@@ -121,10 +123,9 @@ public class WeaponElementalVfx : MonoBehaviour
         pulsePhase += dt * (2.6f + profile.tier * 0.45f);
 
         bool surgeChanged = Mathf.Abs(surgeWeight - lastAppliedSurgeWeight) > 0.005f;
-        bool majorSurgeDelta = Mathf.Abs(surgeWeight - lastAppliedSurgeWeight) > 0.01f;
 
         pulseUpdateTimer -= dt;
-        if (pulseUpdateTimer <= 0f || majorSurgeDelta)
+        if (pulseUpdateTimer <= 0f)
         {
             pulseUpdateTimer = 0.05f;
 
@@ -151,21 +152,21 @@ public class WeaponElementalVfx : MonoBehaviour
                 weaponPointLight.color = Color.Lerp(profile.primaryColor, profile.coreColor, 0.22f * surgeWeight);
                 weaponPointLight.intensity = profile.lightIntensity * (0.86f + 0.24f * pulse01 + 0.95f * surgeWeight);
             }
-        }
 
-        if (surgeChanged)
-        {
-            lastAppliedSurgeWeight = surgeWeight;
-            float surgeBoostMotes = (1f + 0.95f * surgeWeight) * qualityRateMult;
-            float surgeBoostSparks = (1f + 1.25f * surgeWeight) * qualityRateMult;
-            float surgeBoostCore = (1f + 1.10f * surgeWeight) * qualityRateMult;
-            float surgeBoostRunes = (1f + 0.85f * surgeWeight) * qualityRateMult;
-            float surgeBoostCrown = (1f + 1.15f * surgeWeight) * qualityRateMult;
-            UpdateEmissionRate(bladeMotesPs, baseMotesRate, surgeBoostMotes);
-            UpdateEmissionRate(bladeSparksPs, baseSparksRate, surgeBoostSparks);
-            UpdateEmissionRate(bladeCoreFlarePs, baseCoreFlareRate, surgeBoostCore);
-            UpdateEmissionRate(orbitingRunesPs, baseRunesRate, surgeBoostRunes);
-            UpdateEmissionRate(mythicCrownPs, baseCrownRate, surgeBoostCrown);
+            if (surgeChanged)
+            {
+                lastAppliedSurgeWeight = surgeWeight;
+                float surgeBoostMotes = (1f + 0.95f * surgeWeight) * qualityRateMult;
+                float surgeBoostSparks = (1f + 1.25f * surgeWeight) * qualityRateMult;
+                float surgeBoostCore = (1f + 1.10f * surgeWeight) * qualityRateMult;
+                float surgeBoostRunes = (1f + 0.85f * surgeWeight) * qualityRateMult;
+                float surgeBoostCrown = (1f + 1.15f * surgeWeight) * qualityRateMult;
+                UpdateEmissionRate(bladeMotesPs, baseMotesRate, surgeBoostMotes);
+                UpdateEmissionRate(bladeSparksPs, baseSparksRate, surgeBoostSparks);
+                UpdateEmissionRate(bladeCoreFlarePs, baseCoreFlareRate, surgeBoostCore);
+                UpdateEmissionRate(orbitingRunesPs, baseRunesRate, surgeBoostRunes);
+                UpdateEmissionRate(mythicCrownPs, baseCrownRate, surgeBoostCrown);
+            }
         }
     }
 
@@ -182,7 +183,15 @@ public class WeaponElementalVfx : MonoBehaviour
         WeaponElementalVfx vfx = weaponRoot.GetComponent<WeaponElementalVfx>();
         if (vfx == null)
         {
-            vfx = weaponRoot.AddComponent<WeaponElementalVfx>();
+            suppressAwakeConfigure = true;
+            try
+            {
+                vfx = weaponRoot.AddComponent<WeaponElementalVfx>();
+            }
+            finally
+            {
+                suppressAwakeConfigure = false;
+            }
         }
 
         vfx.Configure(tierOverride, shopSlotIndex);

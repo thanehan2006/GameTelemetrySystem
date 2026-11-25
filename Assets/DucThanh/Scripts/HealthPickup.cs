@@ -151,6 +151,13 @@ public class HealthPickup : MonoBehaviour
                 transform.localScale = Vector3.one * 2.1f;
             }
         }
+
+        foreach (Renderer r in GetComponentsInChildren<Renderer>(true))
+        {
+            if (r is ParticleSystemRenderer) continue;
+            r.shadowCastingMode = ShadowCastingMode.Off;
+            r.receiveShadows = false;
+        }
     }
 
     private void EnsureAuraVfx()
@@ -169,6 +176,7 @@ public class HealthPickup : MonoBehaviour
         glowLight.color = new Color(1f, 0.34f, 0.56f);
         glowLight.range = 5.2f;
         glowLight.intensity = baseLightIntensity;
+        glowLight.enabled = GameSettingsManager.CurrentGraphicsPreset != GraphicsPreset.Low;
 
         if (transform.Find("PotionGroundRing") == null)
         {
@@ -192,22 +200,18 @@ public class HealthPickup : MonoBehaviour
         if (transform.Find("PotionLightBeam") == null)
         {
             float invScale = transform.localScale.x > 0.01f ? 1f / transform.localScale.x : 1f;
-            GameObject beam = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
-            beam.name = "PotionLightBeam";
+            GameObject beam = new GameObject("PotionLightBeam");
             beam.transform.SetParent(transform, false);
-            Collider c = beam.GetComponent<Collider>();
-            if (c != null) Destroy(c);
+            MeshFilter bmf = beam.AddComponent<MeshFilter>();
+            bmf.sharedMesh = CombatVfxManager.GetCylinderMesh();
 
             beam.transform.localPosition = new Vector3(0f, 1.15f * invScale, 0f);
             beam.transform.localScale = new Vector3(0.24f * invScale, 1.15f * invScale, 0.24f * invScale);
 
-            Renderer br = beam.GetComponent<Renderer>();
-            if (br != null)
-            {
-                br.sharedMaterial = GetSharedBeamMat();
-                br.shadowCastingMode = ShadowCastingMode.Off;
-                br.receiveShadows = false;
-            }
+            MeshRenderer br = beam.AddComponent<MeshRenderer>();
+            br.sharedMaterial = GetSharedBeamMat();
+            br.shadowCastingMode = ShadowCastingMode.Off;
+            br.receiveShadows = false;
         }
 
         if (transform.Find("PotionSparkles") == null)
@@ -323,12 +327,12 @@ public class HealthPickup : MonoBehaviour
         float wave = Mathf.Sin(now * bobFrequency + phaseOffset);
         transform.position = new Vector3(basePosition.x, basePosition.y + 0.08f + wave * bobAmplitude, basePosition.z);
 
-        if (glowLight != null)
+        if (glowLight != null && glowLight.enabled)
         {
             glowLight.intensity = baseLightIntensity * (0.84f + 0.24f * Mathf.Sin(now * 3.8f + phaseOffset));
         }
 
-        if (!playerHealth.IsAlive) return;
+        if (!playerHealth.IsAlive || playerHealth.currentHealth >= playerHealth.maxHealth) return;
 
         if (verticalDiff <= 2.5f && horizSqrDist <= pickupRadius * pickupRadius)
         {

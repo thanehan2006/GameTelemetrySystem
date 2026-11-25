@@ -155,7 +155,7 @@ public class GameAudioManager : MonoBehaviour
 
     private void Update()
     {
-        if (!IsTypingInTextField() && Input.GetKeyDown(KeyCode.M))
+        if (Input.GetKeyDown(KeyCode.M) && !IsTypingInTextField())
         {
             ToggleMute();
         }
@@ -204,8 +204,7 @@ public class GameAudioManager : MonoBehaviour
         GameAudioManager mgr = EnsureInstance();
         mgr.isMuted = muted;
         PlayerPrefs.SetInt(MasterMutedPrefKey, muted ? 1 : 0);
-        mgr.hasPendingPrefsSave = false;
-        PlayerPrefs.Save();
+        mgr.hasPendingPrefsSave = true;
         mgr.ApplyAudioListenerState();
         OnAudioSettingsChanged?.Invoke();
     }
@@ -225,8 +224,7 @@ public class GameAudioManager : MonoBehaviour
         GameAudioManager mgr = EnsureInstance();
         mgr.isBgmMuted = muted;
         PlayerPrefs.SetInt(BgmMutedPrefKey, muted ? 1 : 0);
-        mgr.hasPendingPrefsSave = false;
-        PlayerPrefs.Save();
+        mgr.hasPendingPrefsSave = true;
         mgr.ApplyBgmVolumeImmediate();
         OnAudioSettingsChanged?.Invoke();
     }
@@ -246,8 +244,7 @@ public class GameAudioManager : MonoBehaviour
         GameAudioManager mgr = EnsureInstance();
         mgr.isSfxMuted = muted;
         PlayerPrefs.SetInt(SfxMutedPrefKey, muted ? 1 : 0);
-        mgr.hasPendingPrefsSave = false;
-        PlayerPrefs.Save();
+        mgr.hasPendingPrefsSave = true;
         OnAudioSettingsChanged?.Invoke();
     }
 
@@ -359,7 +356,9 @@ public class GameAudioManager : MonoBehaviour
     public void ToggleMute()
     {
         SetMasterMuted(!isMuted);
+#if UNITY_EDITOR
         Debug.Log($"[GameAudioManager] Âm thanh: {(isMuted ? "TẮT (Muted - nhấn M để bật lại)" : "BẬT")}");
+#endif
     }
 
     // Chọn track nhạc nền Boss tương ứng theo chỉ số bản đồ

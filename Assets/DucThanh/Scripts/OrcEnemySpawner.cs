@@ -13,6 +13,7 @@ public class OrcEnemySpawner : MonoBehaviour
     public float spawnInterval = 4f;
     public float spawnRadius = 12f;
     public float minimumDistance = 6f;
+    public int maxAliveEnemies = 12;
 
     [Header("Level Scaling")]
     public float spawnIntervalStepPerLevel = 0.5f;
@@ -57,9 +58,20 @@ public class OrcEnemySpawner : MonoBehaviour
 
         if (enemyPrefabs == null || enemyPrefabs.Length == 0) return;
 
+        if (ScoreManager.Instance != null)
+        {
+            currentLevel = ScoreManager.Instance.currentLevel;
+        }
+
+        if (OrcEnemyAI.ActiveEnemyCount >= maxAliveEnemies) return;
+
+        float effectiveInterval = Mathf.Max(
+            minSpawnInterval,
+            spawnInterval - Mathf.Max(0, currentLevel - 1) * spawnIntervalStepPerLevel);
+
         timer += Time.deltaTime;
 
-        if (timer >= spawnInterval)
+        if (timer >= effectiveInterval)
         {
             timer = 0f;
             SpawnEnemy();

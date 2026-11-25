@@ -41,6 +41,8 @@ public class PlayerAttack : MonoBehaviour
     [Header("Hitbox Settings")]
     public float hitboxStartDelay = 0.08f;
     [SerializeField] private LayerMask enemyLayers = ~0;
+    [Tooltip("NormalizedTime thresholds in Atk1 (3-hit combo) where hit tracking resets for swings 2 and 3")]
+    public float[] atk1SwingResetTimes = { 0.34f, 0.56f };
 
     [Header("References")]
     public Transform visualModel;
@@ -81,6 +83,9 @@ public class PlayerAttack : MonoBehaviour
 
     private float nextAttackTime;
     private float attackStartTime;
+    private int currentSwingPhase;
+    private float swingStartTime;
+    private float swingLungeStartTime = -999f;
     private bool queuedNextAttack;
     private bool wasCursorLocked;
     private readonly HashSet<EnemyHealth> hitEnemiesInSwing = new HashSet<EnemyHealth>();
@@ -120,7 +125,7 @@ public class PlayerAttack : MonoBehaviour
     // Xử lý input chuột trái đánh, hủy đòn để đỡ đòn và điều khiển khóa mục tiêu
     void Update()
     {
-        if (GameOverManager.IsGameOver || WeaponShopManager.IsShopOpen)
+        if (GameOverManager.IsGameOver || WeaponShopManager.IsShopOpen || PlayerHealth.IsPlayerDead)
         {
             StopAttackState();
             wasCursorLocked = false;
@@ -150,13 +155,14 @@ public class PlayerAttack : MonoBehaviour
         if (IsAttacking)
         {
             float elapsed = Time.time - attackStartTime;
+            float lungeElapsed = Time.time - swingLungeStartTime;
             animator.speed = attackAnimSpeed;
 
-            UpdateSmoothAttackRotation(elapsed);
+            UpdateSmoothAttackRotation(Time.time - swingStartTime);
 
-            if (elapsed <= lungeDuration)
+            if (lungeElapsed >= 0f && lungeElapsed <= lungeDuration)
             {
-                UpdateCombatLunge(elapsed);
+                UpdateCombatLunge(lungeElapsed);
             }
             else if (playerController != null)
             {
@@ -193,13 +199,17 @@ public class PlayerAttack : MonoBehaviour
     {
         UpdateLockOnVisualIndicator();
 
-        if (!IsAttacking || GameOverManager.IsGameOver || WeaponShopManager.IsShopOpen) return;
+        if (!IsAttacking || GameOverManager.IsGameOver || WeaponShopManager.IsShopOpen || PlayerHealth.IsPlayerDead) return;
 
         float elapsed = Time.time - attackStartTime;
         if (elapsed < hitboxStartDelay) return;
 
         AnimatorStateInfo state = animator.GetCurrentAnimatorStateInfo(0);
-        if (state.shortNameHash == currentAttackStateHash && !animator.IsInTransition(0) && state.normalizedTime > 0.90f) return;
+        if (state.shortNameHash == currentAttackStateHash && !animator.IsInTransition(0))
+        {
+            if (state.normalizedTime > 0.90f) return;
+            UpdateMultiHitSwingPhase(state.normalizedTime);
+        }
 
         CheckWeaponHit();
     }
@@ -232,6 +242,9 @@ public class PlayerAttack : MonoBehaviour
         IsAttacking = true;
         queuedNextAttack = false;
         attackStartTime = Time.time;
+        currentSwingPhase = 0;
+        swingStartTime = attackStartTime;
+        swingLungeStartTime = attackStartTime;
         hitEnemiesInSwing.Clear();
 
         ResolveAttackDirectionAndTarget();
@@ -243,6 +256,12 @@ public class PlayerAttack : MonoBehaviour
         animator.CrossFadeInFixedTime(currentAttackStateHash, 0.06f, 0, 0f);
         UpdateWeaponTrailTheme(currentAttackVariant);
         SetWeaponTrailEmitting(true);
+        TriggerSwingPresentation(currentAttackVariant);
+    }
+
+    // Phát hiệu ứng vệt chém và âm thanh vung vũ khí cho từng nhịp chém
+    private void TriggerSwingPresentation(int slashVariant)
+    {
         if (activeWeaponVfx != null)
         {
             activeWeaponVfx.SetAttackSurge(true);
@@ -250,7 +269,7 @@ public class PlayerAttack : MonoBehaviour
             CombatVfxManager.SpawnSlashArc(
                 transform.position,
                 attackFacingDir,
-                currentAttackVariant,
+                slashVariant,
                 p.primaryColor,
                 p.coreColor,
                 p.secondaryColor,
@@ -258,9 +277,42 @@ public class PlayerAttack : MonoBehaviour
         }
         else
         {
-            CombatVfxManager.SpawnSlashArc(transform.position, attackFacingDir, currentAttackVariant);
+            CombatVfxManager.SpawnSlashArc(transform.position, attackFacingDir, slashVariant);
         }
         GameAudioManager.PlaySwordSwing();
+    }
+
+    // Đặt lại danh sách quái đã trúng khi Atk1 chuyển sang các nhịp chém thứ 2 và thứ 3
+    private void UpdateMultiHitSwingPhase(float normalizedTime)
+    {
+        if (currentAttackVariant != 0 || atk1SwingResetTimes == null || atk1SwingResetTimes.Length == 0)
+        {
+            return;
+        }
+
+        int targetPhase = 0;
+        for (int i = 0; i < atk1SwingResetTimes.Length; i++)
+        {
+            if (normalizedTime >= atk1SwingResetTimes[i])
+            {
+                targetPhase++;
+            }
+        }
+
+        if (targetPhase > currentSwingPhase)
+        {
+            currentSwingPhase = targetPhase;
+            hitEnemiesInSwing.Clear();
+            swingStartTime = Time.time;
+            swingLungeStartTime = Time.time;
+
+            if (currentTargetEnemy == null || currentTargetHealth == null || currentTargetHealth.IsDead)
+            {
+                ResolveAttackDirectionAndTarget();
+            }
+
+            TriggerSwingPresentation(currentSwingPhase % 2);
+        }
     }
 
     private void CacheAvailableAttackStates()
@@ -387,7 +439,7 @@ public class PlayerAttack : MonoBehaviour
         for (int i = 0; i < count; i++)
         {
             Collider c = hitBuffer[i];
-            if (c == null || c.transform == transform || c.transform.IsChildOf(transform)) continue;
+            if (c == null || c is TerrainCollider || c.transform == transform || c.transform.IsChildOf(transform)) continue;
 
             EnemyHealth eh = c.GetComponentInParent<EnemyHealth>();
             if (eh == null || eh.IsDead) continue;
@@ -500,6 +552,8 @@ public class PlayerAttack : MonoBehaviour
     {
         IsAttacking = false;
         queuedNextAttack = false;
+        currentSwingPhase = 0;
+        swingLungeStartTime = -999f;
         hitEnemiesInSwing.Clear();
         SetWeaponTrailEmitting(false);
         if (activeWeaponVfx != null) activeWeaponVfx.SetAttackSurge(false);
@@ -548,7 +602,7 @@ public class PlayerAttack : MonoBehaviour
         for (int i = 0; i < count; i++)
         {
             Collider col = hits[i];
-            if (col == null || col.transform == transform || col.transform.IsChildOf(transform)) continue;
+            if (col == null || col is TerrainCollider || col.transform == transform || col.transform.IsChildOf(transform)) continue;
 
             EnemyHealth enemy = col.GetComponentInParent<EnemyHealth>();
             if (enemy != null && !enemy.IsDead && hitEnemiesInSwing.Add(enemy))
@@ -556,6 +610,7 @@ public class PlayerAttack : MonoBehaviour
                 if (playerController != null)
                 {
                     playerController.StopCombatLunge();
+                    swingLungeStartTime = -999f;
                 }
 
                 OrcEnemyAI orcAI = enemy.CachedEnemyAI;
@@ -907,7 +962,7 @@ public class PlayerAttack : MonoBehaviour
         for (int i = 0; i < count; i++)
         {
             Collider c = hitBuffer[i];
-            if (c == null || c.transform == transform || c.transform.IsChildOf(transform)) continue;
+            if (c == null || c is TerrainCollider || c.transform == transform || c.transform.IsChildOf(transform)) continue;
 
             EnemyHealth eh = c.GetComponentInParent<EnemyHealth>();
             if (eh == null || eh.IsDead) continue;

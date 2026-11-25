@@ -39,6 +39,12 @@ public class PlayerController : MonoBehaviour
     [SerializeField] private float maxVisualGroundDrop = 0.35f;
     [SerializeField] private float visualGroundSmoothSpeed = 22f;
 
+    [Header("Map Boundary & Fall Protection")]
+    public bool enableMapBoundary = true;
+    public float mapEdgeMargin = 2.5f;
+    public float fallRecoveryDepth = 15f;
+    public float boundaryWarningCooldown = 2.5f;
+
     public Vector3 CurrentInputDirection { get; private set; }
     public bool HasMovementInput { get; private set; }
     public bool IsBlocking { get; private set; }
@@ -70,6 +76,17 @@ public class PlayerController : MonoBehaviour
     private bool cachedHasGround;
     private float nextGroundSampleTime;
     private Terrain cachedTerrain;
+    private bool hasMapBounds;
+    private float mapMinX;
+    private float mapMaxX;
+    private float mapMinZ;
+    private float mapMaxZ;
+    private float mapMinY;
+    private float nextBoundsRefreshTime;
+    private float nextBoundaryWarningTime;
+    private Vector3 lastSafePosition;
+    private bool hasSafePosition;
+    private int lastBlockVisualParryState = -1;
 
     // Khởi tạo CharacterController và hiệu chỉnh kích thước collider
     void Awake()
@@ -97,7 +114,10 @@ public class PlayerController : MonoBehaviour
     // Nạp model nhân vật đã chọn, cập nhật tốc độ và đồng bộ vị trí trên mặt đất
     void Start()
     {
+        RefreshMapBounds();
         SnapToGround();
+        lastSafePosition = transform.position;
+        hasSafePosition = true;
 
         if (playerCamera == null && Camera.main != null)
         {
@@ -133,7 +153,7 @@ public class PlayerController : MonoBehaviour
     // Xử lý nhận phím di chuyển, trạng thái đỡ đòn và bụi bước chân
     void Update()
     {
-        if (GameOverManager.IsGameOver || WeaponShopManager.IsShopOpen)
+        if (GameOverManager.IsGameOver || WeaponShopManager.IsShopOpen || PlayerHealth.IsPlayerDead)
         {
             CurrentInputDirection = Vector3.zero;
             HasMovementInput = false;
@@ -222,6 +242,7 @@ public class PlayerController : MonoBehaviour
             0.15f);
 
         Vector3 localPos = visualModel.localPosition;
+        bool wasInitialized = hasInitializedVisualGround;
         float newY;
         if (!hasInitializedVisualGround)
         {
@@ -234,7 +255,10 @@ public class PlayerController : MonoBehaviour
             newY = Mathf.Lerp(localPos.y, targetLocalY, k);
         }
 
-        visualModel.localPosition = new Vector3(0f, newY, 0f);
+        if (!wasInitialized || Mathf.Abs(newY - localPos.y) > 0.0005f)
+        {
+            visualModel.localPosition = new Vector3(0f, newY, 0f);
+        }
     }
 
     // Tự động cân chỉnh tâm và chiều cao của CharacterController
@@ -372,6 +396,7 @@ public class PlayerController : MonoBehaviour
 
         float dt = Time.deltaTime;
         Vector3 horizontalVelocity = moveDir * moveSpeed + lungeVelocity + knockbackVelocity;
+        bool hitBoundary = ClampHorizontalVelocityToMapBounds(ref horizontalVelocity, dt);
         float horizontalSpeed = horizontalVelocity.magnitude;
 
         if (controller.isGrounded)
@@ -387,6 +412,7 @@ public class PlayerController : MonoBehaviour
         finalDisplacement.y = verticalVelocity * dt;
 
         controller.Move(finalDisplacement);
+        EnforceMapBoundsAndFallRecovery(hitBoundary);
 
         if (controller.isGrounded && !isAttacking && !IsBlocking && HasMovementInput)
         {
@@ -395,10 +421,9 @@ public class PlayerController : MonoBehaviour
             {
                 footstepTimer = 0.36f;
                 GameAudioManager.PlayFootstep();
-                bool hasDustGround = TrySampleGroundHeight(transform.position, out float dustGroundY, 1.2f, 4f);
                 CombatVfxManager.SpawnFootstepDust(new Vector3(
                     transform.position.x,
-                    hasDustGround ? dustGroundY : transform.position.y,
+                    cachedHasGround ? cachedGroundY : transform.position.y,
                     transform.position.z));
             }
         }
@@ -492,7 +517,7 @@ public class PlayerController : MonoBehaviour
 
     private void OnControllerColliderHit(ControllerColliderHit hit)
     {
-        if (hit.collider == null) return;
+        if (hit.collider == null || hit.collider is TerrainCollider) return;
 
         OrcEnemyAI enemy = hit.collider.GetComponentInParent<OrcEnemyAI>();
         if (enemy != null)
@@ -530,9 +555,7 @@ public class PlayerController : MonoBehaviour
         {
             RaycastHit hit = groundHitBuffer[i];
             Collider col = hit.collider;
-            if (col == null || col.transform.IsChildOf(transform)) continue;
-            if (col.GetComponentInParent<OrcEnemyAI>() != null || col.GetComponentInParent<EnemyHealth>() != null) continue;
-
+            if (col == null) continue;
             if (col is TerrainCollider)
             {
                 if (!foundTerrain || hit.point.y > terrainY)
@@ -542,6 +565,8 @@ public class PlayerController : MonoBehaviour
                 }
                 continue;
             }
+            if (col.transform.IsChildOf(transform)) continue;
+            if (col.GetComponentInParent<OrcEnemyAI>() != null || col.GetComponentInParent<EnemyHealth>() != null) continue;
 
             if (hit.normal.y >= 0.55f && hit.point.y <= rayTopY - 0.1f)
             {
@@ -566,10 +591,16 @@ public class PlayerController : MonoBehaviour
         }
 
         if (cachedTerrain == null) cachedTerrain = Terrain.activeTerrain;
-        if (cachedTerrain != null)
+        if (cachedTerrain != null && cachedTerrain.terrainData != null)
         {
-            groundY = cachedTerrain.SampleHeight(worldPos) + cachedTerrain.transform.position.y;
-            return true;
+            Vector3 tPos = cachedTerrain.transform.position;
+            Vector3 tSize = cachedTerrain.terrainData.size;
+            if (worldPos.x >= tPos.x && worldPos.x <= tPos.x + tSize.x
+                && worldPos.z >= tPos.z && worldPos.z <= tPos.z + tSize.z)
+            {
+                groundY = cachedTerrain.SampleHeight(worldPos) + tPos.y;
+                return true;
+            }
         }
 
         groundY = worldPos.y;
@@ -581,10 +612,208 @@ public class PlayerController : MonoBehaviour
     {
         if (TrySampleGroundHeight(transform.position, out float groundY, 5f, 30f))
         {
+            TeleportControllerPosition(new Vector3(transform.position.x, groundY, transform.position.z));
+        }
+    }
+
+    // Tính vùng giới hạn bản đồ từ toàn bộ Terrain đang hoạt động và thu hẹp theo lề an toàn
+    private void RefreshMapBounds()
+    {
+        if (!enableMapBoundary)
+        {
+            hasMapBounds = false;
+            return;
+        }
+
+        bool found = false;
+        float minX = float.MaxValue;
+        float maxX = float.MinValue;
+        float minZ = float.MaxValue;
+        float maxZ = float.MinValue;
+        float minY = float.MaxValue;
+
+        Terrain[] terrains = Terrain.activeTerrains;
+        if (terrains != null)
+        {
+            for (int i = 0; i < terrains.Length; i++)
+            {
+                AccumulateTerrainBounds(terrains[i], ref found, ref minX, ref maxX, ref minZ, ref maxZ, ref minY);
+            }
+        }
+
+        if (!found)
+        {
+            AccumulateTerrainBounds(Terrain.activeTerrain, ref found, ref minX, ref maxX, ref minZ, ref maxZ, ref minY);
+        }
+
+        if (!found)
+        {
+            hasMapBounds = false;
+            return;
+        }
+
+        float margin = Mathf.Max(0f, mapEdgeMargin);
+        float halfSpanX = (maxX - minX) * 0.5f;
+        float halfSpanZ = (maxZ - minZ) * 0.5f;
+        float insetX = Mathf.Min(margin, halfSpanX * 0.9f);
+        float insetZ = Mathf.Min(margin, halfSpanZ * 0.9f);
+
+        mapMinX = minX + insetX;
+        mapMaxX = maxX - insetX;
+        mapMinZ = minZ + insetZ;
+        mapMaxZ = maxZ - insetZ;
+        mapMinY = minY;
+        hasMapBounds = true;
+    }
+
+    private static void AccumulateTerrainBounds(
+        Terrain terrain,
+        ref bool found,
+        ref float minX,
+        ref float maxX,
+        ref float minZ,
+        ref float maxZ,
+        ref float minY)
+    {
+        if (terrain == null || !terrain.isActiveAndEnabled || terrain.terrainData == null) return;
+
+        Vector3 tPos = terrain.transform.position;
+        Vector3 tSize = terrain.terrainData.size;
+        minX = Mathf.Min(minX, tPos.x);
+        maxX = Mathf.Max(maxX, tPos.x + tSize.x);
+        minZ = Mathf.Min(minZ, tPos.z);
+        maxZ = Mathf.Max(maxZ, tPos.z + tSize.z);
+        minY = Mathf.Min(minY, tPos.y);
+        found = true;
+    }
+
+    // Chặn vận tốc hướng ra ngoài ranh giới để nhân vật trượt mượt dọc theo mép bản đồ
+    private bool ClampHorizontalVelocityToMapBounds(ref Vector3 horizontalVelocity, float dt)
+    {
+        if (!enableMapBoundary) return false;
+
+        if (!hasMapBounds)
+        {
+            if (Time.time >= nextBoundsRefreshTime)
+            {
+                nextBoundsRefreshTime = Time.time + 1f;
+                RefreshMapBounds();
+            }
+            if (!hasMapBounds) return false;
+        }
+
+        if (dt <= 0f) return false;
+
+        Vector3 pos = transform.position;
+        bool hitX = ClampAxisToBounds(pos.x, mapMinX, mapMaxX, dt, ref horizontalVelocity.x, ref knockbackVelocity.x, ref lungeVelocity.x);
+        bool hitZ = ClampAxisToBounds(pos.z, mapMinZ, mapMaxZ, dt, ref horizontalVelocity.z, ref knockbackVelocity.z, ref lungeVelocity.z);
+        return hitX || hitZ;
+    }
+
+    private static bool ClampAxisToBounds(float pos, float minBound, float maxBound, float dt, ref float vel, ref float knockback, ref float lunge)
+    {
+        float next = pos + vel * dt;
+        if (next < minBound && vel < 0f)
+        {
+            vel = pos > minBound ? (minBound - pos) / dt : 0f;
+            if (knockback < 0f) knockback = 0f;
+            if (lunge < 0f) lunge = 0f;
+            return true;
+        }
+        if (next > maxBound && vel > 0f)
+        {
+            vel = pos < maxBound ? (maxBound - pos) / dt : 0f;
+            if (knockback > 0f) knockback = 0f;
+            if (lunge > 0f) lunge = 0f;
+            return true;
+        }
+        return false;
+    }
+
+    // Giữ nhân vật trong ranh giới sau khi di chuyển và đưa về vị trí an toàn nếu bị rơi khỏi map
+    private void EnforceMapBoundsAndFallRecovery(bool hitBoundary)
+    {
+        if (!enableMapBoundary) return;
+
+        Vector3 pos = transform.position;
+        if (hasMapBounds)
+        {
+            float clampedX = Mathf.Clamp(pos.x, mapMinX, mapMaxX);
+            float clampedZ = Mathf.Clamp(pos.z, mapMinZ, mapMaxZ);
+            if (!Mathf.Approximately(pos.x, clampedX) || !Mathf.Approximately(pos.z, clampedZ))
+            {
+                pos.x = clampedX;
+                pos.z = clampedZ;
+                TeleportControllerPosition(pos);
+                hitBoundary = true;
+            }
+        }
+
+        if (hitBoundary)
+        {
+            ShowBoundaryBanner("ĐÃ ĐẾN RANH GIỚI BẢN ĐỒ!", 1.4f);
+        }
+
+        if (controller.isGrounded && IsInsideMapBounds(pos))
+        {
+            lastSafePosition = pos;
+            hasSafePosition = true;
+        }
+
+        if (!hasSafePosition) return;
+
+        float safeRefY = hasMapBounds ? mapMinY : lastSafePosition.y;
+        float fallThresholdY = safeRefY - Mathf.Max(2f, fallRecoveryDepth);
+        if (pos.y < fallThresholdY)
+        {
+            Vector3 recoveryPos = lastSafePosition + Vector3.up * 0.25f;
+            if (hasMapBounds)
+            {
+                recoveryPos.x = Mathf.Clamp(recoveryPos.x, mapMinX, mapMaxX);
+                recoveryPos.z = Mathf.Clamp(recoveryPos.z, mapMinZ, mapMaxZ);
+            }
+
+            verticalVelocity = 0f;
+            knockbackVelocity = Vector3.zero;
+            lungeVelocity = Vector3.zero;
+            TeleportControllerPosition(recoveryPos);
+            SnapToGround();
+            lastSafePosition = transform.position;
+            ShowBoundaryBanner("ĐÃ QUAY LẠI KHU VỰC CHIẾN ĐẤU!", 1.6f, force: true);
+        }
+    }
+
+    private void ShowBoundaryBanner(string message, float duration, bool force = false)
+    {
+        if (!force && Time.time < nextBoundaryWarningTime) return;
+        nextBoundaryWarningTime = Time.time + Mathf.Max(0.5f, boundaryWarningCooldown);
+        if (StageManager.Instance != null)
+        {
+            StageManager.Instance.ShowBanner(message, new Color(1f, 0.76f, 0.28f), duration);
+        }
+    }
+
+    private bool IsInsideMapBounds(Vector3 pos, float inset = 0f)
+    {
+        if (!hasMapBounds) return true;
+        float safeInsetX = Mathf.Min(Mathf.Max(0f, inset), (mapMaxX - mapMinX) * 0.45f);
+        float safeInsetZ = Mathf.Min(Mathf.Max(0f, inset), (mapMaxZ - mapMinZ) * 0.45f);
+        return pos.x >= mapMinX + safeInsetX && pos.x <= mapMaxX - safeInsetX
+            && pos.z >= mapMinZ + safeInsetZ && pos.z <= mapMaxZ - safeInsetZ;
+    }
+
+    private void TeleportControllerPosition(Vector3 targetPos)
+    {
+        if (controller != null)
+        {
             bool wasEnabled = controller.enabled;
             controller.enabled = false;
-            transform.position = new Vector3(transform.position.x, groundY, transform.position.z);
+            transform.position = targetPos;
             controller.enabled = wasEnabled;
+        }
+        else
+        {
+            transform.position = targetPos;
         }
     }
 
@@ -605,6 +834,7 @@ public class PlayerController : MonoBehaviour
     {
         if (!IsBlocking)
         {
+            lastBlockVisualParryState = -1;
             if (blockAuraObj != null && blockAuraObj.activeSelf)
             {
                 blockAuraObj.SetActive(false);
@@ -614,6 +844,7 @@ public class PlayerController : MonoBehaviour
 
         if (blockAuraObj == null)
         {
+            lastBlockVisualParryState = -1;
             blockAuraObj = new GameObject("PlayerBlockAuraFX");
             blockAuraObj.transform.SetParent(transform, false);
 
@@ -646,29 +877,33 @@ public class PlayerController : MonoBehaviour
         blockAuraObj.transform.rotation = Quaternion.LookRotation(fwd);
 
         bool inParry = IsPerfectParryWindow;
+        int parryState = inParry ? 1 : 0;
         float pulse = 0.94f + 0.08f * Mathf.Sin(Time.time * 12f);
         float size = (inParry ? 1.55f : 1.25f) * pulse;
         blockAuraObj.transform.localScale = Vector3.one * size;
 
-        Color auraColor = inParry
-            ? new Color(2.2f, 1.85f, 0.45f, 0.85f)
-            : new Color(0.65f, 1.55f, 2.15f, 0.58f);
-
-        if (blockAuraMat != null)
+        bool parryChanged = parryState != lastBlockVisualParryState;
+        if (parryChanged && blockAuraMat != null)
         {
+            Color auraColor = inParry
+                ? new Color(2.2f, 1.85f, 0.45f, 0.85f)
+                : new Color(0.65f, 1.55f, 2.15f, 0.58f);
             if (blockAuraMat.HasProperty(BaseColorId)) blockAuraMat.SetColor(BaseColorId, auraColor);
             if (blockAuraMat.HasProperty(ColorId)) blockAuraMat.SetColor(ColorId, auraColor);
         }
 
         if (blockAuraLight != null)
         {
+            bool wasLightEnabled = blockAuraLight.enabled;
             bool allowLight = GameSettingsManager.CurrentGraphicsPreset != GraphicsPreset.Low;
-            if (blockAuraLight.enabled != allowLight) blockAuraLight.enabled = allowLight;
-            if (allowLight)
+            if (wasLightEnabled != allowLight) blockAuraLight.enabled = allowLight;
+            if (allowLight && (parryChanged || !wasLightEnabled))
             {
                 blockAuraLight.color = inParry ? new Color(1f, 0.85f, 0.28f) : new Color(0.45f, 0.85f, 1f);
                 blockAuraLight.intensity = inParry ? 3.8f : 1.8f;
             }
         }
+
+        lastBlockVisualParryState = parryState;
     }
 }
