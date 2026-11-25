@@ -24,7 +24,7 @@ namespace GameTelemetryAPI.DTOs
         public int Count { get; set; }
     }
 
-    // DTO thống kê lượt chơi, tỷ lệ thắng và thời gian hoàn thành theo từng màn
+    // DTO thống kê lượt chơi, tỷ lệ thắng và thất bại theo từng màn
     public class LevelStatsDto
     {
         public int Level { get; set; }
@@ -33,9 +33,6 @@ namespace GameTelemetryAPI.DTOs
         public int Completions { get; set; }
         public int Deaths { get; set; }
         public double CompletionRatePercent { get; set; }
-        public int CheckpointsReached { get; set; }
-        public int ShopOpens { get; set; }
-        public int PerfectParries { get; set; }
     }
 
     // DTO thống kê số phiên chơi theo từng ngày
@@ -62,6 +59,16 @@ namespace GameTelemetryAPI.DTOs
         public int PerfectParries { get; set; }
     }
 
+    // DTO phản hồi danh sách phiên chơi có phân trang cho lịch sử dashboard
+    public class PagedSessionsResponseDto
+    {
+        public List<RecentSessionDto> Items { get; set; } = new();
+        public int Page { get; set; }
+        public int PageSize { get; set; }
+        public int TotalCount { get; set; }
+        public int TotalPages { get; set; }
+    }
+
     // DTO thống kê lượt mua và doanh thu vàng theo từng vũ khí
     public class WeaponPurchaseStatDto
     {
@@ -82,10 +89,8 @@ namespace GameTelemetryAPI.DTOs
         public int GoldSpentOnPotions { get; set; }
         public double SpendRatioPercent { get; set; }
         public double AvgGoldPerSession { get; set; }
-        public int ShopOpenCount { get; set; }
         public int WeaponPurchaseCount { get; set; }
         public int PotionPurchaseCount { get; set; }
-        public double ShopConversionPercent { get; set; }
         public List<WeaponPurchaseStatDto> WeaponBreakdown { get; set; } = new();
     }
 
@@ -93,9 +98,8 @@ namespace GameTelemetryAPI.DTOs
     public class CombatStatsDto
     {
         public int TotalEnemyKills { get; set; }
-        public int TotalKillScore { get; set; }
         public int BossKills { get; set; }
-        public int Stage3Starts { get; set; }
+        public int TotalSessions { get; set; }
         public double BossClearRatePercent { get; set; }
         public int BlockHits { get; set; }
         public int TotalBlockedDamage { get; set; }
@@ -103,9 +107,6 @@ namespace GameTelemetryAPI.DTOs
         public double ParryMasteryPercent { get; set; }
         public int TrapHits { get; set; }
         public int TotalTrapDamage { get; set; }
-        public int HealthPickups { get; set; }
-        public int TotalHealthHealed { get; set; }
-        public int CheckpointsReached { get; set; }
     }
 
     // DTO biểu diễn mốc thời gian chi tiết của một sự kiện trong phiên chơi

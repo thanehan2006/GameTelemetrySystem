@@ -72,6 +72,9 @@ namespace GameTelemetryAPI.Data
                     .IsRequired()
                     .HasMaxLength(50);
 
+                entity.HasIndex(e => e.PlayerName)
+                    .IsUnique();
+
                 entity.Property(e => e.PasswordHash)
                     .IsRequired()
                     .HasMaxLength(256)
@@ -143,6 +146,14 @@ namespace GameTelemetryAPI.Data
                 entity.Property(e => e.PurchasedAt)
                     .HasDefaultValueSql("SYSUTCDATETIME()");
 
+                entity.Property(e => e.ClientEventId)
+                    .HasMaxLength(64);
+
+                entity.HasIndex(e => e.ClientEventId)
+                    .IsUnique()
+                    .HasFilter("[ClientEventId] IS NOT NULL")
+                    .HasDatabaseName("UX_ShopPurchases_ClientEventId");
+
                 entity.HasOne(e => e.GameSession)
                     .WithMany(s => s.ShopPurchases)
                     .HasForeignKey(e => e.SessionId)
@@ -161,6 +172,14 @@ namespace GameTelemetryAPI.Data
 
                 entity.Property(e => e.EventTime)
                     .HasDefaultValueSql("SYSUTCDATETIME()");
+
+                entity.Property(e => e.ClientEventId)
+                    .HasMaxLength(64);
+
+                entity.HasIndex(e => e.ClientEventId)
+                    .IsUnique()
+                    .HasFilter("[ClientEventId] IS NOT NULL")
+                    .HasDatabaseName("UX_GameEvents_ClientEventId");
 
                 entity.HasOne(e => e.GameSession)
                     .WithMany(s => s.GameEvents)

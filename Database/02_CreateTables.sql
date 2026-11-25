@@ -96,6 +96,7 @@ BEGIN
         Rarity NVARCHAR(30) NULL,
         Price INT NOT NULL,
         PurchasedAt DATETIME2 NOT NULL CONSTRAINT DF_ShopPurchases_PurchasedAt DEFAULT SYSUTCDATETIME(),
+        ClientEventId NVARCHAR(64) NULL,
 
         CONSTRAINT FK_ShopPurchases_GameSessions
             FOREIGN KEY (SessionId)
@@ -115,6 +116,7 @@ BEGIN
         EventType NVARCHAR(50) NOT NULL,
         EventTime DATETIME2 NOT NULL CONSTRAINT DF_GameEvents_EventTime DEFAULT SYSUTCDATETIME(),
         Value INT NULL,
+        ClientEventId NVARCHAR(64) NULL,
 
         CONSTRAINT FK_GameEvents_GameSessions
             FOREIGN KEY (SessionId)
@@ -139,4 +141,10 @@ IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_GameEvents_Session_Ty
 
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_ShopPurchases_SessionId' AND object_id = OBJECT_ID(N'dbo.ShopPurchases'))
     CREATE NONCLUSTERED INDEX IX_ShopPurchases_SessionId ON dbo.ShopPurchases(SessionId);
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'UX_GameEvents_ClientEventId' AND object_id = OBJECT_ID(N'dbo.GameEvents'))
+    CREATE UNIQUE NONCLUSTERED INDEX UX_GameEvents_ClientEventId ON dbo.GameEvents(ClientEventId) WHERE ClientEventId IS NOT NULL;
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'UX_ShopPurchases_ClientEventId' AND object_id = OBJECT_ID(N'dbo.ShopPurchases'))
+    CREATE UNIQUE NONCLUSTERED INDEX UX_ShopPurchases_ClientEventId ON dbo.ShopPurchases(ClientEventId) WHERE ClientEventId IS NOT NULL;
 GO

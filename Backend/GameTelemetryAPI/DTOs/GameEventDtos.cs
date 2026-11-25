@@ -15,6 +15,9 @@ namespace GameTelemetryAPI.DTOs
         public DateTime? EventTime { get; set; }
 
         public int? Value { get; set; }
+
+        [MaxLength(64, ErrorMessage = "ClientEventId tối đa 64 ký tự")]
+        public string? ClientEventId { get; set; }
     }
 
     // DTO nhận danh sách nhiều sự kiện gửi theo lô cho cùng một phiên chơi
@@ -38,6 +41,9 @@ namespace GameTelemetryAPI.DTOs
         public DateTime? EventTime { get; set; }
 
         public int? Value { get; set; }
+
+        [MaxLength(64)]
+        public string? ClientEventId { get; set; }
     }
 
     // DTO trả về thông tin sự kiện đã lưu
@@ -48,5 +54,6 @@ namespace GameTelemetryAPI.DTOs
         public string EventType { get; set; } = string.Empty;
         public DateTime EventTime { get; set; }
         public int? Value { get; set; }
+        public bool Duplicate { get; set; }
     }
 }

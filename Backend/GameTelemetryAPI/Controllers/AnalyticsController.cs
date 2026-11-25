@@ -127,12 +127,11 @@ namespace GameTelemetryAPI.Controllers
                 .AsNoTracking()
                 .ToDictionaryAsync(l => l.LevelId, l => l.LevelName);
 
-            var eventQuery = _context.GameEvents.AsNoTracking();
-            if (from.HasValue || to.HasValue)
-            {
-                var dateSessionIds = FilterSessions(from, to, null, tzOffset).Select(s => s.SessionId);
-                eventQuery = eventQuery.Where(e => dateSessionIds.Contains(e.SessionId));
-            }
+            var filteredSessionIds = FilterSessions(from, to, level, tzOffset).Select(s => s.SessionId);
+            var eventQuery = _context.GameEvents
+                .AsNoTracking()
+                .Where(e => filteredSessionIds.Contains(e.SessionId));
+
             if (level.HasValue)
             {
                 eventQuery = eventQuery.Where(e => e.Value == level.Value);
@@ -142,8 +141,9 @@ namespace GameTelemetryAPI.Controllers
                 .Where(e => e.Value != null &&
                             (e.EventType == "level_start" ||
                              e.EventType == "level_complete" ||
+                             e.EventType == "level_failed" ||
                              e.EventType == "player_dead"))
-                .Select(e => new { Level = e.Value!.Value, e.EventType })
+                .Select(e => new { e.SessionId, Level = e.Value!.Value, e.EventType })
                 .ToListAsync();
 
             var grouped = events
@@ -159,8 +159,13 @@ namespace GameTelemetryAPI.Controllers
                 var list = grouped.ContainsKey(lvl) ? grouped[lvl] : null;
                 int starts = list?.Count(x => x.EventType == "level_start") ?? 0;
                 int completions = list?.Count(x => x.EventType == "level_complete") ?? 0;
-                int deaths = list?.Count(x => x.EventType == "player_dead") ?? 0;
-                double rate = starts > 0 ? Math.Round((double)completions / starts * 100, 1) : 0;
+                int deaths = list != null
+                    ? list.Where(x => x.EventType == "player_dead" || x.EventType == "level_failed")
+                          .Select(x => x.SessionId)
+                          .Distinct()
+                          .Count()
+                    : 0;
+                double rate = starts > 0 ? Math.Min(100, Math.Round((double)completions / starts * 100, 1)) : 0;
 
                 return new LevelStatsDto
                 {
@@ -229,9 +234,115 @@ namespace GameTelemetryAPI.Controllers
             [FromQuery] int? level = null,
             [FromQuery] int? tzOffset = null)
         {
-            var rawSessions = await FilterSessions(from, to, level, tzOffset)
+            int safeLimit = Math.Clamp(limit, 1, 500);
+            var query = FilterSessions(from, to, level, tzOffset)
                 .OrderByDescending(s => s.StartTime)
-                .Take(limit)
+                .ThenByDescending(s => s.SessionId)
+                .Take(safeLimit);
+
+            var sessions = await ProjectRecentSessionsAsync(query);
+            return Ok(sessions);
+        }
+
+        // Lấy lịch sử phiên chơi có phân trang, tìm kiếm, lọc kết quả và sắp xếp
+        [HttpGet("sessions")]
+        public async Task<ActionResult<PagedSessionsResponseDto>> GetSessionsHistory(
+            [FromQuery] int page = 1,
+            [FromQuery] int pageSize = 20,
+            [FromQuery] DateTime? from = null,
+            [FromQuery] DateTime? to = null,
+            [FromQuery] int? level = null,
+            [FromQuery] int? tzOffset = null,
+            [FromQuery] string? search = null,
+            [FromQuery] string? status = null,
+            [FromQuery] string? sort = "newest")
+        {
+            pageSize = Math.Clamp(pageSize, 1, 5000);
+            var query = FilterSessions(from, to, level, tzOffset);
+
+            if (!string.IsNullOrWhiteSpace(search))
+            {
+                string term = search.Trim();
+                string idCandidate = term.StartsWith("#") ? term.Substring(1).Trim() : term;
+                bool hasSessionId = long.TryParse(idCandidate, out long parsedSessionId);
+
+                if (hasSessionId)
+                {
+                    query = query.Where(s =>
+                        s.SessionId == parsedSessionId ||
+                        (s.Player != null && s.Player.PlayerName.Contains(term)));
+                }
+                else
+                {
+                    query = query.Where(s =>
+                        s.Player != null && s.Player.PlayerName.Contains(term));
+                }
+            }
+
+            string? st = status?.Trim().ToLowerInvariant();
+            if (st == "win")
+            {
+                query = query.Where(s =>
+                    s.Result != null && (
+                        s.Result.Trim().ToLower() == "win" ||
+                        s.Result.Trim().ToLower() == "victory" ||
+                        s.Result.Trim().ToLower() == "completed" ||
+                        s.Result.Trim().ToLower() == "thắng"));
+            }
+            else if (st == "lose")
+            {
+                query = query.Where(s =>
+                    s.Result != null && (
+                        s.Result.Trim().ToLower() == "lose" ||
+                        s.Result.Trim().ToLower() == "loss" ||
+                        s.Result.Trim().ToLower() == "defeat" ||
+                        s.Result.Trim().ToLower() == "dead" ||
+                        s.Result.Trim().ToLower() == "thua"));
+            }
+            else if (st == "other")
+            {
+                query = query.Where(s =>
+                    s.Result == null || (
+                        s.Result.Trim().ToLower() != "win" &&
+                        s.Result.Trim().ToLower() != "victory" &&
+                        s.Result.Trim().ToLower() != "completed" &&
+                        s.Result.Trim().ToLower() != "thắng" &&
+                        s.Result.Trim().ToLower() != "lose" &&
+                        s.Result.Trim().ToLower() != "loss" &&
+                        s.Result.Trim().ToLower() != "defeat" &&
+                        s.Result.Trim().ToLower() != "dead" &&
+                        s.Result.Trim().ToLower() != "thua"));
+            }
+
+            int totalCount = await query.CountAsync();
+            int totalPages = totalCount > 0 ? (int)Math.Ceiling((double)totalCount / pageSize) : 1;
+            int safePage = Math.Clamp(page, 1, totalPages);
+
+            bool sortOldest = string.Equals(sort?.Trim(), "oldest", StringComparison.OrdinalIgnoreCase);
+            IOrderedQueryable<GameSession> ordered = sortOldest
+                ? query.OrderBy(s => s.StartTime).ThenBy(s => s.SessionId)
+                : query.OrderByDescending(s => s.StartTime).ThenByDescending(s => s.SessionId);
+
+            var pagedQuery = ordered
+                .Skip((safePage - 1) * pageSize)
+                .Take(pageSize);
+
+            var sessions = await ProjectRecentSessionsAsync(pagedQuery);
+
+            return Ok(new PagedSessionsResponseDto
+            {
+                Items = sessions,
+                Page = safePage,
+                PageSize = pageSize,
+                TotalCount = totalCount,
+                TotalPages = totalPages
+            });
+        }
+
+        // Chuyển truy vấn GameSession sang danh sách RecentSessionDto với thời gian UTC chuẩn hóa
+        private static async Task<List<RecentSessionDto>> ProjectRecentSessionsAsync(IQueryable<GameSession> query)
+        {
+            var rawSessions = await query
                 .Select(s => new
                 {
                     s.SessionId,
@@ -248,7 +359,7 @@ namespace GameTelemetryAPI.Controllers
                 })
                 .ToListAsync();
 
-            var sessions = rawSessions.Select(s => new RecentSessionDto
+            return rawSessions.Select(s => new RecentSessionDto
             {
                 SessionId = s.SessionId,
                 PlayerName = s.PlayerName,
@@ -265,8 +376,6 @@ namespace GameTelemetryAPI.Controllers
                 GoldSpent = s.GoldSpent,
                 PerfectParries = s.PerfectParries
             }).ToList();
-
-            return Ok(sessions);
         }
 
         // Phân tích kinh tế vàng từ GameSessions và chi tiết giao dịch từ ShopPurchases
@@ -383,7 +492,7 @@ namespace GameTelemetryAPI.Controllers
             {
                 TotalEnemyKills = sessions.Sum(s => s.EnemiesKilled),
                 BossKills = bossKills,
-                Stage3Starts = totalSessions,
+                TotalSessions = totalSessions,
                 BossClearRatePercent = totalSessions > 0 ? Math.Round((double)bossKills / totalSessions * 100, 1) : 0,
                 BlockHits = blockHits,
                 TotalBlockedDamage = sessions.Sum(s => s.BlockedDamage),

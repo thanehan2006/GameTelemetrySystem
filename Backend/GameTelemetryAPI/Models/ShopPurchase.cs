@@ -12,6 +12,7 @@ namespace GameTelemetryAPI.Models
         public string? Rarity { get; set; }
         public int Price { get; set; }
         public DateTime PurchasedAt { get; set; } = DateTime.UtcNow;
+        public string? ClientEventId { get; set; }
 
         [JsonIgnore]
         public GameSession? GameSession { get; set; }

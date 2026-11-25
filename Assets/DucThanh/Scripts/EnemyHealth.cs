@@ -315,9 +315,6 @@ public class EnemyHealth : MonoBehaviour
         }
         ClearTintFromRenderers();
 
-        OnHealthChanged?.Invoke(0, maxHealth);
-        OnDied?.Invoke();
-
         if (TelemetryManager.Instance != null)
         {
             TelemetryManager.Instance.TrackEnemyKilled(scoreValue);
@@ -330,6 +327,9 @@ public class EnemyHealth : MonoBehaviour
         {
             Debug.LogWarning("[EnemyHealth] Chưa có TelemetryManager trong Scene!");
         }
+
+        OnHealthChanged?.Invoke(0, maxHealth);
+        OnDied?.Invoke();
 
         if (ScoreManager.Instance != null)
         {

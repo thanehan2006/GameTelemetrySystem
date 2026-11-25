@@ -284,6 +284,11 @@ public class MainMenuSceneController : MonoBehaviour
         isTransitioning = true;
 
         GameAudioManager.PlayUiClick();
+        PlayerPrefs.DeleteKey("PlayerId");
+        PlayerPrefs.DeleteKey("PlayerName");
+        PlayerPrefs.DeleteKey("SessionId");
+        PlayerPrefs.DeleteKey("PendingLoginEvent");
+        PlayerPrefs.Save();
         GameMenuManager.ClearLoggedInSession();
         if (Application.CanStreamedLevelBeLoaded(loginSceneName))
         {

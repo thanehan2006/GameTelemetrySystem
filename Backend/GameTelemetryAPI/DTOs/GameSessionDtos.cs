@@ -7,6 +7,8 @@ namespace GameTelemetryAPI.DTOs
     {
         [Required(ErrorMessage = "PlayerId là bắt buộc")]
         public int PlayerId { get; set; }
+
+        public int? LevelId { get; set; }
     }
 
     // DTO gửi kết quả kết thúc phiên chơi (Win, Lose hoặc Quit)
@@ -14,6 +16,8 @@ namespace GameTelemetryAPI.DTOs
     {
         [MaxLength(20, ErrorMessage = "Result tối đa 20 ký tự (ví dụ: win, lose, quit)")]
         public string? Result { get; set; }
+
+        public DateTime? EndTime { get; set; }
     }
 
     // DTO trả về thông tin chi tiết của phiên chơi
@@ -21,6 +25,7 @@ namespace GameTelemetryAPI.DTOs
     {
         public long SessionId { get; set; }
         public int PlayerId { get; set; }
+        public int? LevelId { get; set; }
         public DateTime StartTime { get; set; }
         public DateTime? EndTime { get; set; }
         public string? Result { get; set; }

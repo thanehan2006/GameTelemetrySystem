@@ -129,6 +129,7 @@ public class GameMenuManager : MonoBehaviour
 
     private bool uiBuilt;
     private bool isMenuOpen;
+    private bool isQuitting;
     private ViewMode currentView = ViewMode.None;
     private ViewMode returnView = ViewMode.None;
 
@@ -837,9 +838,21 @@ public class GameMenuManager : MonoBehaviour
         HideMenuInternal(restoreGameplay: true);
     }
 
+    private static void CloseActiveGameplaySession(string result = "Quit")
+    {
+        if (TelemetryManager.Instance != null)
+        {
+            TelemetryManager.Instance.TrackGameEnded(result);
+        }
+
+        PlayerPrefs.DeleteKey("SessionId");
+        PlayerPrefs.Save();
+    }
+
     private void OnRestartStageClicked()
     {
         GameAudioManager.PlayUiClick();
+        CloseActiveGameplaySession("Quit");
         string currentScene = SceneManager.GetActiveScene().name;
         HideMenuInternal(restoreGameplay: false);
         Time.timeScale = 1f;
@@ -849,6 +862,7 @@ public class GameMenuManager : MonoBehaviour
     private void OnGoToCharacterSelectClicked()
     {
         GameAudioManager.PlayUiClick();
+        CloseActiveGameplaySession("Quit");
         HideMenuInternal(restoreGameplay: false);
         Time.timeScale = 1f;
         if (Application.CanStreamedLevelBeLoaded("PickCharacter"))
@@ -860,6 +874,7 @@ public class GameMenuManager : MonoBehaviour
     private void OnReturnToMainMenuClicked()
     {
         GameAudioManager.PlayUiClick();
+        CloseActiveGameplaySession("Quit");
         HideMenuInternal(restoreGameplay: false);
         Time.timeScale = 1f;
         if (Application.CanStreamedLevelBeLoaded("MainMenuScene"))
@@ -876,6 +891,12 @@ public class GameMenuManager : MonoBehaviour
     private void OnLogoutClicked()
     {
         GameAudioManager.PlayUiClick();
+        CloseActiveGameplaySession("Quit");
+        PlayerPrefs.DeleteKey("PlayerId");
+        PlayerPrefs.DeleteKey("PlayerName");
+        PlayerPrefs.DeleteKey("SessionId");
+        PlayerPrefs.DeleteKey("PendingLoginEvent");
+        PlayerPrefs.Save();
         ClearLoggedInSession();
         HideMenuInternal(restoreGameplay: false);
         Time.timeScale = 1f;
@@ -893,8 +914,24 @@ public class GameMenuManager : MonoBehaviour
 
     private void OnQuitGameClicked()
     {
+        if (isQuitting) return;
+        isQuitting = true;
+
         GameAudioManager.PlayUiClick();
         Time.timeScale = 1f;
+
+        if (TelemetryManager.Instance != null)
+        {
+            TelemetryManager.Instance.EndSessionAndQuit("Quit", PerformApplicationQuit);
+        }
+        else
+        {
+            PerformApplicationQuit();
+        }
+    }
+
+    private static void PerformApplicationQuit()
+    {
 #if UNITY_EDITOR
         EditorApplication.isPlaying = false;
 #else

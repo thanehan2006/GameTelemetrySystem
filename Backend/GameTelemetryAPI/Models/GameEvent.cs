@@ -11,6 +11,7 @@ namespace GameTelemetryAPI.Models
         public string EventType { get; set; } = string.Empty;
         public DateTime EventTime { get; set; } = DateTime.UtcNow;
         public int? Value { get; set; }
+        public string? ClientEventId { get; set; }
 
         [JsonIgnore]
         public GameSession? GameSession { get; set; }

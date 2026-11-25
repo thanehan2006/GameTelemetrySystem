@@ -36,6 +36,7 @@ namespace GameTelemetryAPI.Controllers
             var session = new GameSession
             {
                 PlayerId = dto.PlayerId,
+                LevelId = dto.LevelId is >= 1 and <= 3 ? dto.LevelId.Value : null,
                 StartTime = DateTime.UtcNow,
                 EndTime = null,
                 Result = null
@@ -44,14 +45,7 @@ namespace GameTelemetryAPI.Controllers
             _context.GameSessions.Add(session);
             await _context.SaveChangesAsync();
 
-            return CreatedAtAction(nameof(GetSessionById), new { id = session.SessionId }, new GameSessionResponseDto
-            {
-                SessionId = session.SessionId,
-                PlayerId = session.PlayerId,
-                StartTime = session.StartTime,
-                EndTime = session.EndTime,
-                Result = session.Result
-            });
+            return CreatedAtAction(nameof(GetSessionById), new { id = session.SessionId }, ToDto(session));
         }
 
         // Cập nhật thời gian kết thúc và kết quả cho phiên chơi
@@ -64,22 +58,41 @@ namespace GameTelemetryAPI.Controllers
                 return NotFound(new { message = $"Không tìm thấy phiên chơi với SessionId {id}" });
             }
 
-            session.EndTime = DateTime.UtcNow;
-            if (!string.IsNullOrWhiteSpace(dto.Result))
+            string? incomingResult = string.IsNullOrWhiteSpace(dto.Result) ? null : dto.Result.Trim();
+
+            if (session.EndTime != null)
             {
-                session.Result = dto.Result.Trim();
+                if (IsFinalCombatResult(session.Result) && IsQuitOrEmpty(incomingResult))
+                {
+                    return Ok(ToDto(session));
+                }
+
+                if (incomingResult == null || string.Equals(session.Result, incomingResult, StringComparison.OrdinalIgnoreCase))
+                {
+                    return Ok(ToDto(session));
+                }
+            }
+
+            DateTime resolvedEnd = dto.EndTime.HasValue ? NormalizeUtc(dto.EndTime.Value) : DateTime.UtcNow;
+            DateTime maxAllowed = DateTime.UtcNow.AddMinutes(1);
+            if (resolvedEnd < session.StartTime)
+            {
+                resolvedEnd = session.StartTime;
+            }
+            else if (resolvedEnd > maxAllowed)
+            {
+                resolvedEnd = maxAllowed;
+            }
+
+            session.EndTime = resolvedEnd;
+            if (incomingResult != null)
+            {
+                session.Result = incomingResult;
             }
 
             await _context.SaveChangesAsync();
 
-            return Ok(new GameSessionResponseDto
-            {
-                SessionId = session.SessionId,
-                PlayerId = session.PlayerId,
-                StartTime = session.StartTime,
-                EndTime = session.EndTime,
-                Result = session.Result
-            });
+            return Ok(ToDto(session));
         }
 
         // Truy vấn thông tin một phiên chơi theo SessionId
@@ -92,14 +105,42 @@ namespace GameTelemetryAPI.Controllers
                 return NotFound(new { message = $"Không tìm thấy phiên chơi với SessionId {id}" });
             }
 
-            return Ok(new GameSessionResponseDto
+            return Ok(ToDto(session));
+        }
+
+        private static GameSessionResponseDto ToDto(GameSession session) => new GameSessionResponseDto
+        {
+            SessionId = session.SessionId,
+            PlayerId = session.PlayerId,
+            LevelId = session.LevelId,
+            StartTime = session.StartTime,
+            EndTime = session.EndTime,
+            Result = session.Result
+        };
+
+        private static bool IsFinalCombatResult(string? result)
+        {
+            if (string.IsNullOrWhiteSpace(result)) return false;
+            var r = result.Trim().ToLowerInvariant();
+            return r == "win" || r == "victory" || r == "completed" || r == "thắng"
+                || r == "lose" || r == "loss" || r == "defeat" || r == "dead" || r == "thua";
+        }
+
+        private static bool IsQuitOrEmpty(string? result)
+        {
+            if (string.IsNullOrWhiteSpace(result)) return true;
+            var r = result.Trim().ToLowerInvariant();
+            return r == "quit" || r == "exit" || r == "abandoned";
+        }
+
+        private static DateTime NormalizeUtc(DateTime value)
+        {
+            return value.Kind switch
             {
-                SessionId = session.SessionId,
-                PlayerId = session.PlayerId,
-                StartTime = session.StartTime,
-                EndTime = session.EndTime,
-                Result = session.Result
-            });
+                DateTimeKind.Utc => value,
+                DateTimeKind.Local => value.ToUniversalTime(),
+                _ => DateTime.SpecifyKind(value, DateTimeKind.Utc)
+            };
         }
     }
 }

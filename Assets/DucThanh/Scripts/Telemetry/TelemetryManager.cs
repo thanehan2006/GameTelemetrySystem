@@ -13,6 +13,7 @@ public class CreateGameEventRequest
     public string eventType;
     public string eventTime;
     public int value;
+    public string clientEventId;
 }
 
 [Serializable]
@@ -21,6 +22,7 @@ public class SingleEventItemRequest
     public string eventType;
     public string eventTime;
     public int value;
+    public string clientEventId;
 }
 
 [Serializable]
@@ -31,12 +33,21 @@ public class CreateBatchGameEventsRequest
 }
 
 [Serializable]
+public class PendingEndSessionRequest
+{
+    public long sessionId;
+    public string result;
+    public string endTime;
+}
+
+[Serializable]
 public class OfflineEventStore
 {
     public List<CreateGameEventRequest> pendingEvents = new List<CreateGameEventRequest>();
+    public List<PendingEndSessionRequest> pendingEndSessions = new List<PendingEndSessionRequest>();
 }
 
-// Thu thập sự kiện hành vi người chơi trong trận, gom nhóm gửi theo lô (batch) lên API và lưu hàng đợi offline khi mất mạng
+// Thu thập sự kiện hành vi người chơi trong trận, gắn ClientEventId chống trùng, gửi theo lô (batch) và lưu hàng đợi offline khi mất mạng
 public class TelemetryManager : MonoBehaviour
 {
     private const int ImmediateBatchSize = 10;
@@ -64,25 +75,31 @@ public class TelemetryManager : MonoBehaviour
     private readonly List<CreateGameEventRequest> pendingEvents = new List<CreateGameEventRequest>(16);
     private readonly List<CreateGameEventRequest> sendBatch = new List<CreateGameEventRequest>(16);
     private readonly CreateBatchGameEventsRequest reusableBatchDto = new CreateBatchGameEventsRequest();
+    private readonly List<PendingEndSessionRequest> pendingEndSessions = new List<PendingEndSessionRequest>(4);
+    private readonly HashSet<long> inFlightEndSessions = new HashSet<long>();
 
     private string offlineQueuePath;
     private bool hasOfflineFileOnDisk;
     private bool isSending;
     private bool isStartingSession;
+    private bool isFlushingEndSessions;
+    private bool isQuitting;
     private bool gameEnded;
     private bool playerDeadTracked;
+    private string pendingEndResultIfSessionMissing;
     private int startedLevel = -1;
     private int completedLevel = -1;
     private int failedLevel = -1;
     private Coroutine scheduledFlushRoutine;
+    private Coroutine retryEndSessionsRoutine;
 
     public string BaseUrl
     {
-        get => string.IsNullOrEmpty(baseUrl) ? ApiConfig.GetBaseUrl() : baseUrl;
+        get => ApiConfig.ResolveBaseUrl(baseUrl);
         set => baseUrl = value;
     }
 
-    // Khởi tạo Singleton tồn tại xuyên scene và đọc hàng đợi sự kiện offline nếu có
+    // Khởi tạo Singleton và đọc hàng đợi sự kiện/kết thúc phiên offline nếu có
     private void Awake()
     {
         if (Instance != null && Instance != this)
@@ -96,17 +113,20 @@ public class TelemetryManager : MonoBehaviour
         LoadOfflineQueue();
     }
 
-    // Khởi tạo phiên chơi ban đầu khi vào scene gameplay
+    // Khởi tạo phiên chơi ban đầu và gửi bù các phiên cũ đang chờ đóng
     private void Start()
     {
         StartNewSession();
+        FlushPendingEndSessions();
     }
 
-    // Đóng phiên cũ (nếu còn) và tạo phiên chơi mới cho lượt chơi hiện tại
+    // Tạo phiên chơi mới cho lượt chơi hiện tại
     public void StartNewSession()
     {
         gameEnded = false;
         playerDeadTracked = false;
+        isQuitting = false;
+        pendingEndResultIfSessionMissing = null;
         startedLevel = -1;
         completedLevel = -1;
         failedLevel = -1;
@@ -114,6 +134,12 @@ public class TelemetryManager : MonoBehaviour
         if (sessionApiClient == null)
         {
             sessionApiClient = FindFirstObjectByType<SessionApiClient>();
+        }
+
+        StageManager stageManager = StageManager.Instance != null ? StageManager.Instance : FindFirstObjectByType<StageManager>();
+        if (stageManager != null)
+        {
+            CurrentLevel = stageManager.MapLevel;
         }
 
         string savedSessionId = PlayerPrefs.GetString("SessionId", "");
@@ -132,12 +158,6 @@ public class TelemetryManager : MonoBehaviour
             PlayerPrefs.DeleteKey("PendingLoginEvent");
             PlayerPrefs.Save();
             TrackEvent("login", PlayerPrefs.GetInt("PlayerId", 0));
-        }
-
-        StageManager stageManager = StageManager.Instance != null ? StageManager.Instance : FindFirstObjectByType<StageManager>();
-        if (stageManager != null)
-        {
-            CurrentLevel = stageManager.MapLevel;
         }
 
         TrackEvent("game_start");
@@ -172,7 +192,7 @@ public class TelemetryManager : MonoBehaviour
         }
 
         isStartingSession = true;
-        sessionApiClient.StartSession(playerId, (success, sessionId, message) =>
+        sessionApiClient.StartSession(playerId, CurrentLevel, (success, sessionId, message) =>
         {
             isStartingSession = false;
 
@@ -187,12 +207,24 @@ public class TelemetryManager : MonoBehaviour
                     }
                 }
 
+                if (gameEnded && !string.IsNullOrEmpty(pendingEndResultIfSessionMissing))
+                {
+                    PlayerPrefs.DeleteKey("SessionId");
+                    PlayerPrefs.Save();
+                    EnqueueEndSession(sessionId, pendingEndResultIfSessionMissing);
+                    pendingEndResultIfSessionMissing = null;
+                }
+
                 FlushPendingEvents();
+                FlushPendingEndSessions();
             }
             else
             {
                 Debug.LogWarning($"[TelemetryManager] Tạo Session thất bại: {message}");
-                StartCoroutine(RetryStartSessionCoroutine());
+                if (!gameEnded)
+                {
+                    StartCoroutine(RetryStartSessionCoroutine());
+                }
             }
         });
     }
@@ -206,7 +238,7 @@ public class TelemetryManager : MonoBehaviour
         }
     }
 
-    // Ghi nhận một sự kiện telemetry vào bộ đệm chờ và tự động gửi khi đủ lô hoặc là sự kiện quan trọng
+    // Ghi nhận một sự kiện telemetry kèm ClientEventId duy nhất vào bộ đệm chờ và tự động gửi khi đủ lô hoặc là sự kiện quan trọng
     public void TrackEvent(string eventType, int eventValue = 0)
     {
         if (string.IsNullOrWhiteSpace(eventType)) return;
@@ -226,7 +258,8 @@ public class TelemetryManager : MonoBehaviour
             sessionId = numericSessionId,
             eventType = normalizedType,
             eventTime = DateTime.UtcNow.ToString("o"),
-            value = eventValue
+            value = eventValue,
+            clientEventId = Guid.NewGuid().ToString("N")
         });
 
 #if UNITY_EDITOR
@@ -306,12 +339,12 @@ public class TelemetryManager : MonoBehaviour
 
     public void TrackItemPickup(int healOrValue)
     {
-        TrackEvent("item_pickup", healOrValue);
+        // Đã chuẩn hóa schema 5 bảng: bỏ qua sự kiện không còn lưu trữ
     }
 
     public void TrackCheckpointReached(int stage)
     {
-        TrackEvent("checkpoint_reached", stage);
+        // Đã chuẩn hóa schema 5 bảng: bỏ qua sự kiện không còn lưu trữ
     }
 
     public void TrackTrapHit(int damage)
@@ -336,7 +369,7 @@ public class TelemetryManager : MonoBehaviour
 
     public void TrackShopOpened(int stage)
     {
-        TrackEvent("shop_opened", stage);
+        // Đã chuẩn hóa schema 5 bảng: bỏ qua sự kiện không còn lưu trữ
     }
 
     public void TrackWeaponPurchased(int price)
@@ -366,9 +399,166 @@ public class TelemetryManager : MonoBehaviour
         TrackEvent("game_exit", CurrentLevel);
         gameEnded = true;
 
-        if (sendToBackend && sessionApiClient != null && !string.IsNullOrEmpty(PlayerPrefs.GetString("SessionId", "")))
+        long endingSessionId = ResolveCurrentNumericSessionId();
+        PlayerPrefs.DeleteKey("SessionId");
+        PlayerPrefs.Save();
+
+        if (!sendToBackend) return;
+
+        string normalizedResult = string.IsNullOrWhiteSpace(sessionResult) ? "Quit" : sessionResult.Trim();
+        if (endingSessionId > 0)
         {
-            sessionApiClient.EndSession(sessionResult);
+            EnqueueEndSession(endingSessionId, normalizedResult);
+            SaveOfflineQueue();
+            FlushPendingEndSessions();
+        }
+        else
+        {
+            pendingEndResultIfSessionMissing = normalizedResult;
+        }
+    }
+
+    // Đẩy sự kiện + đóng phiên chơi với thời gian chờ ngắn trước khi thoát ứng dụng
+    public void EndSessionAndQuit(string sessionResult, Action onComplete, float maxWaitSeconds = 0.8f)
+    {
+        if (isQuitting)
+        {
+            return;
+        }
+
+        isQuitting = true;
+
+        if (!gameObject.activeInHierarchy)
+        {
+            TrackGameEnded(sessionResult);
+            SaveOfflineQueue();
+            onComplete?.Invoke();
+            return;
+        }
+
+        StartCoroutine(EndSessionAndQuitCoroutine(sessionResult, onComplete, maxWaitSeconds));
+    }
+
+    private IEnumerator EndSessionAndQuitCoroutine(string sessionResult, Action onComplete, float maxWaitSeconds)
+    {
+        TrackGameEnded(sessionResult);
+        FlushPendingEvents();
+        FlushPendingEndSessions();
+
+        float deadline = Time.realtimeSinceStartup + Mathf.Max(0.1f, maxWaitSeconds);
+        while (Time.realtimeSinceStartup < deadline
+            && (isSending || HasSendableEvents() || inFlightEndSessions.Count > 0 || pendingEndSessions.Count > 0))
+        {
+            yield return null;
+        }
+
+        SaveOfflineQueue();
+        onComplete?.Invoke();
+    }
+
+    private long ResolveCurrentNumericSessionId()
+    {
+        if (long.TryParse(SessionId, out long parsed) && parsed > 0)
+        {
+            return parsed;
+        }
+
+        string saved = PlayerPrefs.GetString("SessionId", "");
+        return long.TryParse(saved, out long savedParsed) && savedParsed > 0 ? savedParsed : 0;
+    }
+
+    private void EnqueueEndSession(long sessionId, string result)
+    {
+        if (sessionId <= 0) return;
+
+        for (int i = 0; i < pendingEndSessions.Count; i++)
+        {
+            if (pendingEndSessions[i].sessionId == sessionId)
+            {
+                return;
+            }
+        }
+
+        pendingEndSessions.Add(new PendingEndSessionRequest
+        {
+            sessionId = sessionId,
+            result = result,
+            endTime = DateTime.UtcNow.ToString("o")
+        });
+    }
+
+    private void FlushPendingEndSessions()
+    {
+        if (!sendToBackend || pendingEndSessions.Count == 0 || !gameObject.activeInHierarchy) return;
+
+        if (sessionApiClient == null)
+        {
+            sessionApiClient = FindFirstObjectByType<SessionApiClient>();
+            if (sessionApiClient == null)
+            {
+                SaveOfflineQueue();
+                return;
+            }
+        }
+
+        isFlushingEndSessions = true;
+        var snapshot = new List<PendingEndSessionRequest>(pendingEndSessions);
+        for (int i = 0; i < snapshot.Count; i++)
+        {
+            PendingEndSessionRequest req = snapshot[i];
+            if (req == null || req.sessionId <= 0 || inFlightEndSessions.Contains(req.sessionId))
+            {
+                continue;
+            }
+
+            inFlightEndSessions.Add(req.sessionId);
+            sessionApiClient.EndSessionById(req.sessionId, req.result, req.endTime, (success, message) =>
+            {
+                inFlightEndSessions.Remove(req.sessionId);
+                if (success)
+                {
+                    pendingEndSessions.Remove(req);
+                    if (hasOfflineFileOnDisk)
+                    {
+                        SaveOfflineQueue();
+                    }
+                }
+                else
+                {
+                    SaveOfflineQueue();
+                    ScheduleRetryEndSessions();
+                }
+
+                if (inFlightEndSessions.Count == 0)
+                {
+                    isFlushingEndSessions = false;
+                }
+            });
+        }
+
+        if (inFlightEndSessions.Count == 0)
+        {
+            isFlushingEndSessions = false;
+        }
+    }
+
+    private void ScheduleRetryEndSessions()
+    {
+        if (!sendToBackend || isQuitting || retryEndSessionsRoutine != null || !gameObject.activeInHierarchy)
+        {
+            return;
+        }
+
+        retryEndSessionsRoutine = StartCoroutine(RetryEndSessionsCoroutine());
+    }
+
+    private IEnumerator RetryEndSessionsCoroutine()
+    {
+        yield return new WaitForSecondsRealtime(Mathf.Max(1f, retryInterval));
+        retryEndSessionsRoutine = null;
+        if (pendingEndSessions.Count > 0 && !isFlushingEndSessions)
+        {
+            FlushPendingEndSessions();
         }
     }
 
@@ -433,17 +623,27 @@ public class TelemetryManager : MonoBehaviour
                 reusableBatchDto.events.Clear();
                 for (int i = 0; i < sendBatch.Count; i++)
                 {
+                    if (string.IsNullOrEmpty(sendBatch[i].clientEventId))
+                    {
+                        sendBatch[i].clientEventId = Guid.NewGuid().ToString("N");
+                    }
+
                     reusableBatchDto.events.Add(new SingleEventItemRequest
                     {
                         eventType = sendBatch[i].eventType,
                         eventTime = sendBatch[i].eventTime,
-                        value = sendBatch[i].value
+                        value = sendBatch[i].value,
+                        clientEventId = sendBatch[i].clientEventId
                     });
                 }
                 json = JsonUtility.ToJson(reusableBatchDto);
             }
             else
             {
+                if (string.IsNullOrEmpty(sendBatch[0].clientEventId))
+                {
+                    sendBatch[0].clientEventId = Guid.NewGuid().ToString("N");
+                }
                 url = BaseUrl.TrimEnd('/') + "/api/Events";
                 json = JsonUtility.ToJson(sendBatch[0]);
             }
@@ -470,7 +670,6 @@ public class TelemetryManager : MonoBehaviour
                 }
                 else if (request.responseCode == 400 || request.responseCode == 404)
                 {
-
                     removeBatch = true;
                     Debug.LogWarning($"[TelemetryManager] Dropped {sendBatch.Count} invalid/orphan event(s) (HTTP {request.responseCode}): {request.downloadHandler?.text}");
                 }
@@ -495,6 +694,7 @@ public class TelemetryManager : MonoBehaviour
             else
             {
                 SaveOfflineQueue();
+                if (isQuitting) break;
                 yield return new WaitForSecondsRealtime(Mathf.Max(1f, retryInterval));
             }
         }
@@ -502,7 +702,7 @@ public class TelemetryManager : MonoBehaviour
         isSending = false;
     }
 
-    // Đọc lại các sự kiện chưa gửi được từ tệp JSON lưu trên thiết bị
+    // Đọc lại các sự kiện & yêu cầu đóng phiên chưa gửi được từ tệp JSON lưu trên thiết bị
     private void LoadOfflineQueue()
     {
         try
@@ -518,14 +718,33 @@ public class TelemetryManager : MonoBehaviour
             if (string.IsNullOrWhiteSpace(json)) return;
 
             OfflineEventStore store = JsonUtility.FromJson<OfflineEventStore>(json);
-            if (store?.pendingEvents == null) return;
+            if (store == null) return;
 
-            for (int i = 0; i < store.pendingEvents.Count; i++)
+            if (store.pendingEvents != null)
             {
-                CreateGameEventRequest evt = store.pendingEvents[i];
-                if (evt != null && evt.sessionId > 0 && !string.IsNullOrWhiteSpace(evt.eventType))
+                for (int i = 0; i < store.pendingEvents.Count; i++)
                 {
-                    pendingEvents.Add(evt);
+                    CreateGameEventRequest evt = store.pendingEvents[i];
+                    if (evt != null && evt.sessionId > 0 && !string.IsNullOrWhiteSpace(evt.eventType))
+                    {
+                        if (string.IsNullOrEmpty(evt.clientEventId))
+                        {
+                            evt.clientEventId = Guid.NewGuid().ToString("N");
+                        }
+                        pendingEvents.Add(evt);
+                    }
+                }
+            }
+
+            if (store.pendingEndSessions != null)
+            {
+                for (int i = 0; i < store.pendingEndSessions.Count; i++)
+                {
+                    PendingEndSessionRequest endReq = store.pendingEndSessions[i];
+                    if (endReq != null && endReq.sessionId > 0)
+                    {
+                        pendingEndSessions.Add(endReq);
+                    }
                 }
             }
         }
@@ -535,7 +754,7 @@ public class TelemetryManager : MonoBehaviour
         }
     }
 
-    // Lưu tạm hàng đợi sự kiện xuống thiết bị để tránh mất dữ liệu khi mất kết nối
+    // Lưu tạm hàng đợi sự kiện và phiên chờ đóng xuống thiết bị để tránh mất dữ liệu khi mất kết nối
     private void SaveOfflineQueue()
     {
         if (string.IsNullOrEmpty(offlineQueuePath)) return;
@@ -551,7 +770,15 @@ public class TelemetryManager : MonoBehaviour
                 }
             }
 
-            if (store.pendingEvents.Count == 0)
+            for (int i = 0; i < pendingEndSessions.Count; i++)
+            {
+                if (pendingEndSessions[i].sessionId > 0)
+                {
+                    store.pendingEndSessions.Add(pendingEndSessions[i]);
+                }
+            }
+
+            if (store.pendingEvents.Count == 0 && store.pendingEndSessions.Count == 0)
             {
                 if (hasOfflineFileOnDisk && File.Exists(offlineQueuePath))
                 {
@@ -573,7 +800,7 @@ public class TelemetryManager : MonoBehaviour
 
     private void OnApplicationPause(bool pauseStatus)
     {
-        if (pauseStatus && pendingEvents.Count > 0)
+        if (pauseStatus && (pendingEvents.Count > 0 || pendingEndSessions.Count > 0))
         {
             SaveOfflineQueue();
         }
@@ -586,5 +813,14 @@ public class TelemetryManager : MonoBehaviour
             TrackGameEnded("Quit");
         }
         SaveOfflineQueue();
+    }
+
+    private void OnDestroy()
+    {
+        if (Instance == this)
+        {
+            SaveOfflineQueue();
+            Instance = null;
+        }
     }
 }

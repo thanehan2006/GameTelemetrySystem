@@ -15399,7 +15399,7 @@ MonoBehaviour:
   baseUrl: https://sjf1zkj0-7013.asse.devtunnels.ms
   sendToBackend: 1
   sessionApiClient: {fileID: 0}
-  currentLevel: 1
+  currentLevel: 2
   fallbackTestPlayerId: 1
   retryInterval: 5
   batchFlushDelay: 1.8

@@ -1,5 +1,6 @@
 using System;
 using System.Collections;
+using System.Collections.Generic;
 using System.Text;
 using UnityEngine;
 using UnityEngine.Networking;
@@ -8,6 +9,7 @@ using UnityEngine.Networking;
 public class StartSessionRequest
 {
     public int playerId;
+    public int levelId;
 }
 
 [Serializable]
@@ -15,6 +17,7 @@ public class StartSessionResponse
 {
     public long sessionId;
     public int playerId;
+    public int levelId;
     public string startTime;
     public string endTime;
     public string result;
@@ -24,6 +27,7 @@ public class StartSessionResponse
 public class EndSessionRequest
 {
     public string result;
+    public string endTime;
 }
 
 // Client giao tiếp API quản lý bắt đầu và kết thúc phiên chơi (GameSession)
@@ -33,12 +37,12 @@ public class SessionApiClient : MonoBehaviour
     [SerializeField]
     private string baseUrl = ApiConfig.DEFAULT_BASE_URL;
 
-    private bool isEndingSession;
-    private string endedSessionId;
+    private readonly HashSet<long> endingSessionIds = new HashSet<long>();
+    private readonly HashSet<long> endedSessionIds = new HashSet<long>();
 
     public string BaseUrl
     {
-        get => string.IsNullOrEmpty(baseUrl) ? ApiConfig.GetBaseUrl() : baseUrl;
+        get => ApiConfig.ResolveBaseUrl(baseUrl);
         set => baseUrl = value;
     }
 
@@ -46,11 +50,17 @@ public class SessionApiClient : MonoBehaviour
     public void StartSession(Action<bool, long, string> callback)
     {
         int playerId = PlayerPrefs.GetInt("PlayerId", 0);
-        StartSession(playerId, callback);
+        StartSession(playerId, 0, callback);
     }
 
     // Bắt đầu phiên chơi mới với PlayerId chỉ định
     public void StartSession(int overridePlayerId, Action<bool, long, string> callback)
+    {
+        StartSession(overridePlayerId, 0, callback);
+    }
+
+    // Bắt đầu phiên chơi mới với PlayerId và LevelId (1..3)
+    public void StartSession(int overridePlayerId, int levelId, Action<bool, long, string> callback)
     {
         if (overridePlayerId <= 0)
         {
@@ -58,13 +68,17 @@ public class SessionApiClient : MonoBehaviour
             return;
         }
 
-        StartCoroutine(StartSessionCoroutine(overridePlayerId, callback));
+        StartCoroutine(StartSessionCoroutine(overridePlayerId, levelId, callback));
     }
 
     // Gửi POST tới /api/Sessions/start để lấy SessionId từ SQL Server
-    private IEnumerator StartSessionCoroutine(int playerId, Action<bool, long, string> callback)
+    private IEnumerator StartSessionCoroutine(int playerId, int levelId, Action<bool, long, string> callback)
     {
-        StartSessionRequest requestData = new StartSessionRequest { playerId = playerId };
+        StartSessionRequest requestData = new StartSessionRequest
+        {
+            playerId = playerId,
+            levelId = levelId
+        };
         string json = JsonUtility.ToJson(requestData);
         string url = BaseUrl.TrimEnd('/') + "/api/Sessions/start";
 
@@ -89,12 +103,12 @@ public class SessionApiClient : MonoBehaviour
                     yield break;
                 }
 
-                endedSessionId = null;
-                isEndingSession = false;
+                endingSessionIds.Remove(response.sessionId);
+                endedSessionIds.Remove(response.sessionId);
                 PlayerPrefs.SetString("SessionId", response.sessionId.ToString());
                 PlayerPrefs.Save();
 
-                Debug.Log($"[SessionApiClient] Session started: {response.sessionId}");
+                Debug.Log($"[SessionApiClient] Session started: {response.sessionId} (Level {levelId})");
                 callback?.Invoke(true, response.sessionId, "Tạo Session thành công.");
             }
             else
@@ -106,31 +120,50 @@ public class SessionApiClient : MonoBehaviour
         }
     }
 
-    // Kết thúc phiên chơi hiện tại với kết quả Win, Lose hoặc Quit
+    // Kết thúc phiên chơi hiện tại trong PlayerPrefs với kết quả Win, Lose hoặc Quit
     public void EndSession(string result, Action<bool, string> callback = null)
     {
-        string sessionId = PlayerPrefs.GetString("SessionId", "");
-
-        if (string.IsNullOrEmpty(sessionId))
+        string rawSessionId = PlayerPrefs.GetString("SessionId", "");
+        if (!long.TryParse(rawSessionId, out long sessionId) || sessionId <= 0)
         {
             callback?.Invoke(false, "Không tìm thấy SessionId.");
             return;
         }
 
-        if (isEndingSession || sessionId == endedSessionId)
+        EndSessionById(sessionId, result, DateTime.UtcNow.ToString("o"), callback);
+    }
+
+    // Kết thúc phiên chơi theo SessionId và mốc thời gian chỉ định (hỗ trợ phát lại khi có mạng lại)
+    public void EndSessionById(long sessionId, string result, string endTimeIso, Action<bool, string> callback = null)
+    {
+        if (sessionId <= 0)
+        {
+            callback?.Invoke(false, "SessionId không hợp lệ.");
+            return;
+        }
+
+        if (endingSessionIds.Contains(sessionId) || endedSessionIds.Contains(sessionId))
         {
             callback?.Invoke(true, "Session đã được kết thúc trước đó.");
             return;
         }
 
-        StartCoroutine(EndSessionCoroutine(sessionId, result, callback));
+        string safeEndTime = string.IsNullOrWhiteSpace(endTimeIso)
+            ? DateTime.UtcNow.ToString("o")
+            : endTimeIso.Trim();
+
+        StartCoroutine(EndSessionCoroutine(sessionId, result, safeEndTime, callback));
     }
 
     // Gửi PUT tới /api/Sessions/{id}/end để đóng phiên chơi trên máy chủ
-    private IEnumerator EndSessionCoroutine(string sessionId, string result, Action<bool, string> callback)
+    private IEnumerator EndSessionCoroutine(long sessionId, string result, string endTimeIso, Action<bool, string> callback)
     {
-        isEndingSession = true;
-        EndSessionRequest data = new EndSessionRequest { result = result };
+        endingSessionIds.Add(sessionId);
+        EndSessionRequest data = new EndSessionRequest
+        {
+            result = string.IsNullOrWhiteSpace(result) ? "Quit" : result.Trim(),
+            endTime = endTimeIso
+        };
         string json = JsonUtility.ToJson(data);
         string url = BaseUrl.TrimEnd('/') + "/api/Sessions/" + sessionId + "/end";
 
@@ -145,14 +178,17 @@ public class SessionApiClient : MonoBehaviour
 
             yield return request.SendWebRequest();
 
-            isEndingSession = false;
+            endingSessionIds.Remove(sessionId);
 
             if (request.result == UnityWebRequest.Result.Success || request.responseCode == 404)
             {
-                endedSessionId = sessionId;
-                Debug.Log($"[SessionApiClient] Session ended: {sessionId} ({result})");
-                PlayerPrefs.DeleteKey("SessionId");
-                PlayerPrefs.Save();
+                endedSessionIds.Add(sessionId);
+                Debug.Log($"[SessionApiClient] Session ended: {sessionId} ({data.result})");
+                if (PlayerPrefs.GetString("SessionId", "") == sessionId.ToString())
+                {
+                    PlayerPrefs.DeleteKey("SessionId");
+                    PlayerPrefs.Save();
+                }
 
                 callback?.Invoke(true, "Kết thúc Session thành công.");
             }

@@ -14,7 +14,18 @@ public static class ApiConfig
 
     public static string GetBaseUrl()
     {
-        return PlayerPrefs.GetString("ApiBaseUrl", DEFAULT_BASE_URL);
+        return ResolveBaseUrl(DEFAULT_BASE_URL);
+    }
+
+    public static string ResolveBaseUrl(string serializedBaseUrl)
+    {
+        string overrideUrl = PlayerPrefs.GetString("ApiBaseUrl", string.Empty);
+        if (!string.IsNullOrWhiteSpace(overrideUrl))
+        {
+            return overrideUrl.Trim();
+        }
+
+        return string.IsNullOrWhiteSpace(serializedBaseUrl) ? DEFAULT_BASE_URL : serializedBaseUrl.Trim();
     }
 
     public static void ConfigureRequest(UnityWebRequest request, string url)
@@ -72,7 +83,7 @@ public class AuthApiClient : MonoBehaviour
 
     public string BaseUrl
     {
-        get => string.IsNullOrEmpty(baseUrl) ? ApiConfig.GetBaseUrl() : baseUrl;
+        get => ApiConfig.ResolveBaseUrl(baseUrl);
         set => baseUrl = value;
     }
 

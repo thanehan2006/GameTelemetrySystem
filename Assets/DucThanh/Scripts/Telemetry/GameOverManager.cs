@@ -52,6 +52,7 @@ public class GameOverManager : MonoBehaviour
     private float targetCardScale = 1f;
     private bool isAnimatingIn;
     private bool uiBuilt;
+    private bool isQuitting;
 
     public static readonly Color WinGold = new Color(0.95f, 0.76f, 0.28f, 1f);
     public static readonly Color WinGoldBright = new Color(1f, 0.88f, 0.48f, 1f);
@@ -884,18 +885,33 @@ public class GameOverManager : MonoBehaviour
         LoadingController.LoadScene(currentScene.name);
     }
 
-    // Ghi nhận kết thúc phiên chơi và quay về màn hình chọn bản đồ
+    // Ghi nhận kết thúc phiên chơi và thoát game sau khi đẩy telemetry
     public void QuitGame()
     {
+        if (isQuitting) return;
+        isQuitting = true;
+
         GameAudioManager.PlayUiClick();
-        TelemetryManager.Instance?.TrackGameEnded("Quit");
         Time.timeScale = 1f;
         IsGameOver = false;
+
+        if (TelemetryManager.Instance != null)
+        {
+            TelemetryManager.Instance.EndSessionAndQuit("Quit", PerformApplicationQuit);
+        }
+        else
+        {
+            PerformApplicationQuit();
+        }
+        Debug.Log("[GameOverManager] QUIT GAME");
+    }
+
+    private static void PerformApplicationQuit()
+    {
 #if UNITY_EDITOR
         UnityEditor.EditorApplication.isPlaying = false;
 #else
         Application.Quit();
 #endif
-        Debug.Log("[GameOverManager] QUIT GAME");
     }
 }
