@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.Rendering;
+using UnityEngine.Rendering.Universal;
 
 /// <summary>
 /// Tạo và cache ảnh chân dung 3D từ modelPrefab của 4 lớp nhân vật trong CharacterRosterConfig
@@ -95,9 +97,18 @@ public static class CharacterPortraitProvider
         List<GameObject> tempObjects = new List<GameObject>();
         RenderTexture rt = null;
         RenderTexture prevActive = RenderTexture.active;
+        Camera cam = null;
+
+        bool prevFog = RenderSettings.fog;
+        AmbientMode prevAmbientMode = RenderSettings.ambientMode;
+        Color prevAmbientLight = RenderSettings.ambientLight;
 
         try
         {
+            RenderSettings.fog = false;
+            RenderSettings.ambientMode = AmbientMode.Flat;
+            RenderSettings.ambientLight = new Color(0.26f, 0.26f, 0.30f, 1f);
+
             // Tắt tạm các đèn ngoài scene để studio 3 điểm giữ ánh sáng nhất quán trên mọi màn
             Light[] existingLights = UnityEngine.Object.FindObjectsByType<Light>(FindObjectsInactive.Exclude, FindObjectsSortMode.None);
             for (int i = 0; i < existingLights.Length; i++)
@@ -113,24 +124,40 @@ public static class CharacterPortraitProvider
             GameObject model = UnityEngine.Object.Instantiate(profile.modelPrefab, studioPos, Quaternion.identity);
             tempObjects.Add(model);
             model.name = "PortraitStudioModel_" + profile.id;
+            model.SetActive(true);
 
             PrepareStudioModel(model);
 
-            Bounds totalBounds = CalculateRendererBounds(model, studioPos);
-            float modelHeight = Mathf.Clamp(totalBounds.size.y, 1.0f, 4.0f);
-            if (totalBounds.size.y < 0.25f)
+            Transform headBone = FindHeadBone(model);
+            float modelHeight = 1.85f;
+            Bounds totalBounds = default;
+            bool hasHeadHeight = false;
+
+            if (headBone != null)
             {
-                modelHeight = 1.85f;
+                float headHeight = headBone.position.y - studioPos.y;
+                if (headHeight > 0.35f && headHeight < 4.0f)
+                {
+                    modelHeight = Mathf.Clamp(headHeight / 0.84f, 1.0f, 3.5f);
+                    hasHeadHeight = true;
+                }
             }
 
-            Transform headBone = FindHeadBone(model);
+            if (!hasHeadHeight)
+            {
+                totalBounds = CalculateRendererBounds(model, studioPos);
+                modelHeight = totalBounds.size.y < 0.25f
+                    ? 1.85f
+                    : Mathf.Clamp(totalBounds.size.y, 1.0f, 4.0f);
+            }
+
             Vector3 focus = headBone != null
                 ? headBone.position - Vector3.up * (modelHeight * 0.055f)
                 : new Vector3(totalBounds.center.x, totalBounds.min.y + modelHeight * 0.80f, totalBounds.center.z);
 
             GameObject camGo = new GameObject("PortraitStudioCamera", typeof(Camera));
             tempObjects.Add(camGo);
-            Camera cam = camGo.GetComponent<Camera>();
+            cam = camGo.GetComponent<Camera>();
             cam.enabled = false;
             cam.clearFlags = CameraClearFlags.SolidColor;
             cam.backgroundColor = new Color(
@@ -142,8 +169,22 @@ public static class CharacterPortraitProvider
             cam.nearClipPlane = 0.05f;
             cam.farClipPlane = 20f;
             cam.cullingMask = 1 << PortraitLayer;
+            cam.useOcclusionCulling = false;
+            cam.forceIntoRenderTexture = true;
             cam.allowHDR = false;
             cam.allowMSAA = false;
+
+            UniversalAdditionalCameraData urpCam = camGo.GetComponent<UniversalAdditionalCameraData>()
+                ?? camGo.AddComponent<UniversalAdditionalCameraData>();
+            urpCam.renderType = CameraRenderType.Base;
+            urpCam.renderPostProcessing = false;
+            urpCam.renderShadows = false;
+            urpCam.antialiasing = AntialiasingMode.None;
+            urpCam.requiresDepthOption = CameraOverrideOption.Off;
+            urpCam.requiresColorOption = CameraOverrideOption.Off;
+            urpCam.volumeLayerMask = 0;
+            urpCam.stopNaN = false;
+            urpCam.dithering = false;
 
             camGo.transform.position = focus + new Vector3(modelHeight * 0.14f, modelHeight * 0.03f, modelHeight * 0.56f);
             camGo.transform.LookAt(focus, Vector3.up);
@@ -154,15 +195,23 @@ public static class CharacterPortraitProvider
             Color rimCol = Color.Lerp(Color.white, profile.themeColor, 0.75f);
             tempObjects.Add(CreateStudioLight("StudioRimLight", new Vector3(18f, 25f, 0f), rimCol, 1.65f));
 
-            rt = RenderTexture.GetTemporary(PortraitSize, PortraitSize, 24, RenderTextureFormat.ARGB32, RenderTextureReadWrite.sRGB);
+            RenderTextureDescriptor desc = new RenderTextureDescriptor(PortraitSize, PortraitSize, RenderTextureFormat.ARGB32, 24)
+            {
+                sRGB = true,
+                msaaSamples = 1,
+                useMipMap = false,
+                autoGenerateMips = false
+            };
+            rt = RenderTexture.GetTemporary(desc);
             cam.targetTexture = rt;
-            RenderTexture.active = rt;
             cam.Render();
 
+            RenderTexture.active = rt;
             Texture2D tex = new Texture2D(PortraitSize, PortraitSize, TextureFormat.RGBA32, false, false);
+            tex.hideFlags = HideFlags.HideAndDontSave;
             tex.wrapMode = TextureWrapMode.Clamp;
             tex.filterMode = FilterMode.Bilinear;
-            tex.ReadPixels(new Rect(0, 0, PortraitSize, PortraitSize), 0, 0);
+            tex.ReadPixels(new Rect(0, 0, PortraitSize, PortraitSize), 0, 0, false);
 
             ApplyBottomVignette(tex, profile.themeColor);
             tex.Apply(false, true);
@@ -175,11 +224,19 @@ public static class CharacterPortraitProvider
         }
         finally
         {
+            if (cam != null)
+            {
+                cam.targetTexture = null;
+            }
             RenderTexture.active = prevActive;
             if (rt != null)
             {
                 RenderTexture.ReleaseTemporary(rt);
             }
+
+            RenderSettings.fog = prevFog;
+            RenderSettings.ambientMode = prevAmbientMode;
+            RenderSettings.ambientLight = prevAmbientLight;
 
             for (int i = 0; i < tempObjects.Count; i++)
             {
@@ -210,12 +267,25 @@ public static class CharacterPortraitProvider
             }
         }
 
+        Renderer[] allRenderers = root.GetComponentsInChildren<Renderer>(true);
+        for (int i = 0; i < allRenderers.Length; i++)
+        {
+            Renderer r = allRenderers[i];
+            if (r == null) continue;
+            r.enabled = true;
+            r.forceRenderingOff = false;
+            r.shadowCastingMode = ShadowCastingMode.Off;
+            r.receiveShadows = false;
+            r.renderingLayerMask = 1u;
+        }
+
         SkinnedMeshRenderer[] skinned = root.GetComponentsInChildren<SkinnedMeshRenderer>(true);
         for (int i = 0; i < skinned.Length; i++)
         {
             if (skinned[i] != null)
             {
                 skinned[i].updateWhenOffscreen = true;
+                skinned[i].forceMatrixRecalculationPerRender = true;
             }
         }
 
@@ -325,7 +395,7 @@ public static class CharacterPortraitProvider
         l.color = color;
         l.intensity = intensity;
         l.shadows = LightShadows.None;
-        l.cullingMask = 1 << PortraitLayer;
+        l.cullingMask = ~0;
         return go;
     }
 
@@ -341,15 +411,27 @@ public static class CharacterPortraitProvider
             255);
 
         int bandRows = Mathf.Max(1, Mathf.RoundToInt(h * 0.24f));
-        for (int y = 0; y < bandRows; y++)
+        for (int y = 0; y < h; y++)
         {
-            float t = 1f - ((float)y / bandRows);
-            float blend = t * t * 0.85f;
             int rowStart = y * w;
-            for (int x = 0; x < w; x++)
+            if (y < bandRows)
             {
-                Color32 src = pixels[rowStart + x];
-                pixels[rowStart + x] = Color32.Lerp(src, fadeTarget, blend);
+                float t = 1f - ((float)y / bandRows);
+                float blend = t * t * 0.85f;
+                for (int x = 0; x < w; x++)
+                {
+                    Color32 src = pixels[rowStart + x];
+                    Color32 blended = Color32.Lerp(src, fadeTarget, blend);
+                    blended.a = 255;
+                    pixels[rowStart + x] = blended;
+                }
+            }
+            else
+            {
+                for (int x = 0; x < w; x++)
+                {
+                    pixels[rowStart + x].a = 255;
+                }
             }
         }
 
@@ -360,6 +442,7 @@ public static class CharacterPortraitProvider
     {
         const int size = 128;
         Texture2D tex = new Texture2D(size, size, TextureFormat.RGBA32, false, false);
+        tex.hideFlags = HideFlags.HideAndDontSave;
         tex.wrapMode = TextureWrapMode.Clamp;
         tex.filterMode = FilterMode.Bilinear;
 
