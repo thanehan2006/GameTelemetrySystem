@@ -442,7 +442,10 @@ public class MedievalButtonFeedback : MonoBehaviour, IPointerEnterHandler, IPoin
         float s = Mathf.Lerp(transform.localScale.x, desiredScale, k);
         bool scaleSettled = Mathf.Abs(s - desiredScale) < 0.0005f;
         if (scaleSettled) s = desiredScale;
-        transform.localScale = new Vector3(s, s, 1f);
+        if (Mathf.Abs(transform.localScale.x - s) > 0.0001f)
+        {
+            transform.localScale = new Vector3(s, s, 1f);
+        }
 
         bool colorSettled = true;
         if (targetGraphic != null && hasBaseColor)
@@ -459,7 +462,11 @@ public class MedievalButtonFeedback : MonoBehaviour, IPointerEnterHandler, IPoin
                 && Mathf.Abs(nextCol.g - targetCol.g) < 0.002f
                 && Mathf.Abs(nextCol.b - targetCol.b) < 0.002f
                 && Mathf.Abs(nextCol.a - targetCol.a) < 0.002f;
-            targetGraphic.color = colorSettled ? targetCol : nextCol;
+            Color appliedCol = colorSettled ? targetCol : nextCol;
+            if (targetGraphic.color != appliedCol)
+            {
+                targetGraphic.color = appliedCol;
+            }
         }
 
         if (borderGraphic != null && borderCaptured)
@@ -467,7 +474,11 @@ public class MedievalButtonFeedback : MonoBehaviour, IPointerEnterHandler, IPoin
             Color bt = !interactable ? borderBaseColor : ((isHovered || isPressed) ? HoverBorderColor : borderBaseColor);
             Color nb = Color.Lerp(borderGraphic.color, bt, k);
             bool bs = Mathf.Abs(nb.r - bt.r) < 0.002f && Mathf.Abs(nb.g - bt.g) < 0.002f && Mathf.Abs(nb.b - bt.b) < 0.002f && Mathf.Abs(nb.a - bt.a) < 0.002f;
-            borderGraphic.color = bs ? bt : nb;
+            Color appliedBorder = bs ? bt : nb;
+            if (borderGraphic.color != appliedBorder)
+            {
+                borderGraphic.color = appliedBorder;
+            }
             colorSettled &= bs;
         }
 
@@ -544,7 +555,10 @@ public class MedievalSliderFeedback : MonoBehaviour, IPointerEnterHandler, IPoin
         float s = Mathf.Lerp(handleRect.localScale.x, desired, k);
         bool settled = Mathf.Abs(s - desired) < 0.0005f;
         if (settled) s = desired;
-        handleRect.localScale = new Vector3(s, s, 1f);
+        if (Mathf.Abs(handleRect.localScale.x - s) > 0.0001f)
+        {
+            handleRect.localScale = new Vector3(s, s, 1f);
+        }
 
         if (settled && !isHovered && !isDragging)
         {

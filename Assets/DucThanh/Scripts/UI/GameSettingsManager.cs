@@ -88,6 +88,11 @@ public static class GameSettingsManager
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
     private static void ResetStaticState()
     {
+        SceneManager.sceneLoaded -= OnSceneLoaded;
+        Application.quitting -= FlushPendingPrefs;
+#if UNITY_EDITOR
+        Application.quitting -= RestoreUrpBaselineInEditor;
+#endif
         initialized = false;
         sceneHooked = false;
         hasBaselineUrp = false;
@@ -105,10 +110,13 @@ public static class GameSettingsManager
 
         if (!sceneHooked)
         {
+            SceneManager.sceneLoaded -= OnSceneLoaded;
             SceneManager.sceneLoaded += OnSceneLoaded;
+            Application.quitting -= FlushPendingPrefs;
             Application.quitting += FlushPendingPrefs;
             sceneHooked = true;
 #if UNITY_EDITOR
+            Application.quitting -= RestoreUrpBaselineInEditor;
             Application.quitting += RestoreUrpBaselineInEditor;
 #endif
         }

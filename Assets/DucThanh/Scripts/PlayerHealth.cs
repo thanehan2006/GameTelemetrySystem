@@ -20,7 +20,6 @@ public class PlayerHealth : MonoBehaviour
     [SerializeField] private float barSmoothSpeed = 10f;
 
     private Image ghostFillImage;
-    private Image sheenImage;
     private Image crestGemImage;
     private float targetHpRatio = 1f;
     private float ghostHpRatio = 1f;
@@ -80,7 +79,7 @@ public class PlayerHealth : MonoBehaviour
                 healthText,
                 out Image styledFill,
                 out ghostFillImage,
-                out sheenImage,
+                out _,
                 out crestGemImage);
             if (styledFill != null) healthFillImage = styledFill;
         }

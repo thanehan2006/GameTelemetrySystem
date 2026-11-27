@@ -51,6 +51,8 @@ public class LoadingController : MonoBehaviour
     private float nextTipSwitchTime;
     private int tipIndex;
     private int lastUiUpdateFrame = -1;
+    private int lastDisplayedPercent = -1;
+    private string lastStatusText;
 
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
     private static void ResetStaticState()
@@ -137,10 +139,7 @@ public class LoadingController : MonoBehaviour
                 FloatingEmbersUI embers = emberLayer.AddComponent<FloatingEmbersUI>();
                 embers.Initialize(26, 0.05f, 0.95f, new Color(1f, 0.85f, 0.35f, 1f), new Color(0.45f, 0.95f, 0.65f, 1f));
             }
-            return;
         }
-
-        ApplyLoadingTheme();
     }
 
     // Cho phép nhấn phím R để tải lại nếu thiếu tài nguyên bắt buộc
@@ -152,181 +151,6 @@ public class LoadingController : MonoBehaviour
             float scale = 1.0f + Mathf.PingPong(Time.unscaledTime * 0.012f, 0.06f);
             keyArtRect.localScale = new Vector3(scale, scale, 1f);
         }
-    }
-
-    private void ApplyLoadingTheme()
-    {
-        Canvas canvas = ResolveLoadingCanvas();
-        if (canvas == null) return;
-
-        FantasyUiThemeHelper.ConfigureResponsiveCanvas(canvas);
-        TMP_FontAsset sharedFont = progressText != null ? progressText.font : (loadingStatus != null ? loadingStatus.font : null);
-
-        Transform oldBg = canvas.transform.Find("Background");
-        if (oldBg != null) oldBg.gameObject.SetActive(false);
-
-        Transform oldTitle = canvas.transform.Find("LoadingTitle");
-        if (oldTitle != null) oldTitle.gameObject.SetActive(false);
-
-        RawImage keyArt = FantasyUiThemeHelper.CreateFullscreenKeyArt(canvas.transform, "UI/LoadingBg", "LoadingKeyArt");
-        keyArtRect = keyArt.rectTransform;
-
-        Image veil = FantasyUiThemeHelper.CreateGradientOverlay(canvas.transform, "LoadingGradientVeil", false, new Color(0.03f, 0.05f, 0.09f, 1f));
-        veil.transform.SetSiblingIndex(1);
-
-        GameObject emberLayer = new GameObject("LoadingEmbers", typeof(RectTransform));
-        emberLayer.transform.SetParent(canvas.transform, false);
-        emberLayer.transform.SetSiblingIndex(2);
-        FantasyUiThemeHelper.StretchFull(emberLayer.GetComponent<RectTransform>());
-        FloatingEmbersUI embers = emberLayer.AddComponent<FloatingEmbersUI>();
-        embers.Initialize(26, 0.05f, 0.95f, new Color(1f, 0.85f, 0.35f, 1f), new Color(0.45f, 0.95f, 0.65f, 1f));
-
-        GameObject brandGroup = new GameObject("GameBrandHeader", typeof(RectTransform));
-        brandGroup.transform.SetParent(canvas.transform, false);
-        RectTransform brandRt = brandGroup.GetComponent<RectTransform>();
-        brandRt.anchorMin = new Vector2(0f, 1f);
-        brandRt.anchorMax = new Vector2(0f, 1f);
-        brandRt.pivot = new Vector2(0f, 1f);
-        brandRt.anchoredPosition = new Vector2(88f, -64f);
-        brandRt.sizeDelta = new Vector2(680f, 160f);
-
-        TMP_Text badge = FantasyUiThemeHelper.CreateText(brandGroup.transform, "Badge", "HÀNH ĐỘNG SINH TỒN  •  DARK FANTASY",
-            15f, FontStyles.Bold, FantasyUiThemeHelper.GoldBright, TextAlignmentOptions.Left, sharedFont);
-        SetTopLeftRect(badge.rectTransform, 0f, 0f, 650f, 24f);
-        badge.characterSpacing = 6f;
-
-        TMP_Text title = FantasyUiThemeHelper.CreateText(brandGroup.transform, "GameTitle", "VANGUARD",
-            64f, FontStyles.Bold, Color.white, TextAlignmentOptions.Left, sharedFont);
-        SetTopLeftRect(title.rectTransform, -3f, -26f, 650f, 74f);
-        title.characterSpacing = 10f;
-        Shadow titleShadow = title.gameObject.AddComponent<Shadow>();
-        titleShadow.effectColor = new Color(0f, 0f, 0f, 0.75f);
-        titleShadow.effectDistance = new Vector2(0f, -4f);
-
-        FantasyUiThemeHelper.CreateAccentLine(brandGroup.transform, "GoldDivider",
-            new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(0f, 1f),
-            new Vector2(0f, -104f), new Vector2(220f, 3f), FantasyUiThemeHelper.GoldPrimary);
-
-        TMP_Text sub = FantasyUiThemeHelper.CreateText(brandGroup.transform, "GameSubtitle", "CUỘC TRUY QUÉT RỪNG ORC",
-            21f, FontStyles.Bold, new Color(0.88f, 0.80f, 0.62f, 0.96f), TextAlignmentOptions.Left, sharedFont);
-        SetTopLeftRect(sub.rectTransform, 0f, -114f, 650f, 32f);
-        sub.characterSpacing = 5f;
-
-        GameObject footer = new GameObject("LoadingFooterHUD", typeof(RectTransform));
-        footer.transform.SetParent(canvas.transform, false);
-        RectTransform footRt = footer.GetComponent<RectTransform>();
-        footRt.anchorMin = new Vector2(0f, 0f);
-        footRt.anchorMax = new Vector2(1f, 0f);
-        footRt.pivot = new Vector2(0.5f, 0f);
-        footRt.anchoredPosition = new Vector2(0f, 54f);
-        footRt.sizeDelta = new Vector2(-176f, 130f);
-
-        tipText = FantasyUiThemeHelper.CreateText(footer.transform, "GameplayTipText", GameplayTips[0],
-            19f, FontStyles.Normal, new Color(0.88f, 0.91f, 0.96f, 0.95f), TextAlignmentOptions.Left, sharedFont);
-        RectTransform tipRt = tipText.rectTransform;
-        tipRt.anchorMin = new Vector2(0f, 1f);
-        tipRt.anchorMax = new Vector2(1f, 1f);
-        tipRt.pivot = new Vector2(0.5f, 1f);
-        tipRt.anchoredPosition = new Vector2(0f, 0f);
-        tipRt.sizeDelta = new Vector2(0f, 36f);
-
-        if (progressBar != null)
-        {
-            progressBar.transform.SetParent(footer.transform, false);
-            progressBar.interactable = false;
-            progressBar.transition = Selectable.Transition.None;
-            progressBar.minValue = 0f;
-            progressBar.maxValue = 1f;
-
-            RectTransform barRt = progressBar.GetComponent<RectTransform>();
-            barRt.anchorMin = new Vector2(0f, 0.5f);
-            barRt.anchorMax = new Vector2(1f, 0.5f);
-            barRt.pivot = new Vector2(0.5f, 0.5f);
-            barRt.anchoredPosition = new Vector2(0f, -6f);
-            barRt.sizeDelta = new Vector2(0f, 14f);
-
-            Transform handleArea = progressBar.transform.Find("Handle Slide Area");
-            if (handleArea != null) handleArea.gameObject.SetActive(false);
-
-            Transform barBg = progressBar.transform.Find("Background");
-            if (barBg != null)
-            {
-                FantasyUiThemeHelper.StretchFull(barBg.GetComponent<RectTransform>());
-                Image bgImg = barBg.GetComponent<Image>();
-                if (bgImg != null)
-                {
-                    bgImg.sprite = null;
-                    bgImg.color = new Color(0.08f, 0.11f, 0.18f, 0.92f);
-                }
-                Outline bgOut = barBg.GetComponent<Outline>();
-                if (bgOut == null) bgOut = barBg.gameObject.AddComponent<Outline>();
-                bgOut.effectColor = FantasyUiThemeHelper.GoldBorder;
-                bgOut.effectDistance = new Vector2(1f, -1f);
-            }
-
-            Transform fillArea = progressBar.transform.Find("Fill Area");
-            if (fillArea != null)
-            {
-                RectTransform faRt = fillArea.GetComponent<RectTransform>();
-                faRt.anchorMin = Vector2.zero;
-                faRt.anchorMax = Vector2.one;
-                faRt.offsetMin = new Vector2(2f, 2f);
-                faRt.offsetMax = new Vector2(-2f, -2f);
-            }
-
-            if (progressBar.fillRect != null)
-            {
-                progressBar.fillRect.offsetMin = Vector2.zero;
-                progressBar.fillRect.offsetMax = Vector2.zero;
-                Image fillImg = progressBar.fillRect.GetComponent<Image>();
-                if (fillImg != null)
-                {
-                    fillImg.sprite = null;
-                    fillImg.color = FantasyUiThemeHelper.GoldBright;
-                }
-            }
-        }
-
-        if (loadingStatus != null)
-        {
-            loadingStatus.transform.SetParent(footer.transform, false);
-            RectTransform stRt = loadingStatus.rectTransform;
-            stRt.anchorMin = new Vector2(0f, 0f);
-            stRt.anchorMax = new Vector2(0.75f, 0f);
-            stRt.pivot = new Vector2(0f, 0f);
-            stRt.anchoredPosition = new Vector2(0f, 6f);
-            stRt.sizeDelta = new Vector2(0f, 30f);
-
-            loadingStatus.fontSize = 18f;
-            loadingStatus.fontStyle = FontStyles.Normal;
-            loadingStatus.color = FantasyUiThemeHelper.TextMuted;
-            loadingStatus.alignment = TextAlignmentOptions.MidlineLeft;
-        }
-
-        if (progressText != null)
-        {
-            progressText.transform.SetParent(footer.transform, false);
-            RectTransform ptRt = progressText.rectTransform;
-            ptRt.anchorMin = new Vector2(0.75f, 0f);
-            ptRt.anchorMax = new Vector2(1f, 0f);
-            ptRt.pivot = new Vector2(1f, 0f);
-            ptRt.anchoredPosition = new Vector2(0f, 4f);
-            ptRt.sizeDelta = new Vector2(0f, 34f);
-
-            progressText.fontSize = 24f;
-            progressText.fontStyle = FontStyles.Bold;
-            progressText.color = FantasyUiThemeHelper.GoldBright;
-            progressText.alignment = TextAlignmentOptions.MidlineRight;
-        }
-    }
-
-    private static void SetTopLeftRect(RectTransform rt, float x, float y, float w, float h)
-    {
-        rt.anchorMin = new Vector2(0f, 1f);
-        rt.anchorMax = new Vector2(0f, 1f);
-        rt.pivot = new Vector2(0f, 1f);
-        rt.anchoredPosition = new Vector2(x, y);
-        rt.sizeDelta = new Vector2(w, h);
     }
 
     // Nạp trước tài nguyên game bằng GameAssetPreloader rồi kích hoạt scene chiến đấu
@@ -365,9 +189,11 @@ public class LoadingController : MonoBehaviour
         realProgress = 0f;
         displayedProgress = 0f;
         lastUiUpdateFrame = -1;
+        lastDisplayedPercent = 0;
+        lastStatusText = "Khởi tạo hệ thống tải tài nguyên...";
         progressBar.value = 0f;
         progressText.text = "0%";
-        loadingStatus.text = "Khởi tạo hệ thống tải tài nguyên...";
+        loadingStatus.text = lastStatusText;
 
         if (startDelay > 0f)
         {
@@ -410,9 +236,11 @@ public class LoadingController : MonoBehaviour
             realProgress = 0f;
             displayedProgress = 0f;
             lastUiUpdateFrame = -1;
+            lastDisplayedPercent = 0;
+            lastStatusText = "Đang tải lại tài nguyên...";
             progressBar.value = 0f;
             progressText.text = "0%";
-            loadingStatus.text = "Đang tải lại tài nguyên...";
+            loadingStatus.text = lastStatusText;
             yield return null;
         }
 
@@ -442,8 +270,10 @@ public class LoadingController : MonoBehaviour
         }
 
         progressBar.value = 1f;
+        lastDisplayedPercent = 100;
         progressText.text = "100%";
-        loadingStatus.text = "Đã tải xong tài nguyên — Sẵn sàng ra trận!";
+        lastStatusText = "Đã tải xong tài nguyên — Sẵn sàng ra trận!";
+        loadingStatus.text = lastStatusText;
 
         if (readyHoldDuration > 0f)
         {
@@ -481,11 +311,17 @@ public class LoadingController : MonoBehaviour
             int percentage = displayedProgress >= 0.999f
                 ? 100
                 : Mathf.Clamp(Mathf.FloorToInt(displayedProgress * 100f), 0, 99);
-            progressText.text = percentage + "%";
+            if (percentage != lastDisplayedPercent)
+            {
+                lastDisplayedPercent = percentage;
+                progressText.text = percentage + "%";
+            }
         }
 
-        if (loadingStatus != null && !string.IsNullOrEmpty(statusText))
+        if (loadingStatus != null && !string.IsNullOrEmpty(statusText)
+            && !string.Equals(lastStatusText, statusText, System.StringComparison.Ordinal))
         {
+            lastStatusText = statusText;
             loadingStatus.text = statusText;
         }
 

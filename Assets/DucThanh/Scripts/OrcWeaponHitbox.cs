@@ -4,6 +4,7 @@ using UnityEngine;
 public class OrcWeaponHitbox : MonoBehaviour
 {
     private OrcEnemyAI ownerAI;
+    private Transform ownerTransform;
     private int damage = 10;
     private bool hitboxActive = false;
     private bool hasDealtDamageInCurrentSwing = false;
@@ -12,6 +13,7 @@ public class OrcWeaponHitbox : MonoBehaviour
     public void Initialize(OrcEnemyAI owner, int attackDamage)
     {
         ownerAI = owner;
+        ownerTransform = owner != null ? owner.transform : null;
         damage = attackDamage;
     }
 
@@ -47,26 +49,38 @@ public class OrcWeaponHitbox : MonoBehaviour
     // Kiểm tra va chạm với Player để xét Perfect Parry, Block thường hoặc trừ máu trực tiếp
     private void CheckHit(Collider other)
     {
-        if (!hitboxActive || hasDealtDamageInCurrentSwing) return;
+        if (!hitboxActive || hasDealtDamageInCurrentSwing || other == null || other is TerrainCollider) return;
 
-        if (ownerAI != null && (other.transform == ownerAI.transform || other.transform.IsChildOf(ownerAI.transform)))
+        Transform selfRoot = ownerTransform != null ? ownerTransform : (ownerAI != null ? ownerAI.transform : null);
+        if (selfRoot != null && (other.transform == selfRoot || other.transform.IsChildOf(selfRoot)))
         {
             return;
         }
 
-        PlayerHealth playerHealth = other.GetComponent<PlayerHealth>();
-        if (playerHealth == null)
+        PlayerHealth playerHealth = PlayerHealth.Instance;
+        if (playerHealth != null)
         {
-            playerHealth = other.GetComponentInParent<PlayerHealth>();
+            Transform pt = playerHealth.transform;
+            if (other.transform != pt && !other.transform.IsChildOf(pt)) return;
+        }
+        else
+        {
+            playerHealth = other.GetComponent<PlayerHealth>();
+            if (playerHealth == null)
+            {
+                playerHealth = other.GetComponentInParent<PlayerHealth>();
+            }
         }
 
         if (playerHealth != null && playerHealth.currentHealth > 0 && !playerHealth.IsInvulnerable)
         {
             hasDealtDamageInCurrentSwing = true;
 
-            Vector3 sourcePos = ownerAI != null ? ownerAI.transform.position : transform.position;
+            Vector3 sourcePos = selfRoot != null ? selfRoot.position : transform.position;
             Vector3 hitPoint = playerHealth.transform.position + Vector3.up * 1.15f;
-            PlayerController playerController = playerHealth.GetComponent<PlayerController>();
+            PlayerController playerController = PlayerController.Instance != null && PlayerController.Instance.transform == playerHealth.transform
+                ? PlayerController.Instance
+                : playerHealth.GetComponent<PlayerController>();
 
             if (playerController != null && playerController.IsBlocking)
             {

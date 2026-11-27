@@ -323,6 +323,7 @@ public class GameMenuManager : MonoBehaviour
         }
         if (WeaponShopManager.Instance != null && WeaponShopManager.Instance.IsActualShopOpen) return;
         if (StoryGuideManager.IsAnyModalOpen) return;
+        if (WarriorProfileOverlay.IsOpen) return;
 
         if (!Input.GetKeyDown(KeyCode.Escape)) return;
 

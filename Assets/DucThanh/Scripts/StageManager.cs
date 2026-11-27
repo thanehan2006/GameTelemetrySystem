@@ -123,6 +123,7 @@ public class StageManager : MonoBehaviour
     private Material beaconBeamMat;
     private Material beaconRingMat;
     private ParticleSystem beaconMotesPs;
+    private Light beaconLight;
     private Vector3 currentWaypointTarget;
 
     private TMP_Text hudStageTitleText;
@@ -163,7 +164,7 @@ public class StageManager : MonoBehaviour
         CurrentStage = 1;
     }
 
-    // Dựng vật thể môi trường, HUD, cột sáng dẫn đường và bắt đầu Màn 1
+    // Liên kết HUD có sẵn trên scene, dựng cột sáng dẫn đường và bắt đầu Màn 1
     private void Start()
     {
         ApplyRuntimePerformanceOptimizations();
@@ -178,7 +179,6 @@ public class StageManager : MonoBehaviour
         stage2Center = SnapPositionToTerrain(stage2Center);
         stage3Center = SnapPositionToTerrain(stage3Center);
 
-        BuildStageEnvironments();
         SpawnRoadEnemies();
         BuildRuntimeHud();
         StoryGuideManager.EnsureInstance().InitializeForMap(MapLevel, mapDisplayName, stage1Center);
@@ -190,8 +190,19 @@ public class StageManager : MonoBehaviour
 
     private void OnDestroy()
     {
+        UnsubscribeBossEvents();
         if (beaconBeamMat != null) Destroy(beaconBeamMat);
         if (beaconRingMat != null) Destroy(beaconRingMat);
+        if (Instance == this) Instance = null;
+    }
+
+    private void UnsubscribeBossEvents()
+    {
+        if (activeBoss != null)
+        {
+            activeBoss.OnHealthChanged -= HandleBossHealthChanged;
+            activeBoss.OnDied -= HandleBossDied;
+        }
     }
 
     // Theo dõi điều kiện hoàn thành từng màn và cập nhật hướng dẫn trên HUD
@@ -675,6 +686,7 @@ public class StageManager : MonoBehaviour
     {
         if (phase == StagePhase.Completed) return;
         phase = StagePhase.Completed;
+        UnsubscribeBossEvents();
 
         if (bossBarRoot != null) bossBarRoot.SetActive(false);
 
@@ -949,124 +961,6 @@ public class StageManager : MonoBehaviour
         return snapped;
     }
 
-    // Dựng hoặc liên kết trại lửa checkpoint, cụm bẫy gai và bình hồi máu trên bản đồ
-    private void BuildStageEnvironments()
-    {
-
-        if (GameObject.Find("StageProps_Generated") != null)
-        {
-            return;
-        }
-
-        GameObject propsRoot = new GameObject("StageProps_Generated");
-
-        CreateCheckpoint("Checkpoint_Stage1", stage1Center + new Vector3(-2.5f, 0f, 2f), 1, "Trại Rừng Ngoại Vi", 30, propsRoot.transform);
-        CreateCheckpoint("Checkpoint_Stage2", stage2Center + new Vector3(3f, 0f, 0f), 2, "Thung Lũng Bẫy", 45, propsRoot.transform);
-        CreateCheckpoint("Checkpoint_Stage3", stage3Center + new Vector3(0f, 0f, 16f), 3, "Cổng Mỏ Vàng", 55, propsRoot.transform);
-
-        if (runeStonePrefab != null)
-        {
-            SpawnPropOnTerrain(runeStonePrefab, stage1Center + new Vector3(9f, 0f, 6f), Quaternion.Euler(0f, -35f, 0f), Vector3.one * 1.3f, propsRoot.transform, "Stage1_RuneStone");
-        }
-        SpawnHealthPickupAt(stage1Center + new Vector3(-6f, 0f, -5f), 35, propsRoot.transform);
-
-        Vector3 mid12A = Vector3.Lerp(stage1Center, stage2Center, 0.35f);
-        Vector3 mid12B = Vector3.Lerp(stage1Center, stage2Center, 0.68f);
-        SpawnHealthPickupAt(mid12A, 35, propsRoot.transform);
-        SpawnHealthPickupAt(mid12B, 35, propsRoot.transform);
-
-        Vector3[] trapOffsets =
-        {
-            new Vector3(-7f, 0f, 5f),
-            new Vector3(6f, 0f, 7f),
-            new Vector3(-9f, 0f, -6f),
-            new Vector3(8f, 0f, -5f),
-            new Vector3(0f, 0f, 9f),
-            new Vector3(-2f, 0f, -9f)
-        };
-        for (int i = 0; i < trapOffsets.Length; i++)
-        {
-            SpawnTrapAt(stage2Center + trapOffsets[i], propsRoot.transform, $"Stage2_SpikeTrap_{i + 1}");
-        }
-        SpawnHealthPickupAt(stage2Center + new Vector3(-11f, 0f, 1f), 40, propsRoot.transform);
-        SpawnHealthPickupAt(stage2Center + new Vector3(11f, 0f, -2f), 40, propsRoot.transform);
-
-        Vector3 mid23 = Vector3.Lerp(stage2Center, stage3Center, 0.5f);
-        SpawnHealthPickupAt(mid23, 40, propsRoot.transform);
-
-        if (goldMinePrefab != null)
-        {
-            SpawnPropOnTerrain(goldMinePrefab, stage3Center + new Vector3(0f, 0f, -12f), Quaternion.Euler(0f, 180f, 0f), Vector3.one * 1.4f, propsRoot.transform, "Stage3_GoldMine");
-        }
-        if (trolleyGoldPrefab != null)
-        {
-            SpawnPropOnTerrain(trolleyGoldPrefab, stage3Center + new Vector3(5.5f, 0f, -8f), Quaternion.Euler(0f, 35f, 0f), Vector3.one * 1.25f, propsRoot.transform, "Stage3_TrolleyGold");
-            SpawnPropOnTerrain(trolleyGoldPrefab, stage3Center + new Vector3(-6.5f, 0f, -7f), Quaternion.Euler(0f, -25f, 0f), Vector3.one * 1.2f, propsRoot.transform, "Stage3_TrolleyGold_2");
-        }
-        if (stoneWallPrefab != null)
-        {
-            int wallCount = 8;
-            float ringRadius = 19f;
-            for (int i = 0; i < wallCount; i++)
-            {
-
-                if (i == 1 || i == 2) continue;
-                float angle = i * (360f / wallCount) * Mathf.Deg2Rad;
-                Vector3 wallPos = stage3Center + new Vector3(Mathf.Cos(angle), 0f, Mathf.Sin(angle)) * ringRadius;
-                Quaternion wallRot = Quaternion.LookRotation(stage3Center - wallPos);
-                SpawnPropOnTerrain(stoneWallPrefab, wallPos, wallRot, Vector3.one * 1.4f, propsRoot.transform, $"Stage3_ArenaWall_{i}");
-            }
-        }
-        if (fireflyFxPrefab != null)
-        {
-            SpawnPropOnTerrain(fireflyFxPrefab, stage3Center + new Vector3(0f, 1.5f, 0f), Quaternion.identity, Vector3.one, propsRoot.transform, "Stage3_Fireflies");
-        }
-
-        SpawnHealthPickupAt(stage3Center + new Vector3(-12f, 0f, 4f), 50, propsRoot.transform);
-        SpawnHealthPickupAt(stage3Center + new Vector3(12f, 0f, 4f), 50, propsRoot.transform);
-    }
-
-    private void CreateCheckpoint(string objName, Vector3 rawPos, int stageNum, string title, int healBonus, Transform parent)
-    {
-        Vector3 pos = SnapPositionToTerrain(rawPos);
-        GameObject cpObj = new GameObject(objName);
-        cpObj.transform.SetParent(parent, false);
-        cpObj.transform.position = pos;
-
-        CampfireCheckpoint cp = cpObj.AddComponent<CampfireCheckpoint>();
-        cp.stageNumber = stageNum;
-        cp.checkpointName = title;
-        cp.healBonus = healBonus;
-        cp.activationRadius = 6f;
-    }
-
-    private void SpawnTrapAt(Vector3 rawPos, Transform parent, string trapName)
-    {
-        Vector3 pos = SnapPositionToTerrain(rawPos);
-        GameObject trapObj;
-        if (spikeTrapPrefab != null)
-        {
-            trapObj = Instantiate(spikeTrapPrefab, pos, Quaternion.Euler(0f, Random.Range(0f, 360f), 0f), parent);
-            trapObj.transform.localScale = Vector3.one * 1.35f;
-        }
-        else
-        {
-            trapObj = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
-            trapObj.transform.SetParent(parent, false);
-            trapObj.transform.position = pos;
-            trapObj.transform.localScale = new Vector3(2.2f, 0.25f, 2.2f);
-            Renderer r = trapObj.GetComponent<Renderer>();
-            if (r != null) r.material.color = new Color(0.85f, 0.2f, 0.15f);
-        }
-
-        trapObj.name = trapName;
-        TrapHazard hazard = trapObj.GetComponent<TrapHazard>();
-        if (hazard == null) hazard = trapObj.AddComponent<TrapHazard>();
-        hazard.damage = Mathf.Max(1, Mathf.RoundToInt(18 * Mathf.Max(0.5f, enemyDamageMultiplier)));
-        hazard.hitCooldown = 1.25f;
-        hazard.triggerRadius = 1.75f;
-    }
-
     private static void ApplyRuntimePerformanceOptimizations()
     {
         GameSettingsManager.ApplyCurrentGraphicsSettings();
@@ -1098,14 +992,6 @@ public class StageManager : MonoBehaviour
         HealthPickup pickup = obj.GetComponent<HealthPickup>();
         if (pickup == null) pickup = obj.AddComponent<HealthPickup>();
         pickup.healAmount = healAmt;
-    }
-
-    private void SpawnPropOnTerrain(GameObject prefab, Vector3 rawPos, Quaternion rot, Vector3 scale, Transform parent, string objName)
-    {
-        Vector3 pos = SnapPositionToTerrain(rawPos);
-        GameObject obj = Instantiate(prefab, pos, rot, parent);
-        obj.name = objName;
-        obj.transform.localScale = scale;
     }
 
     private void AddUnitAuraLight(GameObject target, Color color, float range, float intensity, bool essential = false)
@@ -1195,6 +1081,7 @@ public class StageManager : MonoBehaviour
         rend.receiveShadows = false;
 
         AddUnitAuraLight(beaconObject, new Color(1f, 0.8f, 0.2f), 16f, 4.5f, essential: true);
+        beaconLight = beaconObject.GetComponentInChildren<Light>(true);
         beaconObject.SetActive(false);
     }
 
@@ -1223,8 +1110,7 @@ public class StageManager : MonoBehaviour
             main.startColor = new Color(color.r * 2.2f, color.g * 2.2f, color.b * 2.2f, 0.95f);
         }
 
-        Light l = beaconObject.GetComponentInChildren<Light>();
-        if (l != null) l.color = color;
+        if (beaconLight != null) beaconLight.color = color;
 
         beaconObject.SetActive(true);
         if (beaconMotesPs != null) beaconMotesPs.Play();
@@ -1235,44 +1121,21 @@ public class StageManager : MonoBehaviour
         if (beaconObject != null) beaconObject.SetActive(false);
     }
 
-    // Khởi tạo hoặc nâng cấp giao diện bảng nhiệm vụ, thanh máu Boss và banner trên Canvas
+    // Liên kết và nâng cấp giao diện bảng nhiệm vụ, thanh máu Boss và banner đã đặt sẵn trên Canvas
     private void BuildRuntimeHud()
     {
         Canvas canvas = FantasyUiThemeHelper.FindSceneCanvas(gameObject);
         if (canvas == null) return;
 
         Transform existingMission = canvas.transform.Find("StageMissionHUD");
-        GameObject missionPanel;
         if (existingMission != null)
         {
-            missionPanel = existingMission.gameObject;
+            GameObject missionPanel = existingMission.gameObject;
             hudStageTitleText = existingMission.Find("StageTitleText")?.GetComponent<TMP_Text>();
             hudObjectiveText = existingMission.Find("ObjectiveText")?.GetComponent<TMP_Text>();
             hudDashText = existingMission.Find("DashStatusText")?.GetComponent<TMP_Text>();
+            CombatHudStyler.StyleMissionHud(missionPanel, hudStageTitleText, hudObjectiveText, hudDashText);
         }
-        else
-        {
-            missionPanel = CreateUiPanel("StageMissionHUD", canvas.transform,
-                new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(0f, 1f),
-                new Vector2(22f, -20f), new Vector2(452f, 128f),
-                CombatHudStyler.ObsidianDeep);
-
-            hudStageTitleText = CreateUiText("StageTitleText", missionPanel.transform,
-                new Vector2(0f, 1f), new Vector2(1f, 1f), new Vector2(0.5f, 1f),
-                new Vector2(0f, -10f), new Vector2(-28f, 28f),
-                "MÀN 1/3 • TRẠI RỪNG NGOẠI VI", 16.5f, FontStyles.Bold, Color.white, TextAlignmentOptions.MidlineLeft);
-
-            hudObjectiveText = CreateUiText("ObjectiveText", missionPanel.transform,
-                new Vector2(0f, 1f), new Vector2(1f, 1f), new Vector2(0.5f, 1f),
-                new Vector2(0f, -46f), new Vector2(-28f, 40f),
-                "Đang khởi tạo nhiệm vụ...", 15, FontStyles.Bold, Color.white, TextAlignmentOptions.MidlineLeft);
-
-            hudDashText = CreateUiText("DashStatusText", missionPanel.transform,
-                new Vector2(0f, 0f), new Vector2(1f, 0f), new Vector2(0.5f, 0f),
-                new Vector2(0f, 3f), new Vector2(-28f, 28f),
-                "[LMB] Chém  •  [RMB] Đỡ  •  [B] Lò Rèn  •  [H] Sổ Tay", 12.6f, FontStyles.Bold, Color.white, TextAlignmentOptions.MidlineLeft);
-        }
-        CombatHudStyler.StyleMissionHud(missionPanel, hudStageTitleText, hudObjectiveText, hudDashText);
 
         Transform existingBossBar = canvas.transform.Find("BossHpBarHUD");
         if (existingBossBar != null)
@@ -1281,94 +1144,33 @@ public class StageManager : MonoBehaviour
             bossNameText = existingBossBar.Find("BossNameText")?.GetComponent<TMP_Text>();
             bossHpValueText = existingBossBar.Find("BossHpValueText")?.GetComponent<TMP_Text>();
             bossHpSlider = existingBossBar.Find("BossSlider")?.GetComponent<Slider>();
+            CombatHudStyler.StyleBossHud(
+                bossBarRoot,
+                bossHpSlider,
+                bossNameText,
+                bossHpValueText,
+                out bossFillImage,
+                out bossGhostFillImage,
+                out bossFrameImage);
+            if (bossBarRoot.GetComponent<Canvas>() == null)
+            {
+                bossBarRoot.AddComponent<Canvas>();
+            }
+            bossBarRoot.SetActive(false);
         }
-        else
-        {
-            bossBarRoot = CreateUiPanel("BossHpBarHUD", canvas.transform,
-                new Vector2(0.5f, 1f), new Vector2(0.5f, 1f), new Vector2(0.5f, 1f),
-                new Vector2(0f, -20f), new Vector2(568f, 76f),
-                CombatHudStyler.CrimsonObsidian);
-
-            bossNameText = CreateUiText("BossNameText", bossBarRoot.transform,
-                new Vector2(0f, 1f), new Vector2(0.76f, 1f), new Vector2(0f, 1f),
-                new Vector2(34f, -8f), new Vector2(-8f, 26f),
-                "❖ BOSS: ĐẠI TƯỚNG ORC WARLORD ❖", 16, FontStyles.Bold, Color.white, TextAlignmentOptions.MidlineLeft);
-
-            bossHpValueText = CreateUiText("BossHpValueText", bossBarRoot.transform,
-                new Vector2(0.76f, 1f), new Vector2(1f, 1f), new Vector2(1f, 1f),
-                new Vector2(-20f, -8f), new Vector2(-4f, 26f),
-                "700 / 700", 14.5f, FontStyles.Bold, Color.white, TextAlignmentOptions.MidlineRight);
-
-            GameObject sliderGo = new GameObject("BossSlider", typeof(RectTransform), typeof(Slider));
-            sliderGo.transform.SetParent(bossBarRoot.transform, false);
-            RectTransform sRt = sliderGo.GetComponent<RectTransform>();
-            sRt.anchorMin = new Vector2(0f, 0f);
-            sRt.anchorMax = new Vector2(1f, 0f);
-            sRt.pivot = new Vector2(0.5f, 0f);
-            sRt.anchoredPosition = new Vector2(0f, 12f);
-            sRt.sizeDelta = new Vector2(-40f, 20f);
-
-            GameObject bgGo = new GameObject("Bg", typeof(RectTransform), typeof(Image));
-            bgGo.transform.SetParent(sliderGo.transform, false);
-            StretchRect(bgGo.GetComponent<RectTransform>());
-            bgGo.GetComponent<Image>().color = new Color(0.14f, 0.035f, 0.055f, 0.96f);
-
-            GameObject fillArea = new GameObject("FillArea", typeof(RectTransform));
-            fillArea.transform.SetParent(sliderGo.transform, false);
-            StretchRect(fillArea.GetComponent<RectTransform>());
-
-            GameObject fillGo = new GameObject("Fill", typeof(RectTransform), typeof(Image));
-            fillGo.transform.SetParent(fillArea.transform, false);
-            StretchRect(fillGo.GetComponent<RectTransform>());
-            Image fillImg = fillGo.GetComponent<Image>();
-            fillImg.color = CombatHudStyler.BossFillNormal;
-
-            bossHpSlider = sliderGo.GetComponent<Slider>();
-            bossHpSlider.interactable = false;
-            bossHpSlider.transition = Selectable.Transition.None;
-            bossHpSlider.fillRect = fillGo.GetComponent<RectTransform>();
-            bossHpSlider.minValue = 0f;
-            bossHpSlider.maxValue = 700f;
-            bossHpSlider.value = 700f;
-        }
-        CombatHudStyler.StyleBossHud(
-            bossBarRoot,
-            bossHpSlider,
-            bossNameText,
-            bossHpValueText,
-            out bossFillImage,
-            out bossGhostFillImage,
-            out bossFrameImage);
-        if (bossBarRoot != null && bossBarRoot.GetComponent<Canvas>() == null)
-        {
-            bossBarRoot.AddComponent<Canvas>();
-        }
-        bossBarRoot.SetActive(false);
 
         Transform existingBanner = canvas.transform.Find("StageBannerHUD");
         if (existingBanner != null)
         {
             bannerRoot = existingBanner.gameObject;
             bannerText = existingBanner.Find("BannerText")?.GetComponent<TMP_Text>();
+            CombatHudStyler.StyleStageBanner(bannerRoot, bannerText, out bannerCanvasGroup);
+            if (bannerRoot.GetComponent<Canvas>() == null)
+            {
+                bannerRoot.AddComponent<Canvas>();
+            }
+            bannerRoot.SetActive(false);
         }
-        else
-        {
-            bannerRoot = CreateUiPanel("StageBannerHUD", canvas.transform,
-                new Vector2(0.5f, 0.78f), new Vector2(0.5f, 0.78f), new Vector2(0.5f, 0.5f),
-                Vector2.zero, new Vector2(740f, 98f),
-                new Color(0.035f, 0.050f, 0.090f, 0.90f));
-
-            bannerText = CreateUiText("BannerText", bannerRoot.transform,
-                Vector2.zero, Vector2.one, new Vector2(0.5f, 0.5f),
-                Vector2.zero, new Vector2(-88f, -24f),
-                "", 21, FontStyles.Bold, Color.white, TextAlignmentOptions.Center);
-        }
-        CombatHudStyler.StyleStageBanner(bannerRoot, bannerText, out bannerCanvasGroup);
-        if (bannerRoot != null && bannerRoot.GetComponent<Canvas>() == null)
-        {
-            bannerRoot.AddComponent<Canvas>();
-        }
-        bannerRoot.SetActive(false);
     }
 
     private void ShowBossBar(int currentHp, int maxHp)
@@ -1413,50 +1215,6 @@ public class StageManager : MonoBehaviour
         {
             hudDashText.text = "<color=#7BE5FF><b>[LMB]</b></color> Chém  <color=#5C6A85>•</color>  <color=#7BE5FF><b>[RMB]</b></color> Đỡ  <color=#5C6A85>•</color>  <color=#E8C56E><b>[B]</b></color> Lò Rèn  <color=#5C6A85>•</color>  <color=#7BE5FF><b>[H]</b></color> Sổ Tay";
         }
-    }
-
-    private GameObject CreateUiPanel(string name, Transform parent, Vector2 anchorMin, Vector2 anchorMax, Vector2 pivot, Vector2 pos, Vector2 size, Color bgColor)
-    {
-        GameObject go = new GameObject(name, typeof(RectTransform), typeof(Image));
-        go.transform.SetParent(parent, false);
-        RectTransform rt = go.GetComponent<RectTransform>();
-        rt.anchorMin = anchorMin;
-        rt.anchorMax = anchorMax;
-        rt.pivot = pivot;
-        rt.anchoredPosition = pos;
-        rt.sizeDelta = size;
-        go.GetComponent<Image>().color = bgColor;
-        return go;
-    }
-
-    private TMP_Text CreateUiText(string name, Transform parent, Vector2 anchorMin, Vector2 anchorMax, Vector2 pivot, Vector2 pos, Vector2 size, string content, float fontSize, FontStyles style, Color color, TextAlignmentOptions align)
-    {
-        GameObject go = new GameObject(name, typeof(RectTransform), typeof(TextMeshProUGUI));
-        go.transform.SetParent(parent, false);
-        RectTransform rt = go.GetComponent<RectTransform>();
-        rt.anchorMin = anchorMin;
-        rt.anchorMax = anchorMax;
-        rt.pivot = pivot;
-        rt.anchoredPosition = pos;
-        rt.sizeDelta = size;
-
-        TextMeshProUGUI tmp = go.GetComponent<TextMeshProUGUI>();
-        ClassicFontRuntimeManager.ApplyFont(tmp);
-        tmp.text = content;
-        tmp.fontSize = fontSize;
-        tmp.fontStyle = style;
-        tmp.color = color;
-        tmp.alignment = align;
-        tmp.textWrappingMode = TextWrappingModes.Normal;
-        return tmp;
-    }
-
-    private static void StretchRect(RectTransform rt)
-    {
-        rt.anchorMin = Vector2.zero;
-        rt.anchorMax = Vector2.one;
-        rt.offsetMin = Vector2.zero;
-        rt.offsetMax = Vector2.zero;
     }
 
     private void CleanupDeadEnemies()

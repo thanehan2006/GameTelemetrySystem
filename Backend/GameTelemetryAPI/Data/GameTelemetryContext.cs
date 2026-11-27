@@ -111,6 +111,9 @@ namespace GameTelemetryAPI.Data
                 entity.Property(e => e.StartTime)
                     .HasDefaultValueSql("SYSUTCDATETIME()");
 
+                entity.Property(e => e.CharacterId)
+                    .HasMaxLength(50);
+
                 entity.Property(e => e.Result)
                     .HasMaxLength(20);
 

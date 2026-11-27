@@ -9,6 +9,11 @@ namespace GameTelemetryAPI.DTOs
         public int PlayerId { get; set; }
 
         public int? LevelId { get; set; }
+
+        [MaxLength(50, ErrorMessage = "CharacterId tối đa 50 ký tự")]
+        public string? CharacterId { get; set; }
+
+        public DateTime? StartTime { get; set; }
     }
 
     // DTO gửi kết quả kết thúc phiên chơi (Win, Lose hoặc Quit)
@@ -26,6 +31,7 @@ namespace GameTelemetryAPI.DTOs
         public long SessionId { get; set; }
         public int PlayerId { get; set; }
         public int? LevelId { get; set; }
+        public string? CharacterId { get; set; }
         public DateTime StartTime { get; set; }
         public DateTime? EndTime { get; set; }
         public string? Result { get; set; }

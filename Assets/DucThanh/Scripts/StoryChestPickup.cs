@@ -16,8 +16,31 @@ public class StoryChestPickup : MonoBehaviour
     private static readonly int MetallicId = Shader.PropertyToID("_Metallic");
     private static readonly int SmoothnessId = Shader.PropertyToID("_Smoothness");
 
+    private static readonly WaitForSeconds WaitFadeDelay = new WaitForSeconds(0.15f);
     private static GameObject cachedChestPrefab;
     private static Gradient cachedSparkleGradient;
+    private static Material sharedBeamMat;
+    private static Material sharedRingMat;
+
+    [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+    private static void ResetStaticState()
+    {
+        ActiveChests.Clear();
+        cachedChestPrefab = null;
+        cachedSparkleGradient = null;
+        if (sharedBeamMat != null)
+        {
+            if (Application.isPlaying) Destroy(sharedBeamMat);
+            else DestroyImmediate(sharedBeamMat);
+            sharedBeamMat = null;
+        }
+        if (sharedRingMat != null)
+        {
+            if (Application.isPlaying) Destroy(sharedRingMat);
+            else DestroyImmediate(sharedRingMat);
+            sharedRingMat = null;
+        }
+    }
 
     [Header("Story & Reward Data")]
     public int mapLevel = 1;
@@ -35,8 +58,6 @@ public class StoryChestPickup : MonoBehaviour
     private GameObject beamObject;
     private ParticleSystem sparklePs;
     private Light glowLight;
-    private Material beamMat;
-    private Material ringMat;
     private Material fallbackChestMat;
     private Vector3 baseVisualLocalPos;
     private float baseLightIntensity = 3.2f;
@@ -58,8 +79,6 @@ public class StoryChestPickup : MonoBehaviour
 
     private void OnDestroy()
     {
-        if (beamMat != null) Destroy(beamMat);
-        if (ringMat != null) Destroy(ringMat);
         if (fallbackChestMat != null) Destroy(fallbackChestMat);
     }
 
@@ -238,11 +257,7 @@ public class StoryChestPickup : MonoBehaviour
         Renderer br = beamObject.GetComponent<Renderer>();
         if (br != null)
         {
-            beamMat = new Material(CombatVfxManager.GetAdditiveBeamMaterial());
-            Color beamColHdr = new Color(1.9f, 1.48f, 0.35f, 0.52f);
-            if (beamMat.HasProperty(BaseColorId)) beamMat.SetColor(BaseColorId, beamColHdr);
-            if (beamMat.HasProperty(ColorId)) beamMat.SetColor(ColorId, beamColHdr);
-            br.sharedMaterial = beamMat;
+            br.sharedMaterial = GetSharedBeamMaterial();
             br.shadowCastingMode = ShadowCastingMode.Off;
             br.receiveShadows = false;
         }
@@ -255,11 +270,7 @@ public class StoryChestPickup : MonoBehaviour
         MeshFilter rmf = ringObj.AddComponent<MeshFilter>();
         rmf.sharedMesh = CombatVfxManager.GetHorizontalQuadMesh();
         MeshRenderer rmr = ringObj.AddComponent<MeshRenderer>();
-        ringMat = new Material(CombatVfxManager.GetAdditiveRingMaterial());
-        Color ringColHdr = new Color(2.0f, 1.52f, 0.32f, 0.76f);
-        if (ringMat.HasProperty(BaseColorId)) ringMat.SetColor(BaseColorId, ringColHdr);
-        if (ringMat.HasProperty(ColorId)) ringMat.SetColor(ColorId, ringColHdr);
-        rmr.sharedMaterial = ringMat;
+        rmr.sharedMaterial = GetSharedRingMaterial();
         rmr.shadowCastingMode = ShadowCastingMode.Off;
         rmr.receiveShadows = false;
         groundRingTransform = ringObj.transform;
@@ -405,9 +416,33 @@ public class StoryChestPickup : MonoBehaviour
         StartCoroutine(FadeAndDestroyRoutine());
     }
 
+    private static Material GetSharedBeamMaterial()
+    {
+        if (sharedBeamMat == null)
+        {
+            sharedBeamMat = new Material(CombatVfxManager.GetAdditiveBeamMaterial());
+            Color beamColHdr = new Color(1.9f, 1.48f, 0.35f, 0.52f);
+            if (sharedBeamMat.HasProperty(BaseColorId)) sharedBeamMat.SetColor(BaseColorId, beamColHdr);
+            if (sharedBeamMat.HasProperty(ColorId)) sharedBeamMat.SetColor(ColorId, beamColHdr);
+        }
+        return sharedBeamMat;
+    }
+
+    private static Material GetSharedRingMaterial()
+    {
+        if (sharedRingMat == null)
+        {
+            sharedRingMat = new Material(CombatVfxManager.GetAdditiveRingMaterial());
+            Color ringColHdr = new Color(2.0f, 1.52f, 0.32f, 0.76f);
+            if (sharedRingMat.HasProperty(BaseColorId)) sharedRingMat.SetColor(BaseColorId, ringColHdr);
+            if (sharedRingMat.HasProperty(ColorId)) sharedRingMat.SetColor(ColorId, ringColHdr);
+        }
+        return sharedRingMat;
+    }
+
     private IEnumerator FadeAndDestroyRoutine()
     {
-        yield return new WaitForSeconds(0.15f);
+        yield return WaitFadeDelay;
 
         Vector3 startScale = transform.localScale;
         const float duration = 0.35f;

@@ -28,6 +28,22 @@ public static class ClassicFontRuntimeManager
     private static bool sceneHooked;
     private static readonly List<TMP_FontAsset> runtimeCreatedAssets = new List<TMP_FontAsset>();
 
+    [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+    private static void ResetStaticState()
+    {
+        SceneManager.sceneLoaded -= OnSceneLoaded;
+        sceneHooked = false;
+        PrimaryFont = null;
+        for (int i = 0; i < runtimeCreatedAssets.Count; i++)
+        {
+            if (runtimeCreatedAssets[i] != null)
+            {
+                UnityEngine.Object.Destroy(runtimeCreatedAssets[i]);
+            }
+        }
+        runtimeCreatedAssets.Clear();
+    }
+
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
     private static void InitializeOnBoot()
     {
@@ -35,6 +51,7 @@ public static class ClassicFontRuntimeManager
 
         if (!sceneHooked)
         {
+            SceneManager.sceneLoaded -= OnSceneLoaded;
             SceneManager.sceneLoaded += OnSceneLoaded;
             sceneHooked = true;
         }

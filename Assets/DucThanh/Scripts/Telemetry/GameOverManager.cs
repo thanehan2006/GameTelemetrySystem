@@ -41,15 +41,18 @@ public class GameOverManager : MonoBehaviour
         public TMP_Text statTimeValue;
         public Button nextLevelButton;
         public Button tryAgainButton;
+        public Button mainMenuButton;
         public Button quitButton;
         public FloatingEmbersUI embersEffect;
     }
 
     private EndScreenRefs uiRefs;
+    private RectTransform gameOverPanelRect;
     private CanvasGroup panelCanvasGroup;
     private string cachedNextSceneName;
     private float sessionStartRealtime;
     private float targetCardScale = 1f;
+    private float lastAppliedCardScale = -1f;
     private bool isAnimatingIn;
     private bool uiBuilt;
     private bool isQuitting;
@@ -74,7 +77,13 @@ public class GameOverManager : MonoBehaviour
         Instance = this;
         IsGameOver = false;
         sessionStartRealtime = Time.realtimeSinceStartup;
+        if (gameOverPanel != null) gameOverPanelRect = gameOverPanel.GetComponent<RectTransform>();
         ResolveTitleText();
+    }
+
+    private void OnDestroy()
+    {
+        if (Instance == this) Instance = null;
     }
 
     private void Update()
@@ -150,25 +159,21 @@ public class GameOverManager : MonoBehaviour
 
         ResolveTitleText();
         TMP_Text preservedTitle = titleText;
-        BuildEndScreenLayout(gameOverPanel, ref preservedTitle, destroyImmediate: false, out uiRefs);
+        BindBakedEndScreen(gameOverPanel, ref preservedTitle, out uiRefs);
         titleText = preservedTitle;
 
         ConfigureActionButton(uiRefs.nextLevelButton, NextLevel);
         ConfigureActionButton(uiRefs.tryAgainButton, TryAgain);
+        ConfigureActionButton(uiRefs.mainMenuButton, ReturnToMainMenu);
         ConfigureActionButton(uiRefs.quitButton, QuitGame);
+        UniversalButtonHoverInstaller.RequestScan();
     }
 
-    // Khởi tạo cấu trúc UI màn hình Win/Lose gồm tiêu đề, 3 ô thống kê và hàng nút thao tác
-    public static void BuildEndScreenLayout(
-        GameObject panel,
-        ref TMP_Text preservedTitle,
-        bool destroyImmediate,
-        out EndScreenRefs refs,
-        Sprite softGlowSprite = null)
+    // Liên kết các thành phần UI màn hình Win/Lose đã đặt sẵn trong Scene
+    private static void BindBakedEndScreen(GameObject panel, ref TMP_Text preservedTitle, out EndScreenRefs refs)
     {
         refs = default;
         if (panel == null) return;
-        Sprite glowSprite = softGlowSprite != null ? softGlowSprite : FantasyUiThemeHelper.GetSoftDotSprite();
 
         RectTransform panelRt = panel.GetComponent<RectTransform>();
         if (panelRt != null)
@@ -177,205 +182,128 @@ public class GameOverManager : MonoBehaviour
         }
 
         refs.backdropImage = panel.GetComponent<Image>();
-        if (refs.backdropImage == null) refs.backdropImage = panel.AddComponent<Image>();
-        refs.backdropImage.sprite = null;
-        refs.backdropImage.raycastTarget = true;
-
-        if (panel.GetComponent<CanvasGroup>() == null)
+        if (refs.backdropImage != null)
         {
-            panel.AddComponent<CanvasGroup>();
+            refs.backdropImage.sprite = null;
+            refs.backdropImage.raycastTarget = true;
         }
 
-        if (preservedTitle == null)
+        Sprite glowSprite = FantasyUiThemeHelper.GetSoftDotSprite();
+
+        Transform haloTf = panel.transform.Find("EndScreenHalo");
+        if (haloTf != null)
         {
-            Transform foundTitle = FindDescendantByName(panel.transform, "GameOverText");
-            if (foundTitle != null) preservedTitle = foundTitle.GetComponent<TMP_Text>();
+            refs.haloImage = haloTf.GetComponent<Image>();
+            if (refs.haloImage != null)
+            {
+                refs.haloImage.sprite = glowSprite;
+                refs.haloImage.raycastTarget = false;
+            }
         }
-        Transform oldTryAgain = FindDescendantByName(panel.transform, "TryAgainButton");
-        Transform oldQuit = FindDescendantByName(panel.transform, "QuitButton");
-        Transform oldNext = FindDescendantByName(panel.transform, "NextLevelButton");
 
-        if (preservedTitle != null) preservedTitle.transform.SetParent(panel.transform, false);
-        if (oldTryAgain != null) oldTryAgain.SetParent(panel.transform, false);
-        if (oldQuit != null) oldQuit.SetParent(panel.transform, false);
-        if (oldNext != null) oldNext.SetParent(panel.transform, false);
-
-        DestroyNamedChild(panel.transform, "EndCard", destroyImmediate);
-        DestroyNamedChild(panel.transform, "EndScreenEmbers", destroyImmediate);
-        DestroyNamedChild(panel.transform, "EndScreenHalo", destroyImmediate);
-
-        TMP_FontAsset sharedFont = preservedTitle != null
-            ? preservedTitle.font
-            : panel.GetComponentInChildren<TMP_Text>(true)?.font;
-
-        GameObject haloGo = new GameObject("EndScreenHalo", typeof(RectTransform), typeof(Image));
-        haloGo.transform.SetParent(panel.transform, false);
-        RectTransform haloRt = haloGo.GetComponent<RectTransform>();
-        haloRt.anchorMin = new Vector2(0.5f, 0.5f);
-        haloRt.anchorMax = new Vector2(0.5f, 0.5f);
-        haloRt.pivot = new Vector2(0.5f, 0.5f);
-        haloRt.anchoredPosition = Vector2.zero;
-        haloRt.sizeDelta = new Vector2(1480f, 1080f);
-        refs.haloImage = haloGo.GetComponent<Image>();
-        refs.haloImage.sprite = glowSprite;
-        refs.haloImage.color = new Color(WinGold.r, WinGold.g, WinGold.b, 0.14f);
-        refs.haloImage.raycastTarget = false;
-
-        GameObject emberGo = new GameObject("EndScreenEmbers", typeof(RectTransform));
-        emberGo.transform.SetParent(panel.transform, false);
-        FantasyUiThemeHelper.StretchFull(emberGo.GetComponent<RectTransform>());
-        refs.embersEffect = emberGo.AddComponent<FloatingEmbersUI>();
-
-        GameObject cardGo = new GameObject("EndCard", typeof(RectTransform), typeof(Image));
-        cardGo.transform.SetParent(panel.transform, false);
-        refs.cardRect = cardGo.GetComponent<RectTransform>();
-        refs.cardRect.anchorMin = new Vector2(0.5f, 0.5f);
-        refs.cardRect.anchorMax = new Vector2(0.5f, 0.5f);
-        refs.cardRect.pivot = new Vector2(0.5f, 0.5f);
-        refs.cardRect.anchoredPosition = Vector2.zero;
-        refs.cardRect.sizeDelta = new Vector2(EndCardWidth, EndCardHeight);
-
-        refs.cardBgImage = cardGo.GetComponent<Image>();
-        refs.cardBgImage.sprite = null;
-        refs.cardBgImage.raycastTarget = false;
-
-        refs.cardOutline = cardGo.AddComponent<Outline>();
-        refs.cardOutline.effectDistance = new Vector2(2.2f, -2.2f);
-
-        Shadow cardShadow = cardGo.AddComponent<Shadow>();
-        cardShadow.effectColor = new Color(0f, 0f, 0f, 0.78f);
-        cardShadow.effectDistance = new Vector2(0f, -22f);
-
-        GameObject glowGo = new GameObject("HeaderGlowStrip", typeof(RectTransform), typeof(Image));
-        glowGo.transform.SetParent(cardGo.transform, false);
-        SetCardRect(glowGo.GetComponent<RectTransform>(), 0f, -66f, 720f, 110f);
-        refs.headerGlowImage = glowGo.GetComponent<Image>();
-        refs.headerGlowImage.sprite = glowSprite;
-        refs.headerGlowImage.color = new Color(WinGold.r, WinGold.g, WinGold.b, 0.14f);
-        refs.headerGlowImage.raycastTarget = false;
-
-        refs.topAccentBar = FantasyUiThemeHelper.CreateAccentLine(cardGo.transform, "TopAccentBar",
-            new Vector2(0f, 1f), new Vector2(1f, 1f), new Vector2(0.5f, 1f),
-            Vector2.zero, new Vector2(0f, 6f), WinGold).GetComponent<Image>();
-
-        refs.bottomAccentBar = FantasyUiThemeHelper.CreateAccentLine(cardGo.transform, "BottomAccentBar",
-            new Vector2(0f, 0f), new Vector2(1f, 0f), new Vector2(0.5f, 0f),
-            Vector2.zero, new Vector2(0f, 4f), WinGold).GetComponent<Image>();
-
-        BuildEndCardOrnamentalFrame(cardGo.transform, WinGold, out refs.innerFrameLines, out refs.cornerBracketLines);
-
-        GameObject badgePill = new GameObject("StatusBadgePill", typeof(RectTransform), typeof(Image));
-        badgePill.transform.SetParent(cardGo.transform, false);
-        SetCardRect(badgePill.GetComponent<RectTransform>(), 0f, -34f, 480f, 34f);
-        refs.badgeBgImage = badgePill.GetComponent<Image>();
-        refs.badgeBgImage.color = new Color(0.08f, 0.11f, 0.18f, 0.85f);
-        refs.badgeBgImage.raycastTarget = false;
-        refs.badgeOutline = badgePill.AddComponent<Outline>();
-        refs.badgeOutline.effectColor = new Color(WinGold.r, WinGold.g, WinGold.b, 0.45f);
-        refs.badgeOutline.effectDistance = new Vector2(1f, -1f);
-
-        refs.badgeText = FantasyUiThemeHelper.CreateText(badgePill.transform, "StatusBadge", "CHIẾN DỊCH HOÀN TẤT  •  VANGUARD",
-            14f, FontStyles.Bold, WinGoldBright, TextAlignmentOptions.Center, sharedFont);
-        StretchWithPadding(refs.badgeText.rectTransform, 18f, 2f);
-        ResetTmpAlignment(refs.badgeText, TextAlignmentOptions.Center, noWrap: true, minSize: 12f, maxSize: 15f, charSpacing: 3.5f);
-
-        if (preservedTitle != null)
+        Transform emberTf = panel.transform.Find("EndScreenEmbers");
+        if (emberTf != null)
         {
-            preservedTitle.transform.SetParent(cardGo.transform, false);
-            refs.titleText = preservedTitle;
+            refs.embersEffect = emberTf.GetComponent<FloatingEmbersUI>();
         }
-        else
+
+        Transform cardTf = panel.transform.Find("EndCard");
+        if (cardTf != null)
         {
-            refs.titleText = FantasyUiThemeHelper.CreateText(cardGo.transform, "GameOverText", "CHIẾN THẮNG!",
-                66f, FontStyles.Bold, Color.white, TextAlignmentOptions.Center, sharedFont);
-            preservedTitle = refs.titleText;
+            refs.cardRect = cardTf.GetComponent<RectTransform>();
+            refs.cardBgImage = cardTf.GetComponent<Image>();
+            refs.cardOutline = cardTf.GetComponent<Outline>();
+
+            Transform headerGlowTf = cardTf.Find("HeaderGlowStrip");
+            if (headerGlowTf != null)
+            {
+                refs.headerGlowImage = headerGlowTf.GetComponent<Image>();
+                if (refs.headerGlowImage != null)
+                {
+                    refs.headerGlowImage.sprite = glowSprite;
+                    refs.headerGlowImage.raycastTarget = false;
+                }
+            }
+
+            refs.topAccentBar = cardTf.Find("TopAccentBar")?.GetComponent<Image>();
+            refs.bottomAccentBar = cardTf.Find("BottomAccentBar")?.GetComponent<Image>();
+
+            Transform frameTf = cardTf.Find("InnerFrame");
+            if (frameTf != null)
+            {
+                refs.innerFrameLines = new[]
+                {
+                    frameTf.Find("InnerTop")?.GetComponent<Image>(),
+                    frameTf.Find("InnerBottom")?.GetComponent<Image>(),
+                    frameTf.Find("InnerLeft")?.GetComponent<Image>(),
+                    frameTf.Find("InnerRight")?.GetComponent<Image>()
+                };
+                refs.cornerBracketLines = new Image[8];
+                for (int i = 0; i < 4; i++)
+                {
+                    refs.cornerBracketLines[i * 2] = frameTf.Find($"CornerH_{i}")?.GetComponent<Image>();
+                    refs.cornerBracketLines[i * 2 + 1] = frameTf.Find($"CornerV_{i}")?.GetComponent<Image>();
+                }
+            }
+
+            Transform badgePillTf = cardTf.Find("StatusBadgePill");
+            if (badgePillTf != null)
+            {
+                refs.badgeBgImage = badgePillTf.GetComponent<Image>();
+                refs.badgeOutline = badgePillTf.GetComponent<Outline>();
+                refs.badgeText = badgePillTf.Find("StatusBadge")?.GetComponent<TMP_Text>();
+            }
+
+            refs.titleText = preservedTitle != null
+                ? preservedTitle
+                : cardTf.Find("GameOverText")?.GetComponent<TMP_Text>();
+            if (preservedTitle == null) preservedTitle = refs.titleText;
+
+            Transform divTf = cardTf.Find("TitleDivider");
+            if (divTf != null)
+            {
+                refs.dividerParts = new[]
+                {
+                    divTf.Find("LeftBar")?.GetComponent<Image>(),
+                    divTf.Find("RightBar")?.GetComponent<Image>(),
+                    divTf.Find("CenterDiamond")?.GetComponent<Image>()
+                };
+            }
+
+            refs.subtitleText = cardTf.Find("SubtitleText")?.GetComponent<TMP_Text>();
+
+            Transform statsRowTf = cardTf.Find("MatchStatsRow");
+            if (statsRowTf != null)
+            {
+                refs.tileAccentBars = new[]
+                {
+                    statsRowTf.Find("TileStage/AccentStrip")?.GetComponent<Image>(),
+                    statsRowTf.Find("TileScore/AccentStrip")?.GetComponent<Image>(),
+                    statsRowTf.Find("TileTime/AccentStrip")?.GetComponent<Image>()
+                };
+                refs.statStageValue = statsRowTf.Find("TileStage/Value")?.GetComponent<TMP_Text>();
+                refs.statScoreValue = statsRowTf.Find("TileScore/Value")?.GetComponent<TMP_Text>();
+                refs.statTimeValue = statsRowTf.Find("TileTime/Value")?.GetComponent<TMP_Text>();
+            }
+
+            Transform actionsRowTf = cardTf.Find("ActionButtonsRow");
+            refs.nextLevelButton = FindActionButton(actionsRowTf, panel.transform, "NextLevelButton");
+            refs.tryAgainButton = FindActionButton(actionsRowTf, panel.transform, "TryAgainButton");
+            refs.mainMenuButton = FindActionButton(actionsRowTf, panel.transform, "MainMenuButton");
+            refs.quitButton = FindActionButton(actionsRowTf, panel.transform, "QuitButton");
         }
-        SetCardRect(refs.titleText.rectTransform, 0f, -82f, 840f, 88f);
-        ResetTmpAlignment(refs.titleText, TextAlignmentOptions.Center, noWrap: true, minSize: 38f, maxSize: 68f, charSpacing: 4f);
-        refs.titleText.fontStyle = FontStyles.Bold;
-        refs.titleText.color = Color.white;
-        refs.titleText.raycastTarget = false;
-        ApplyTitleGradient(refs.titleText, WinTitleTop, WinTitleBottom);
 
-        Shadow titleShadow = refs.titleText.GetComponent<Shadow>();
-        if (titleShadow == null) titleShadow = refs.titleText.gameObject.AddComponent<Shadow>();
-        titleShadow.effectColor = new Color(0f, 0f, 0f, 0.85f);
-        titleShadow.effectDistance = new Vector2(0f, -5f);
-
-        refs.dividerParts = BuildOrnamentalDivider(cardGo.transform, -180f, WinGold);
-
-        refs.subtitleText = FantasyUiThemeHelper.CreateText(cardGo.transform, "SubtitleText",
-            "Đại Tướng Orc Warlord đã bị tiêu diệt. Mỏ Vàng và khu rừng đã được giải phóng!",
-            19f, FontStyles.Normal, new Color(0.86f, 0.90f, 0.96f, 0.96f), TextAlignmentOptions.Center, sharedFont);
-        SetCardRect(refs.subtitleText.rectTransform, 0f, -206f, 780f, 64f);
-        ResetTmpAlignment(refs.subtitleText, TextAlignmentOptions.Center, noWrap: false, minSize: 15f, maxSize: 20f, charSpacing: 0.4f);
-        refs.subtitleText.lineSpacing = 5f;
-
-        GameObject statsRow = new GameObject("MatchStatsRow", typeof(RectTransform), typeof(HorizontalLayoutGroup));
-        statsRow.transform.SetParent(cardGo.transform, false);
-        SetCardRect(statsRow.GetComponent<RectTransform>(), 0f, -286f, 824f, 138f);
-
-        HorizontalLayoutGroup hlg = statsRow.GetComponent<HorizontalLayoutGroup>();
-        hlg.spacing = 20f;
-        hlg.childAlignment = TextAnchor.MiddleCenter;
-        hlg.childControlWidth = true;
-        hlg.childControlHeight = true;
-        hlg.childForceExpandWidth = true;
-        hlg.childForceExpandHeight = true;
-
-        refs.tileAccentBars = new Image[3];
-        refs.statStageValue = CreateEndStatTile(statsRow.transform, "TileStage", "TIẾN ĐỘ MÀN", "Màn 3 / 3", sharedFont, out refs.tileAccentBars[0], Color.white);
-        refs.statScoreValue = CreateEndStatTile(statsRow.transform, "TileScore", "ĐIỂM  •  VÀNG", "0  •  0 G", sharedFont, out refs.tileAccentBars[1], WinGoldBright);
-        refs.statTimeValue = CreateEndStatTile(statsRow.transform, "TileTime", "THỜI LƯỢNG", "00:00", sharedFont, out refs.tileAccentBars[2], Color.white);
-
-        GameObject actionsRow = new GameObject("ActionButtonsRow", typeof(RectTransform), typeof(HorizontalLayoutGroup));
-        actionsRow.transform.SetParent(cardGo.transform, false);
-        SetCardRect(actionsRow.GetComponent<RectTransform>(), 0f, -454f, 824f, 66f);
-
-        HorizontalLayoutGroup btnLayout = actionsRow.GetComponent<HorizontalLayoutGroup>();
-        btnLayout.spacing = 20f;
-        btnLayout.childAlignment = TextAnchor.MiddleCenter;
-        btnLayout.childControlWidth = true;
-        btnLayout.childControlHeight = true;
-        btnLayout.childForceExpandWidth = true;
-        btnLayout.childForceExpandHeight = true;
-
-        refs.nextLevelButton = PrepareActionButton(oldNext, actionsRow.transform, "NextLevelButton", "MÀN TIẾP THEO →", sharedFont);
-        refs.tryAgainButton = PrepareActionButton(oldTryAgain, actionsRow.transform, "TryAgainButton", "CHƠI LẠI CHIẾN DỊCH", sharedFont);
-        refs.quitButton = PrepareActionButton(oldQuit, actionsRow.transform, "QuitButton", "THOÁT GAME", sharedFont);
-
-        refs.nextLevelButton.gameObject.SetActive(false);
+        if (refs.nextLevelButton != null)
+        {
+            refs.nextLevelButton.gameObject.SetActive(false);
+        }
     }
 
-    private static Button PrepareActionButton(Transform existing, Transform parent, string defaultName, string defaultLabel, TMP_FontAsset font)
+    private static Button FindActionButton(Transform actionsRowTf, Transform panelRoot, string buttonName)
     {
-        Button btn;
-        if (existing != null)
-        {
-            existing.SetParent(parent, false);
-            btn = existing.GetComponent<Button>();
-            if (btn == null) btn = existing.gameObject.AddComponent<Button>();
-        }
-        else
-        {
-            GameObject go = new GameObject(defaultName, typeof(RectTransform), typeof(Image), typeof(Button));
-            go.transform.SetParent(parent, false);
-            btn = go.GetComponent<Button>();
-        }
-
-        RectTransform rt = btn.GetComponent<RectTransform>();
-        rt.localScale = Vector3.one;
-        rt.localRotation = Quaternion.identity;
-        rt.sizeDelta = new Vector2(260f, 66f);
-
-        TMP_Text labelTmp = btn.GetComponentInChildren<TMP_Text>(true);
-        if (labelTmp == null)
-        {
-            labelTmp = FantasyUiThemeHelper.CreateText(btn.transform, "Text (TMP)", defaultLabel, 20f, FontStyles.Bold, Color.white, TextAlignmentOptions.Center, font);
-        }
-        if (font != null && labelTmp.font == null) labelTmp.font = font;
-
-        return btn;
+        Transform t = actionsRowTf != null ? actionsRowTf.Find(buttonName) : null;
+        if (t == null) t = FindDescendantByName(panelRoot, buttonName);
+        return t != null ? t.GetComponent<Button>() : null;
     }
 
     private static void ConfigureActionButton(Button btn, UnityEngine.Events.UnityAction fallbackAction)
@@ -506,6 +434,13 @@ public class GameOverManager : MonoBehaviour
             StyleEndActionButton(uiRefs.tryAgainButton, isVictory ? "CHƠI LẠI" : "THỬ LẠI NGAY", btnBg, txtCol, borderCol);
         }
 
+        if (uiRefs.mainMenuButton != null)
+        {
+            Color menuBorder = isVictory ? FantasyUiThemeHelper.GoldBorder : new Color(0.88f, 0.36f, 0.38f, 0.72f);
+            Color menuText = isVictory ? WinGoldBright : new Color(0.96f, 0.88f, 0.86f, 1f);
+            StyleEndActionButton(uiRefs.mainMenuButton, "VỀ MENU", FantasyUiThemeHelper.GhostButtonBg, menuText, menuBorder);
+        }
+
         if (uiRefs.quitButton != null)
         {
             Color quitBorder = isVictory ? FantasyUiThemeHelper.GoldBorder : new Color(0.88f, 0.30f, 0.32f, 0.65f);
@@ -546,7 +481,11 @@ public class GameOverManager : MonoBehaviour
 
     private float ComputeResponsiveCardScale()
     {
-        RectTransform panelRt = gameOverPanel != null ? gameOverPanel.GetComponent<RectTransform>() : null;
+        if (gameOverPanelRect == null && gameOverPanel != null)
+        {
+            gameOverPanelRect = gameOverPanel.GetComponent<RectTransform>();
+        }
+        RectTransform panelRt = gameOverPanelRect;
         float w = (panelRt != null && panelRt.rect.width > 10f) ? panelRt.rect.width : Screen.width;
         float h = (panelRt != null && panelRt.rect.height > 10f) ? panelRt.rect.height : Screen.height;
         if (w <= 10f || h <= 10f) return 1f;
@@ -563,8 +502,9 @@ public class GameOverManager : MonoBehaviour
         {
             targetCardScale = nextScale;
         }
-        if (!isAnimatingIn && uiRefs.cardRect != null)
+        if (!isAnimatingIn && uiRefs.cardRect != null && Mathf.Abs(targetCardScale - lastAppliedCardScale) > 0.001f)
         {
+            lastAppliedCardScale = targetCardScale;
             uiRefs.cardRect.localScale = Vector3.one * targetCardScale;
         }
     }
@@ -595,7 +535,11 @@ public class GameOverManager : MonoBehaviour
 
         isAnimatingIn = false;
         if (panelCanvasGroup != null) panelCanvasGroup.alpha = 1f;
-        if (uiRefs.cardRect != null) uiRefs.cardRect.localScale = Vector3.one * targetCardScale;
+        if (uiRefs.cardRect != null)
+        {
+            lastAppliedCardScale = targetCardScale;
+            uiRefs.cardRect.localScale = Vector3.one * targetCardScale;
+        }
     }
 
     public static void ResetTmpAlignment(
@@ -625,121 +569,6 @@ public class GameOverManager : MonoBehaviour
         if (tmp == null) return;
         tmp.enableVertexGradient = true;
         tmp.colorGradient = new VertexGradient(topCol, topCol, bottomCol, bottomCol);
-    }
-
-    public static void BuildEndCardOrnamentalFrame(
-        Transform cardParent,
-        Color accent,
-        out Image[] innerFrameLines,
-        out Image[] cornerBrackets)
-    {
-        GameObject frameGo = new GameObject("InnerFrame", typeof(RectTransform));
-        frameGo.transform.SetParent(cardParent, false);
-        RectTransform frt = frameGo.GetComponent<RectTransform>();
-        frt.anchorMin = Vector2.zero;
-        frt.anchorMax = Vector2.one;
-        frt.offsetMin = new Vector2(14f, 14f);
-        frt.offsetMax = new Vector2(-14f, -14f);
-
-        Color lineCol = new Color(accent.r, accent.g, accent.b, 0.24f);
-        innerFrameLines = new[]
-        {
-            CreateStretchLine(frameGo.transform, "InnerTop", new Vector2(0f, 1f), new Vector2(1f, 1f), new Vector2(0.5f, 1f), new Vector2(0f, 1.5f), lineCol),
-            CreateStretchLine(frameGo.transform, "InnerBottom", new Vector2(0f, 0f), new Vector2(1f, 0f), new Vector2(0.5f, 0f), new Vector2(0f, 1.5f), lineCol),
-            CreateStretchLine(frameGo.transform, "InnerLeft", new Vector2(0f, 0f), new Vector2(0f, 1f), new Vector2(0f, 0.5f), new Vector2(1.5f, 0f), lineCol),
-            CreateStretchLine(frameGo.transform, "InnerRight", new Vector2(1f, 0f), new Vector2(1f, 1f), new Vector2(1f, 0.5f), new Vector2(1.5f, 0f), lineCol)
-        };
-
-        Color bracketCol = new Color(accent.r, accent.g, accent.b, 0.88f);
-        var brackets = new Image[8];
-        Vector2[] anchors =
-        {
-            new Vector2(0f, 1f),
-            new Vector2(1f, 1f),
-            new Vector2(0f, 0f),
-            new Vector2(1f, 0f)
-        };
-        for (int i = 0; i < anchors.Length; i++)
-        {
-            Vector2 a = anchors[i];
-            brackets[i * 2] = CreateCornerSegment(frameGo.transform, $"CornerH_{i}", a, new Vector2(20f, 3f), bracketCol);
-            brackets[i * 2 + 1] = CreateCornerSegment(frameGo.transform, $"CornerV_{i}", a, new Vector2(3f, 20f), bracketCol);
-        }
-        cornerBrackets = brackets;
-    }
-
-    public static Image[] BuildOrnamentalDivider(Transform cardParent, float yFromTop, Color accent)
-    {
-        GameObject divGo = new GameObject("TitleDivider", typeof(RectTransform));
-        divGo.transform.SetParent(cardParent, false);
-        SetCardRect(divGo.GetComponent<RectTransform>(), 0f, yFromTop, 400f, 16f);
-
-        Image leftBar = FantasyUiThemeHelper.CreateAccentLine(divGo.transform, "LeftBar",
-            new Vector2(0f, 0.5f), new Vector2(0f, 0.5f), new Vector2(0f, 0.5f),
-            Vector2.zero, new Vector2(174f, 2f), new Color(accent.r, accent.g, accent.b, 0.85f)).GetComponent<Image>();
-
-        Image rightBar = FantasyUiThemeHelper.CreateAccentLine(divGo.transform, "RightBar",
-            new Vector2(1f, 0.5f), new Vector2(1f, 0.5f), new Vector2(1f, 0.5f),
-            Vector2.zero, new Vector2(174f, 2f), new Color(accent.r, accent.g, accent.b, 0.85f)).GetComponent<Image>();
-
-        GameObject diamondGo = FantasyUiThemeHelper.CreateAccentLine(divGo.transform, "CenterDiamond",
-            new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f),
-            Vector2.zero, new Vector2(10f, 10f), accent);
-        diamondGo.transform.localRotation = Quaternion.Euler(0f, 0f, 45f);
-        Image diamondImg = diamondGo.GetComponent<Image>();
-
-        return new[] { leftBar, rightBar, diamondImg };
-    }
-
-    public static TMP_Text CreateEndStatTile(
-        Transform parent,
-        string name,
-        string label,
-        string defaultValue,
-        TMP_FontAsset font,
-        out Image accentStrip,
-        Color valueColor)
-    {
-        GameObject tile = new GameObject(name, typeof(RectTransform), typeof(Image));
-        tile.transform.SetParent(parent, false);
-
-        Image bg = tile.GetComponent<Image>();
-        bg.color = new Color(0.080f, 0.110f, 0.180f, 0.90f);
-        bg.raycastTarget = false;
-
-        Outline outline = tile.AddComponent<Outline>();
-        outline.effectColor = new Color(1f, 1f, 1f, 0.14f);
-        outline.effectDistance = new Vector2(1.2f, -1.2f);
-
-        GameObject sheen = FantasyUiThemeHelper.CreateAccentLine(tile.transform, "TopSheen",
-            new Vector2(0f, 1f), new Vector2(1f, 1f), new Vector2(0.5f, 1f),
-            Vector2.zero, new Vector2(0f, 24f), new Color(1f, 1f, 1f, 0.03f));
-        sheen.GetComponent<Image>().raycastTarget = false;
-
-        accentStrip = FantasyUiThemeHelper.CreateAccentLine(tile.transform, "AccentStrip",
-            new Vector2(0f, 1f), new Vector2(1f, 1f), new Vector2(0.5f, 1f),
-            Vector2.zero, new Vector2(0f, 3f), WinGold).GetComponent<Image>();
-
-        TMP_Text lbl = FantasyUiThemeHelper.CreateText(tile.transform, "Label", label,
-            14f, FontStyles.Bold, FantasyUiThemeHelper.TextMuted, TextAlignmentOptions.Center, font);
-        RectTransform lrt = lbl.rectTransform;
-        lrt.anchorMin = new Vector2(0f, 1f);
-        lrt.anchorMax = new Vector2(1f, 1f);
-        lrt.pivot = new Vector2(0.5f, 1f);
-        lrt.anchoredPosition = new Vector2(0f, -18f);
-        lrt.sizeDelta = new Vector2(-16f, 24f);
-        ResetTmpAlignment(lbl, TextAlignmentOptions.Center, noWrap: true, minSize: 11f, maxSize: 14f, charSpacing: 2f);
-
-        TMP_Text val = FantasyUiThemeHelper.CreateText(tile.transform, "Value", defaultValue,
-            28f, FontStyles.Bold, valueColor, TextAlignmentOptions.Center, font);
-        RectTransform vrt = val.rectTransform;
-        vrt.anchorMin = new Vector2(0f, 0f);
-        vrt.anchorMax = new Vector2(1f, 1f);
-        vrt.offsetMin = new Vector2(14f, 14f);
-        vrt.offsetMax = new Vector2(-14f, -48f);
-        ResetTmpAlignment(val, TextAlignmentOptions.Center, noWrap: true, minSize: 18f, maxSize: 29f, charSpacing: 0.5f);
-
-        return val;
     }
 
     public static void StyleEndActionButton(Button btn, string label, Color bgColor, Color textColor, Color borderColor)
@@ -790,8 +619,8 @@ public class GameOverManager : MonoBehaviour
             txt.color = textColor;
             txt.fontStyle = FontStyles.Bold;
             txt.raycastTarget = false;
-            StretchWithPadding(txt.rectTransform, 14f, 6f);
-            ResetTmpAlignment(txt, TextAlignmentOptions.Center, noWrap: true, minSize: 15f, maxSize: 21f, charSpacing: 1.5f);
+            StretchWithPadding(txt.rectTransform, 10f, 6f);
+            ResetTmpAlignment(txt, TextAlignmentOptions.Center, noWrap: true, minSize: 13f, maxSize: 20f, charSpacing: 1.0f);
         }
     }
 
@@ -806,26 +635,6 @@ public class GameOverManager : MonoBehaviour
             if (nested != null) return nested;
         }
         return null;
-    }
-
-    private static void DestroyNamedChild(Transform parent, string childName, bool immediate)
-    {
-        Transform child = parent.Find(childName);
-        if (child == null) return;
-        if (immediate) DestroyImmediate(child.gameObject);
-        else Destroy(child.gameObject);
-    }
-
-    private static Image CreateStretchLine(Transform parent, string name, Vector2 aMin, Vector2 aMax, Vector2 pivot, Vector2 sizeDelta, Color color)
-    {
-        GameObject go = FantasyUiThemeHelper.CreateAccentLine(parent, name, aMin, aMax, pivot, Vector2.zero, sizeDelta, color);
-        return go.GetComponent<Image>();
-    }
-
-    private static Image CreateCornerSegment(Transform parent, string name, Vector2 cornerAnchor, Vector2 size, Color color)
-    {
-        GameObject go = FantasyUiThemeHelper.CreateAccentLine(parent, name, cornerAnchor, cornerAnchor, cornerAnchor, Vector2.zero, size, color);
-        return go.GetComponent<Image>();
     }
 
     private static void StretchWithPadding(RectTransform rt, float padX, float padY)
@@ -845,15 +654,6 @@ public class GameOverManager : MonoBehaviour
         {
             if (imgs[i] != null) imgs[i].color = col;
         }
-    }
-
-    private static void SetCardRect(RectTransform rt, float x, float yFromTop, float w, float h)
-    {
-        rt.anchorMin = new Vector2(0.5f, 1f);
-        rt.anchorMax = new Vector2(0.5f, 1f);
-        rt.pivot = new Vector2(0.5f, 1f);
-        rt.anchoredPosition = new Vector2(x, yFromTop);
-        rt.sizeDelta = new Vector2(w, h);
     }
 
     // Chuyển sang màn chiến dịch tiếp theo nếu người chơi thắng
@@ -883,6 +683,26 @@ public class GameOverManager : MonoBehaviour
 
         Scene currentScene = SceneManager.GetActiveScene();
         LoadingController.LoadScene(currentScene.name);
+    }
+
+    // Quay về Menu Chính sau khi kết thúc màn chơi
+    public void ReturnToMainMenu()
+    {
+        GameAudioManager.PlayUiClick();
+        Time.timeScale = 1f;
+        IsGameOver = false;
+
+        PlayerPrefs.DeleteKey("SessionId");
+        PlayerPrefs.Save();
+
+        if (Application.CanStreamedLevelBeLoaded("MainMenuScene"))
+        {
+            LoadingController.LoadScene("MainMenuScene");
+        }
+        else
+        {
+            LoadingController.LoadScene("LoginScene");
+        }
     }
 
     // Ghi nhận kết thúc phiên chơi và thoát game sau khi đẩy telemetry

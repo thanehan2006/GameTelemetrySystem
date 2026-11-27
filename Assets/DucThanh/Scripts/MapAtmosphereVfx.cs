@@ -123,6 +123,11 @@ public class MapAtmosphereVfx : MonoBehaviour
 
     private void ResolveFollowTarget()
     {
+        if (PlayerController.Instance != null)
+        {
+            followTarget = PlayerController.Instance.transform;
+            return;
+        }
         GameObject player = GameObject.FindWithTag("Player");
         if (player != null)
         {

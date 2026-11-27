@@ -141,4 +141,9 @@ public class ScoreManager : MonoBehaviour
             levelText.text = $"{gold:N0} G";
         }
     }
+
+    private void OnDestroy()
+    {
+        if (Instance == this) Instance = null;
+    }
 }

@@ -347,6 +347,7 @@ namespace GameTelemetryAPI.Controllers
                 {
                     s.SessionId,
                     PlayerName = s.Player != null ? s.Player.PlayerName : "Unknown",
+                    s.CharacterId,
                     Level = s.LevelId,
                     s.StartTime,
                     s.EndTime,
@@ -359,23 +360,79 @@ namespace GameTelemetryAPI.Controllers
                 })
                 .ToListAsync();
 
-            return rawSessions.Select(s => new RecentSessionDto
+            return rawSessions.Select(s =>
             {
-                SessionId = s.SessionId,
-                PlayerName = s.PlayerName,
-                Level = s.Level,
-                StartTime = DateTime.SpecifyKind(s.StartTime, DateTimeKind.Utc),
-                EndTime = s.EndTime.HasValue ? DateTime.SpecifyKind(s.EndTime.Value, DateTimeKind.Utc) : null,
-                DurationMinutes = s.EndTime.HasValue
-                    ? Math.Round(Math.Max(0, (s.EndTime.Value - s.StartTime).TotalMinutes), 2)
-                    : null,
-                Result = s.Result,
-                TotalEvents = s.TotalEvents,
-                EnemiesKilled = s.EnemiesKilled,
-                GoldEarned = s.GoldEarned,
-                GoldSpent = s.GoldSpent,
-                PerfectParries = s.PerfectParries
+                var charInfo = CharacterCatalog.Resolve(s.CharacterId);
+                return new RecentSessionDto
+                {
+                    SessionId = s.SessionId,
+                    PlayerName = s.PlayerName,
+                    CharacterId = s.CharacterId,
+                    CharacterName = charInfo.DisplayName,
+                    Level = s.Level,
+                    StartTime = DateTime.SpecifyKind(s.StartTime, DateTimeKind.Utc),
+                    EndTime = s.EndTime.HasValue ? DateTime.SpecifyKind(s.EndTime.Value, DateTimeKind.Utc) : null,
+                    DurationMinutes = s.EndTime.HasValue
+                        ? Math.Round(Math.Max(0, (s.EndTime.Value - s.StartTime).TotalMinutes), 2)
+                        : null,
+                    Result = s.Result,
+                    TotalEvents = s.TotalEvents,
+                    EnemiesKilled = s.EnemiesKilled,
+                    GoldEarned = s.GoldEarned,
+                    GoldSpent = s.GoldSpent,
+                    PerfectParries = s.PerfectParries
+                };
             }).ToList();
+        }
+
+        // Thống kê tỷ lệ chọn, tỷ lệ thắng và hiệu suất chiến đấu theo từng lớp nhân vật
+        [HttpGet("characters")]
+        public async Task<ActionResult<List<CharacterAnalyticsStatDto>>> GetCharacterStats(
+            [FromQuery] DateTime? from = null,
+            [FromQuery] DateTime? to = null,
+            [FromQuery] int? level = null,
+            [FromQuery] int? tzOffset = null)
+        {
+            var rawSessions = await FilterSessions(from, to, level, tzOffset)
+                .Select(s => new
+                {
+                    s.CharacterId,
+                    s.Result,
+                    s.EnemiesKilled,
+                    s.BossKilled,
+                    s.StartTime,
+                    s.EndTime
+                })
+                .ToListAsync();
+
+            int totalSessions = rawSessions.Count;
+            var buckets = CharacterCatalog.AggregateByCharacter(
+                rawSessions.Select(s => new CharacterCatalog.CharacterSessionSample(
+                    s.CharacterId,
+                    s.Result,
+                    s.EnemiesKilled,
+                    s.BossKilled,
+                    s.StartTime,
+                    s.EndTime)));
+
+            var result = buckets.Select(b => new CharacterAnalyticsStatDto
+            {
+                CharacterId = b.Info.Id,
+                CharacterName = b.Info.DisplayName,
+                Title = b.Info.Title,
+                RoleBadge = b.Info.RoleBadge,
+                AccentHex = b.Info.AccentHex,
+                TotalSessions = b.Matches,
+                PickRatePercent = totalSessions > 0 ? Math.Round((double)b.Matches / totalSessions * 100, 1) : 0,
+                Wins = b.Wins,
+                Losses = b.Losses,
+                WinRatePercent = b.WinRatePercent,
+                AvgEnemiesKilled = b.AvgEnemiesPerMatch,
+                BossKills = b.BossKills,
+                AvgDurationMinutes = b.AvgDurationMinutes
+            }).ToList();
+
+            return Ok(result);
         }
 
         // Phân tích kinh tế vàng từ GameSessions và chi tiết giao dịch từ ShopPurchases
@@ -554,19 +611,9 @@ namespace GameTelemetryAPI.Controllers
         }
 
         // Kiểm tra kết quả phiên chơi thuộc nhóm thắng
-        private static bool IsWinResult(string? result)
-        {
-            if (string.IsNullOrWhiteSpace(result)) return false;
-            var r = result.Trim().ToLowerInvariant();
-            return r == "win" || r == "victory" || r == "completed" || r == "thắng";
-        }
+        private static bool IsWinResult(string? result) => CharacterCatalog.IsWinResult(result);
 
         // Kiểm tra kết quả phiên chơi thuộc nhóm thua
-        private static bool IsLoseResult(string? result)
-        {
-            if (string.IsNullOrWhiteSpace(result)) return false;
-            var r = result.Trim().ToLowerInvariant();
-            return r == "lose" || r == "loss" || r == "defeat" || r == "dead" || r == "thua";
-        }
+        private static bool IsLoseResult(string? result) => CharacterCatalog.IsLoseResult(result);
     }
 }

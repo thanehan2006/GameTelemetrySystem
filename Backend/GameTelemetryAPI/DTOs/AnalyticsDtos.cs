@@ -47,6 +47,8 @@ namespace GameTelemetryAPI.DTOs
     {
         public long SessionId { get; set; }
         public string PlayerName { get; set; } = string.Empty;
+        public string? CharacterId { get; set; }
+        public string CharacterName { get; set; } = string.Empty;
         public int? Level { get; set; }
         public DateTime StartTime { get; set; }
         public DateTime? EndTime { get; set; }
@@ -57,6 +59,24 @@ namespace GameTelemetryAPI.DTOs
         public int GoldEarned { get; set; }
         public int GoldSpent { get; set; }
         public int PerfectParries { get; set; }
+    }
+
+    // DTO thống kê tỷ lệ chọn và tỷ lệ thắng theo từng nhân vật cho dashboard
+    public class CharacterAnalyticsStatDto
+    {
+        public string CharacterId { get; set; } = string.Empty;
+        public string CharacterName { get; set; } = string.Empty;
+        public string Title { get; set; } = string.Empty;
+        public string RoleBadge { get; set; } = string.Empty;
+        public string AccentHex { get; set; } = "#f2bd47";
+        public int TotalSessions { get; set; }
+        public double PickRatePercent { get; set; }
+        public int Wins { get; set; }
+        public int Losses { get; set; }
+        public double WinRatePercent { get; set; }
+        public double AvgEnemiesKilled { get; set; }
+        public int BossKills { get; set; }
+        public double AvgDurationMinutes { get; set; }
     }
 
     // DTO phản hồi danh sách phiên chơi có phân trang cho lịch sử dashboard

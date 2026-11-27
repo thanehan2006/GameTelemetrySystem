@@ -89,7 +89,7 @@ public class PlayerAttack : MonoBehaviour
     private bool queuedNextAttack;
     private bool wasCursorLocked;
     private readonly HashSet<EnemyHealth> hitEnemiesInSwing = new HashSet<EnemyHealth>();
-    private readonly Collider[] hitBuffer = new Collider[32];
+    private readonly Collider[] hitBuffer = new Collider[96];
 
     // Lấy tham chiếu điều khiển nhân vật và lưu trữ hitbox vũ khí
     void Awake()
@@ -441,8 +441,7 @@ public class PlayerAttack : MonoBehaviour
             Collider c = hitBuffer[i];
             if (c == null || c is TerrainCollider || c.transform == transform || c.transform.IsChildOf(transform)) continue;
 
-            EnemyHealth eh = c.GetComponentInParent<EnemyHealth>();
-            if (eh == null || eh.IsDead) continue;
+            if (!EnemyHealth.TryGetFromCollider(c, out EnemyHealth eh) || eh.IsDead) continue;
 
             Vector3 toEnemy = eh.transform.position - transform.position;
             toEnemy.y = 0f;
@@ -575,25 +574,46 @@ public class PlayerAttack : MonoBehaviour
         if (weaponCollider == null)
         {
             ResolveWeaponCollider();
-            if (weaponCollider == null) return;
         }
 
-        Transform wt = weaponCollider.transform;
-        Vector3 worldCenter = wt.TransformPoint(weaponCollider.center);
-        Vector3 lossy = wt.lossyScale;
-        Vector3 halfExtents = Vector3.Scale(
-            weaponCollider.size * 0.5f,
-            new Vector3(Mathf.Abs(lossy.x), Mathf.Abs(lossy.y), Mathf.Abs(lossy.z))
-        );
-
-        int hitCount = Physics.OverlapBoxNonAlloc(worldCenter, halfExtents, hitBuffer, wt.rotation, enemyLayers, QueryTriggerInteraction.Collide);
-        ProcessHitColliders(hitBuffer, hitCount, worldCenter);
-
-        if (currentAttackVariant == 2 && (Time.time - attackStartTime) >= 0.14f)
+        if (weaponCollider != null)
         {
-            Vector3 spinCenter = transform.position + Vector3.up * 0.85f;
-            int spinCount = Physics.OverlapSphereNonAlloc(spinCenter, 2.65f, hitBuffer, enemyLayers, QueryTriggerInteraction.Collide);
-            ProcessHitColliders(hitBuffer, spinCount, spinCenter);
+            Transform wt = weaponCollider.transform;
+            Vector3 worldCenter = wt.TransformPoint(weaponCollider.center);
+            Vector3 lossy = wt.lossyScale;
+            Vector3 halfExtents = Vector3.Scale(
+                weaponCollider.size * 0.5f,
+                new Vector3(Mathf.Abs(lossy.x), Mathf.Abs(lossy.y), Mathf.Abs(lossy.z))
+            );
+
+            int hitCount = Physics.OverlapBoxNonAlloc(worldCenter, halfExtents, hitBuffer, wt.rotation, enemyLayers, QueryTriggerInteraction.Collide);
+            ProcessHitColliders(hitBuffer, hitCount, worldCenter);
+        }
+
+        if (currentAttackVariant == 2)
+        {
+            if ((Time.time - attackStartTime) >= 0.14f)
+            {
+                Vector3 spinCenter = transform.position + Vector3.up * 0.85f;
+                int spinCount = Physics.OverlapSphereNonAlloc(spinCenter, 2.65f, hitBuffer, enemyLayers, QueryTriggerInteraction.Collide);
+                ProcessHitColliders(hitBuffer, spinCount, spinCenter);
+            }
+        }
+        else if ((Time.time - swingStartTime) >= 0.06f)
+        {
+            Vector3 forward = attackFacingDir;
+            forward.y = 0f;
+            if (forward.sqrMagnitude < 0.001f)
+            {
+                forward = playerController != null ? playerController.GetVisualForward() : transform.forward;
+                forward.y = 0f;
+            }
+            if (forward.sqrMagnitude < 0.001f) forward = transform.forward;
+            forward.Normalize();
+
+            Vector3 meleeCenter = transform.position + Vector3.up * 0.95f + forward * 0.95f;
+            int arcCount = Physics.OverlapSphereNonAlloc(meleeCenter, 1.45f, hitBuffer, enemyLayers, QueryTriggerInteraction.Collide);
+            ProcessForwardArcColliders(hitBuffer, arcCount, meleeCenter, forward);
         }
     }
 
@@ -604,65 +624,98 @@ public class PlayerAttack : MonoBehaviour
             Collider col = hits[i];
             if (col == null || col is TerrainCollider || col.transform == transform || col.transform.IsChildOf(transform)) continue;
 
-            EnemyHealth enemy = col.GetComponentInParent<EnemyHealth>();
-            if (enemy != null && !enemy.IsDead && hitEnemiesInSwing.Add(enemy))
+            if (EnemyHealth.TryGetFromCollider(col, out EnemyHealth enemy) && !enemy.IsDead && hitEnemiesInSwing.Add(enemy))
             {
-                if (playerController != null)
-                {
-                    playerController.StopCombatLunge();
-                    swingLungeStartTime = -999f;
-                }
-
-                OrcEnemyAI orcAI = enemy.CachedEnemyAI;
-                if (orcAI != null)
-                {
-                    float kb = currentAttackVariant == 2 ? knockbackForce * 1.25f : knockbackForce;
-                    orcAI.ApplyKnockback(transform.position, kb, true);
-                }
-
-                int dealtDamage = currentAttackVariant == 2 ? Mathf.RoundToInt(attackDamage * 1.15f) : attackDamage;
-                enemy.TakeDamage(dealtDamage);
-
-                Vector3 hitPoint = col.ClosestPoint(originCenter);
-                if ((hitPoint - enemy.transform.position).sqrMagnitude < 0.01f)
-                {
-                    hitPoint = enemy.transform.position + Vector3.up * 1.1f;
-                }
-                Vector3 hitDir = enemy.transform.position - transform.position;
-                bool heavyHit = enemy.isBoss || dealtDamage >= 55 || currentAttackVariant == 2;
-                CombatVfxManager.SpawnBloodHit(hitPoint, hitDir, heavyHit);
-                Color dmgColor = heavyHit ? new Color(1f, 0.80f, 0.22f) : Color.white;
-                if (activeWeaponVfx != null)
-                {
-                    WeaponVfxProfile wp = activeWeaponVfx.Profile;
-                    CombatVfxManager.SpawnElementalHitBurst(
-                        hitPoint,
-                        hitDir,
-                        wp.primaryColor,
-                        wp.coreColor,
-                        wp.secondaryColor,
-                        wp.tier,
-                        heavyHit);
-                    if (wp.tier >= 3 && heavyHit)
-                    {
-                        dmgColor = Color.Lerp(wp.primaryColor, wp.coreColor, 0.42f);
-                    }
-                }
-                CombatVfxManager.SpawnFloatingText(
-                    hitPoint + Vector3.up * 0.55f,
-                    heavyHit ? $"{dealtDamage}!" : $"{dealtDamage}",
-                    dmgColor,
-                    heavyHit ? 1.12f : 0.90f,
-                    0.82f);
-                CombatVfxManager.TriggerHitStop(heavyHit ? 0.036f : 0.016f, heavyHit ? 0.10f : 0.18f);
-                GameAudioManager.PlaySwordHit(heavyHit);
-
-                if (ThirdPersonCamera.Instance != null)
-                {
-                    ThirdPersonCamera.Instance.AddCameraShake(enemy.isBoss || currentAttackVariant == 2 ? 0.14f : 0.075f, 0.085f);
-                    if (heavyHit) ThirdPersonCamera.Instance.AddFovPunch(2.4f);
-                }
+                ApplyHitToEnemy(enemy, col, originCenter);
             }
+        }
+    }
+
+    private void ProcessForwardArcColliders(Collider[] hits, int count, Vector3 originCenter, Vector3 forward)
+    {
+        for (int i = 0; i < count; i++)
+        {
+            Collider col = hits[i];
+            if (col == null || col is TerrainCollider || col.transform == transform || col.transform.IsChildOf(transform)) continue;
+
+            if (!EnemyHealth.TryGetFromCollider(col, out EnemyHealth enemy) || enemy.IsDead) continue;
+
+            Vector3 toEnemy = enemy.transform.position - transform.position;
+            if (toEnemy.y < -1.4f || toEnemy.y > 2.4f) continue;
+
+            toEnemy.y = 0f;
+            float sqrDist = toEnemy.sqrMagnitude;
+            if (sqrDist > 2.45f * 2.45f) continue;
+
+            if (sqrDist > 1.25f * 1.25f)
+            {
+                float dist = Mathf.Sqrt(sqrDist);
+                if (Vector3.Dot(forward, toEnemy / dist) < 0.25f) continue;
+            }
+
+            if (hitEnemiesInSwing.Add(enemy))
+            {
+                ApplyHitToEnemy(enemy, col, originCenter);
+            }
+        }
+    }
+
+    private void ApplyHitToEnemy(EnemyHealth enemy, Collider col, Vector3 originCenter)
+    {
+        if (playerController != null)
+        {
+            playerController.StopCombatLunge();
+            swingLungeStartTime = -999f;
+        }
+
+        OrcEnemyAI orcAI = enemy.CachedEnemyAI;
+        if (orcAI != null)
+        {
+            float kb = currentAttackVariant == 2 ? knockbackForce * 1.25f : knockbackForce;
+            orcAI.ApplyKnockback(transform.position, kb, true);
+        }
+
+        int dealtDamage = currentAttackVariant == 2 ? Mathf.RoundToInt(attackDamage * 1.15f) : attackDamage;
+        enemy.TakeDamage(dealtDamage);
+
+        Vector3 hitPoint = col.ClosestPoint(originCenter);
+        if ((hitPoint - enemy.transform.position).sqrMagnitude < 0.01f)
+        {
+            hitPoint = enemy.transform.position + Vector3.up * 1.1f;
+        }
+        Vector3 hitDir = enemy.transform.position - transform.position;
+        bool heavyHit = enemy.isBoss || dealtDamage >= 55 || currentAttackVariant == 2;
+        CombatVfxManager.SpawnBloodHit(hitPoint, hitDir, heavyHit);
+        Color dmgColor = heavyHit ? new Color(1f, 0.80f, 0.22f) : Color.white;
+        if (activeWeaponVfx != null)
+        {
+            WeaponVfxProfile wp = activeWeaponVfx.Profile;
+            CombatVfxManager.SpawnElementalHitBurst(
+                hitPoint,
+                hitDir,
+                wp.primaryColor,
+                wp.coreColor,
+                wp.secondaryColor,
+                wp.tier,
+                heavyHit);
+            if (wp.tier >= 3 && heavyHit)
+            {
+                dmgColor = Color.Lerp(wp.primaryColor, wp.coreColor, 0.42f);
+            }
+        }
+        CombatVfxManager.SpawnFloatingText(
+            hitPoint + Vector3.up * 0.55f,
+            heavyHit ? $"{dealtDamage}!" : $"{dealtDamage}",
+            dmgColor,
+            heavyHit ? 1.12f : 0.90f,
+            0.82f);
+        CombatVfxManager.TriggerHitStop(heavyHit ? 0.036f : 0.016f, heavyHit ? 0.10f : 0.18f);
+        GameAudioManager.PlaySwordHit(heavyHit);
+
+        if (ThirdPersonCamera.Instance != null)
+        {
+            ThirdPersonCamera.Instance.AddCameraShake(enemy.isBoss || currentAttackVariant == 2 ? 0.14f : 0.075f, 0.085f);
+            if (heavyHit) ThirdPersonCamera.Instance.AddFovPunch(2.4f);
         }
     }
 
@@ -964,8 +1017,7 @@ public class PlayerAttack : MonoBehaviour
             Collider c = hitBuffer[i];
             if (c == null || c is TerrainCollider || c.transform == transform || c.transform.IsChildOf(transform)) continue;
 
-            EnemyHealth eh = c.GetComponentInParent<EnemyHealth>();
-            if (eh == null || eh.IsDead) continue;
+            if (!EnemyHealth.TryGetFromCollider(c, out EnemyHealth eh) || eh.IsDead) continue;
 
             Vector3 toEnemy = eh.transform.position - transform.position;
             toEnemy.y = 0f;
@@ -1062,6 +1114,7 @@ public class PlayerAttack : MonoBehaviour
         rmr.receiveShadows = false;
         SetIndicatorColor(rmr, new Color(2.3f, 0.72f, 0.18f, 0.92f));
         lockGroundRingT = ringGo.transform;
+        lockGroundRingT.localPosition = new Vector3(0f, 0.14f, 0f);
 
         GameObject reticleRoot = new GameObject("LockBodyReticle");
         reticleRoot.transform.SetParent(lockIndicatorRoot.transform, false);
@@ -1136,7 +1189,6 @@ public class PlayerAttack : MonoBehaviour
         {
             float ringBase = Mathf.Clamp(radius * 3.8f, 1.8f, 4.4f);
             float pulse = ringBase * (1f + Mathf.Sin(t * 5.5f) * 0.08f);
-            lockGroundRingT.localPosition = new Vector3(0f, 0.14f, 0f);
             lockGroundRingT.localScale = new Vector3(pulse, 1f, pulse);
             lockGroundRingT.Rotate(Vector3.up, 95f * dt, Space.Self);
         }
@@ -1159,7 +1211,6 @@ public class PlayerAttack : MonoBehaviour
             if (lockInnerDiamondT != null)
             {
                 lockInnerDiamondT.localRotation = Quaternion.Euler(0f, -t * 140f + 45f, 0f);
-                lockInnerDiamondT.localScale = new Vector3(0.34f, 1f, 0.34f);
             }
         }
     }

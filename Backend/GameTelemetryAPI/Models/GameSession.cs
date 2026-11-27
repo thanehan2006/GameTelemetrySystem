@@ -8,6 +8,7 @@ namespace GameTelemetryAPI.Models
         public long SessionId { get; set; }
         public int PlayerId { get; set; }
         public int? LevelId { get; set; }
+        public string? CharacterId { get; set; }
         public DateTime StartTime { get; set; } = DateTime.UtcNow;
         public DateTime? EndTime { get; set; }
         public string? Result { get; set; }

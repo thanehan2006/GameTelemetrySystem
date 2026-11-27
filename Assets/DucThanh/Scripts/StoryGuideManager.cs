@@ -1243,11 +1243,17 @@ public class StoryGuideManager : MonoBehaviour
 
         TMP_FontAsset font = canvas.GetComponentInChildren<TMP_Text>(true)?.font;
 
-        if (whisperRoot == null) BuildBottomWhisper(canvas.transform, font);
-        if (liveToastRoot == null) BuildLiveTutorialToast(canvas.transform, font);
-        if (chestOverlayRoot == null) BuildChestModal(canvas.transform, font);
-        if (journalOverlayRoot == null) BuildJournalModal(canvas.transform, font);
-        if (promptRoot == null) BuildInteractPrompt(canvas.transform, font);
+        bool builtAny = false;
+        if (whisperRoot == null) { BuildBottomWhisper(canvas.transform, font); builtAny = true; }
+        if (liveToastRoot == null) { BuildLiveTutorialToast(canvas.transform, font); builtAny = true; }
+        if (chestOverlayRoot == null) { BuildChestModal(canvas.transform, font); builtAny = true; }
+        if (journalOverlayRoot == null) { BuildJournalModal(canvas.transform, font); builtAny = true; }
+        if (promptRoot == null) { BuildInteractPrompt(canvas.transform, font); builtAny = true; }
+
+        if (builtAny)
+        {
+            UniversalButtonHoverInstaller.RequestScan();
+        }
     }
 
     private static void EnsureNestedCanvas(GameObject root)

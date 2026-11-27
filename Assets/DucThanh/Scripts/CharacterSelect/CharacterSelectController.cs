@@ -489,10 +489,19 @@ public class CharacterSelectController : MonoBehaviour
     private void UpdateStatBarsSmooth()
     {
         float k = 1f - Mathf.Exp(-12f * Time.unscaledDeltaTime);
-        if (hpSlider != null) hpSlider.value = Mathf.Lerp(hpSlider.value, targetHpStat, k);
-        if (atkSlider != null) atkSlider.value = Mathf.Lerp(atkSlider.value, targetAtkStat, k);
-        if (spdSlider != null) spdSlider.value = Mathf.Lerp(spdSlider.value, targetSpdStat, k);
-        if (defSlider != null) defSlider.value = Mathf.Lerp(defSlider.value, targetDefStat, k);
+        SmoothSlider(hpSlider, targetHpStat, k);
+        SmoothSlider(atkSlider, targetAtkStat, k);
+        SmoothSlider(spdSlider, targetSpdStat, k);
+        SmoothSlider(defSlider, targetDefStat, k);
+    }
+
+    private static void SmoothSlider(Slider slider, float target, float k)
+    {
+        if (slider == null) return;
+        float cur = slider.value;
+        if (Mathf.Approximately(cur, target)) return;
+        float next = Mathf.Lerp(cur, target, k);
+        slider.value = Mathf.Abs(next - target) < 0.01f ? target : next;
     }
 
     private void UpdateCardHighlights()
@@ -665,17 +674,4 @@ public class CharacterSelectController : MonoBehaviour
         }
         return false;
     }
-
-#if UNITY_EDITOR
-    // Cho phép xóa nhanh vũ khí khỏi các nhân vật ngay trong chế độ chỉnh sửa Scene
-    [ContextMenu("Xóa vũ khí khỏi nhân vật trong Scene")]
-    private void StripShowcaseWeaponsInEditor()
-    {
-        StripShowcaseWeapons(true);
-        if (!Application.isPlaying)
-        {
-            UnityEditor.SceneManagement.EditorSceneManager.MarkSceneDirty(gameObject.scene);
-        }
-    }
-#endif
 }

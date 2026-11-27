@@ -8,12 +8,39 @@ using UnityEngine.AI;
 public class OrcEnemyAI : MonoBehaviour
 {
     private static readonly List<OrcEnemyAI> ActiveEnemies = new List<OrcEnemyAI>();
+    private static readonly HashSet<int> ExtraEnemyColliderIds = new HashSet<int>();
     public static int ActiveEnemyCount => ActiveEnemies.Count;
     private static readonly RaycastHit[] GroundHitBuffer = new RaycastHit[16];
     private static readonly float[] SteeringAngles = { 35f, -35f, 65f, -65f, 95f, -95f };
     private const float DestinationUpdateInterval = 0.22f;
     private const float DestinationMoveThresholdSqr = 0.16f;
     private const float NavMeshSampleRadius = 6f;
+
+    [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+    private static void ResetStaticState()
+    {
+        ActiveEnemies.Clear();
+        ExtraEnemyColliderIds.Clear();
+    }
+
+    public static bool IsEnemyCollider(Collider col)
+    {
+        if (col == null) return false;
+        if (EnemyHealth.TryGetFromCollider(col, out _)) return true;
+        return ExtraEnemyColliderIds.Count > 0 && ExtraEnemyColliderIds.Contains(col.GetInstanceID());
+    }
+
+    public static bool IsPlayerCollider(Collider col)
+    {
+        if (col == null) return false;
+        if (col.CompareTag("Player")) return true;
+        if (PlayerController.Instance != null)
+        {
+            Transform pt = PlayerController.Instance.transform;
+            return col.transform == pt || col.transform.IsChildOf(pt);
+        }
+        return col.GetComponentInParent<PlayerController>() != null;
+    }
 
     public enum IdleBehaviorMode
     {
@@ -64,11 +91,13 @@ public class OrcEnemyAI : MonoBehaviour
     public string runStateName = "Run";
     public string attackStateName = "Attack1";
 
+    private Transform cachedTransform;
     private Transform player;
     private PlayerHealth playerHealth;
     private Animator animator;
     private OrcWeaponHitbox weaponHitbox;
     private NavMeshAgent navAgent;
+    private Collider[] fallbackOwnColliders;
 
     private float nextAttackTime;
     private bool isAttacking;
@@ -121,6 +150,19 @@ public class OrcEnemyAI : MonoBehaviour
     // Lấy tham chiếu NavMeshAgent, Animator và thiết lập hitbox vũ khí
     void Awake()
     {
+        cachedTransform = transform;
+        if (GetComponent<EnemyHealth>() == null)
+        {
+            fallbackOwnColliders = GetComponentsInChildren<Collider>(true);
+            for (int i = 0; i < fallbackOwnColliders.Length; i++)
+            {
+                if (fallbackOwnColliders[i] != null)
+                {
+                    ExtraEnemyColliderIds.Add(fallbackOwnColliders[i].GetInstanceID());
+                }
+            }
+        }
+
         animator = GetComponentInChildren<Animator>();
         if (animator != null)
         {
@@ -251,13 +293,14 @@ public class OrcEnemyAI : MonoBehaviour
         if (alertNearbyAllies && alertAllyRadius > 0f)
         {
             float sqrAlert = alertAllyRadius * alertAllyRadius;
-            Vector3 myPos = transform.position;
+            Vector3 myPos = cachedTransform != null ? cachedTransform.position : transform.position;
             for (int i = 0; i < ActiveEnemies.Count; i++)
             {
                 OrcEnemyAI other = ActiveEnemies[i];
                 if (other == null || other == this || other.isAggroed) continue;
 
-                Vector3 diff = other.transform.position - myPos;
+                Vector3 otherPos = other.cachedTransform != null ? other.cachedTransform.position : other.transform.position;
+                Vector3 diff = otherPos - myPos;
                 diff.y = 0f;
                 if (diff.sqrMagnitude <= sqrAlert)
                 {
@@ -345,9 +388,7 @@ public class OrcEnemyAI : MonoBehaviour
             }
 
             if (col is CharacterController) continue;
-            if (col.CompareTag("Player")) continue;
-            if (col.GetComponentInParent<OrcEnemyAI>() != null) continue;
-            if (col.GetComponentInParent<PlayerController>() != null) continue;
+            if (IsPlayerCollider(col) || IsEnemyCollider(col)) continue;
 
             float ptY = GroundHitBuffer[i].point.y;
             if (ptY <= worldPos.y + 1.35f && ptY > walkableY)
@@ -413,6 +454,8 @@ public class OrcEnemyAI : MonoBehaviour
     // Điều phối trạng thái đứng chờ, truy đuổi, tách bầy và ra đòn theo khoảng cách
     void Update()
     {
+        if (Time.deltaTime <= 0f) return;
+
         if (parryStunTimer > 0f)
         {
             parryStunTimer -= Time.deltaTime;
@@ -860,9 +903,7 @@ public class OrcEnemyAI : MonoBehaviour
             if (col == null) continue;
             if (col is TerrainCollider || col is CharacterController) continue;
             if (col.transform == transform || col.transform.IsChildOf(transform)) continue;
-            if (col.CompareTag("Player")) continue;
-            if (col.GetComponentInParent<OrcEnemyAI>() != null) continue;
-            if (col.GetComponentInParent<PlayerController>() != null) continue;
+            if (IsPlayerCollider(col) || IsEnemyCollider(col)) continue;
             return true;
         }
         return false;
@@ -871,6 +912,8 @@ public class OrcEnemyAI : MonoBehaviour
     // Hiệu chỉnh bám sát bề mặt địa hình mỗi khung hình
     void LateUpdate()
     {
+        if (Time.deltaTime <= 0f) return;
+
         ProcessKnockback();
         if (!isAggroed && lastSqrDistToPlayer > 32f * 32f && knockbackVelocity.sqrMagnitude <= 0.001f)
         {
@@ -966,7 +1009,7 @@ public class OrcEnemyAI : MonoBehaviour
     void EnforceSeparation()
     {
         Vector3 separation = Vector3.zero;
-        Vector3 pos = transform.position;
+        Vector3 pos = cachedTransform != null ? cachedTransform.position : transform.position;
         float minEnemySpacingSqr = minEnemySpacing * minEnemySpacing;
 
         for (int i = 0; i < ActiveEnemies.Count; i++)
@@ -974,7 +1017,7 @@ public class OrcEnemyAI : MonoBehaviour
             OrcEnemyAI other = ActiveEnemies[i];
             if (other == null || other == this) continue;
 
-            Vector3 otherPos = other.transform.position;
+            Vector3 otherPos = other.cachedTransform != null ? other.cachedTransform.position : other.transform.position;
             float dx = pos.x - otherPos.x;
             if (Mathf.Abs(dx) >= minEnemySpacing) continue;
             float dz = pos.z - otherPos.z;
@@ -1152,6 +1195,18 @@ public class OrcEnemyAI : MonoBehaviour
         if (animator != null)
         {
             animator.speed = 1f;
+        }
+    }
+
+    private void OnDestroy()
+    {
+        if (fallbackOwnColliders == null) return;
+        for (int i = 0; i < fallbackOwnColliders.Length; i++)
+        {
+            if (fallbackOwnColliders[i] != null)
+            {
+                ExtraEnemyColliderIds.Remove(fallbackOwnColliders[i].GetInstanceID());
+            }
         }
     }
 }

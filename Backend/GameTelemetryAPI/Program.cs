@@ -20,7 +20,7 @@ builder.Services.AddDbContext<GameTelemetryContext>(options =>
 
 var app = builder.Build();
 
-// Kiểm tra và bổ sung cột PasswordHash trong bảng Players khi khởi động nếu chưa có
+// Kiểm tra và bổ sung các cột mới (PasswordHash, ClientEventId, CharacterId) & index khi khởi động nếu chưa có
 using (var scope = app.Services.CreateScope())
 {
     try
@@ -43,6 +43,13 @@ using (var scope = app.Services.CreateScope())
                 ALTER TABLE dbo.ShopPurchases ADD ClientEventId NVARCHAR(64) NULL;
             END
 
+            IF OBJECT_ID(N'dbo.GameSessions', N'U') IS NOT NULL AND COL_LENGTH(N'dbo.GameSessions', N'CharacterId') IS NULL
+            BEGIN
+                ALTER TABLE dbo.GameSessions ADD CharacterId NVARCHAR(50) NULL;
+            END");
+
+        // Chạy tạo index ở batch riêng để SQL Server biên dịch sau khi các cột mới đã tồn tại
+        db.Database.ExecuteSqlRaw(@"
             IF OBJECT_ID(N'dbo.GameEvents', N'U') IS NOT NULL
                AND COL_LENGTH(N'dbo.GameEvents', N'ClientEventId') IS NOT NULL
                AND NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'UX_GameEvents_ClientEventId' AND object_id = OBJECT_ID(N'dbo.GameEvents'))
@@ -59,11 +66,20 @@ using (var scope = app.Services.CreateScope())
                 CREATE UNIQUE NONCLUSTERED INDEX UX_ShopPurchases_ClientEventId
                     ON dbo.ShopPurchases(ClientEventId)
                     WHERE ClientEventId IS NOT NULL;
+            END
+
+            IF OBJECT_ID(N'dbo.GameSessions', N'U') IS NOT NULL
+               AND COL_LENGTH(N'dbo.GameSessions', N'CharacterId') IS NOT NULL
+               AND NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_GameSessions_CharacterId' AND object_id = OBJECT_ID(N'dbo.GameSessions'))
+            BEGIN
+                CREATE NONCLUSTERED INDEX IX_GameSessions_CharacterId
+                    ON dbo.GameSessions(CharacterId)
+                    WHERE CharacterId IS NOT NULL;
             END");
     }
     catch (Exception ex)
     {
-        app.Logger.LogWarning(ex, "Không thể tự động kiểm tra/cập nhật cột PasswordHash khi khởi động.");
+        app.Logger.LogWarning(ex, "Không thể tự động kiểm tra/cập nhật schema khi khởi động.");
     }
 }
 

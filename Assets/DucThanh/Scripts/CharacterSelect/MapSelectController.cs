@@ -142,6 +142,7 @@ public class MapSelectController : MonoBehaviour
         Cursor.visible = true;
 
         PopulateSelectedHeroBadge();
+        ConfigureMapTitleText();
         BindButtons();
 
         int count = mapSlots != null ? mapSlots.Length : 3;
@@ -500,12 +501,32 @@ public class MapSelectController : MonoBehaviour
         }
     }
 
+    private void ConfigureMapTitleText()
+    {
+        if (mapTitleText == null) return;
+        mapTitleText.textWrappingMode = TextWrappingModes.NoWrap;
+        mapTitleText.overflowMode = TextOverflowModes.Truncate;
+        mapTitleText.enableAutoSizing = true;
+        mapTitleText.fontSizeMin = 19f;
+        mapTitleText.fontSizeMax = 30f;
+        mapTitleText.characterSpacing = 1.2f;
+    }
+
     private void UpdateStatBarsSmooth()
     {
         float k = 1f - Mathf.Exp(-12f * Time.unscaledDeltaTime);
-        if (difficultySlider != null) difficultySlider.value = Mathf.Lerp(difficultySlider.value, targetDiffStat, k);
-        if (hazardSlider != null) hazardSlider.value = Mathf.Lerp(hazardSlider.value, targetHazardStat, k);
-        if (bossSlider != null) bossSlider.value = Mathf.Lerp(bossSlider.value, targetBossStat, k);
+        SmoothSlider(difficultySlider, targetDiffStat, k);
+        SmoothSlider(hazardSlider, targetHazardStat, k);
+        SmoothSlider(bossSlider, targetBossStat, k);
+    }
+
+    private static void SmoothSlider(Slider slider, float target, float k)
+    {
+        if (slider == null) return;
+        float cur = slider.value;
+        if (Mathf.Approximately(cur, target)) return;
+        float next = Mathf.Lerp(cur, target, k);
+        slider.value = Mathf.Abs(next - target) < 0.01f ? target : next;
     }
 
     private void UpdateCardHighlights()

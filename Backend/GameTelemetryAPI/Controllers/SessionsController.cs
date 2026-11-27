@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using GameTelemetryAPI.Data;
 using GameTelemetryAPI.DTOs;
 using GameTelemetryAPI.Models;
+using GameTelemetryAPI.Services;
 
 namespace GameTelemetryAPI.Controllers
 {
@@ -33,11 +34,33 @@ namespace GameTelemetryAPI.Controllers
                 return NotFound(new { message = $"Không tìm thấy người chơi với PlayerId {dto.PlayerId}" });
             }
 
+            DateTime nowUtc = DateTime.UtcNow;
+            DateTime resolvedStart = nowUtc;
+            if (dto.StartTime.HasValue)
+            {
+                DateTime candidate = NormalizeUtc(dto.StartTime.Value);
+                DateTime minAllowed = nowUtc.AddDays(-30);
+                DateTime maxAllowed = nowUtc.AddMinutes(1);
+                if (candidate < minAllowed)
+                {
+                    resolvedStart = minAllowed;
+                }
+                else if (candidate > maxAllowed)
+                {
+                    resolvedStart = nowUtc;
+                }
+                else
+                {
+                    resolvedStart = candidate;
+                }
+            }
+
             var session = new GameSession
             {
                 PlayerId = dto.PlayerId,
                 LevelId = dto.LevelId is >= 1 and <= 3 ? dto.LevelId.Value : null,
-                StartTime = DateTime.UtcNow,
+                CharacterId = CharacterCatalog.NormalizeId(dto.CharacterId),
+                StartTime = resolvedStart,
                 EndTime = null,
                 Result = null
             };
@@ -113,6 +136,7 @@ namespace GameTelemetryAPI.Controllers
             SessionId = session.SessionId,
             PlayerId = session.PlayerId,
             LevelId = session.LevelId,
+            CharacterId = session.CharacterId,
             StartTime = session.StartTime,
             EndTime = session.EndTime,
             Result = session.Result

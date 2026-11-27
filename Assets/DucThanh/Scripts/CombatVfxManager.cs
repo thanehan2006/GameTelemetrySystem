@@ -22,11 +22,27 @@ public class CombatVfxManager : MonoBehaviour
     private static readonly int ZWriteId = Shader.PropertyToID("_ZWrite");
     private static readonly int CullId = Shader.PropertyToID("_Cull");
 
-    private static readonly WaitForSecondsRealtime WaitSlashNormal = new WaitForSecondsRealtime(0.09f);
-    private static readonly WaitForSecondsRealtime WaitSlashSpin = new WaitForSecondsRealtime(0.12f);
-    private static readonly WaitForSecondsRealtime WaitBloodReturn = new WaitForSecondsRealtime(0.95f);
     private static readonly ParticleSystem.Burst[] SingleBurstBuffer = new ParticleSystem.Burst[1];
+    private static readonly GradientColorKey[] TempGradColorKeys = new GradientColorKey[2];
+    private static readonly GradientAlphaKey[] TempGradAlphaKeys = new GradientAlphaKey[3];
+    private static readonly AnimationCurve CurveEase01_1 = AnimationCurve.EaseInOut(0f, 0.1f, 1f, 1f);
+    private static readonly AnimationCurve CurveEase014_1 = AnimationCurve.EaseInOut(0f, 0.14f, 1f, 1f);
+    private static readonly AnimationCurve CurveEase015_1 = AnimationCurve.EaseInOut(0f, 0.15f, 1f, 1f);
+    private static readonly AnimationCurve CurveEase018_1 = AnimationCurve.EaseInOut(0f, 0.18f, 1f, 1f);
+    private static readonly AnimationCurve CurveEase02_1 = AnimationCurve.EaseInOut(0f, 0.2f, 1f, 1f);
+    private static readonly AnimationCurve CurveEase025_125 = AnimationCurve.EaseInOut(0f, 0.25f, 1f, 1.25f);
+    private static readonly AnimationCurve CurveEase035_138 = AnimationCurve.EaseInOut(0f, 0.35f, 1f, 1.38f);
+    private static readonly AnimationCurve CurveEase04_135 = AnimationCurve.EaseInOut(0f, 0.4f, 1f, 1.35f);
+    private static readonly AnimationCurve CurveEase1_0 = AnimationCurve.EaseInOut(0f, 1f, 1f, 0f);
+    private static readonly AnimationCurve CurveEase1_018 = AnimationCurve.EaseInOut(0f, 1f, 1f, 0.18f);
+    private static readonly AnimationCurve CurveLinear05_15 = AnimationCurve.Linear(0f, 0.5f, 1f, 1.5f);
+    private static readonly AnimationCurve CurveLinear055_155 = AnimationCurve.Linear(0f, 0.55f, 1f, 1.55f);
+    private static readonly AnimationCurve CurveLinear055_185 = AnimationCurve.Linear(0f, 0.55f, 1f, 1.85f);
     private static Mesh sharedCylinderMesh;
+
+    private const float BloodReturnDelay = 0.95f;
+    private const float SlashNormalDelay = 0.09f;
+    private const float SlashSpinDelay = 0.12f;
 
     private const float FloatingTextBaseFontSize = 2.35f;
     private const int MaxConcurrentFlashLights = 3;
@@ -98,11 +114,63 @@ public class CombatVfxManager : MonoBehaviour
         public MaterialPropertyBlock propBlock;
     }
 
+    private struct PendingBloodReturn
+    {
+        public PooledBloodHit fx;
+        public float returnUnscaledTime;
+    }
+
+    private struct PendingElementalReturn
+    {
+        public PooledElementalHit fx;
+        public float returnUnscaledTime;
+    }
+
+    private struct ActiveFlashLight
+    {
+        public Light light;
+        public float startIntensity;
+        public float elapsed;
+        public float duration;
+    }
+
+    private struct ActiveSlashArcState
+    {
+        public byte phase; // 0 = pre-delay, 1 = animating, 2 = post-delay
+        public float readyUnscaledTime;
+        public float elapsed;
+        public float duration;
+        public Vector3 playerPos;
+        public Vector3 forwardDir;
+        public Quaternion baseRot;
+        public int attackVariant;
+        public bool useCustomPalette;
+        public Color customPrimary;
+        public Color customCore;
+        public Color customSecondary;
+        public float scaleMult;
+        public PooledSlashArc arc;
+        public Color outerStart;
+        public Color outerEnd;
+        public Color coreStart;
+        public Color coreEnd;
+        public float startYaw;
+        public float endYaw;
+        public float tiltZ;
+        public float startScale;
+        public float endScale;
+    }
+
     private readonly Queue<FloatingTextAnim> floatingTextPool = new Queue<FloatingTextAnim>(24);
     private readonly Queue<Light> flashLightPool = new Queue<Light>(8);
     private readonly Queue<PooledBloodHit> bloodHitPool = new Queue<PooledBloodHit>(12);
     private readonly Queue<PooledElementalHit> elementalHitPool = new Queue<PooledElementalHit>(10);
     private readonly Queue<PooledSlashArc> slashArcPool = new Queue<PooledSlashArc>(6);
+    private readonly List<PendingBloodReturn> pendingBloodReturns = new List<PendingBloodReturn>(MaxActivePooledBloodHits);
+    private readonly List<PendingElementalReturn> pendingElementalReturns = new List<PendingElementalReturn>(MaxActivePooledElementalHits);
+    private readonly List<ActiveFlashLight> activeFlashLightList = new List<ActiveFlashLight>(MaxConcurrentFlashLights);
+    private readonly List<ActiveSlashArcState> activeSlashArcList = new List<ActiveSlashArcState>(MaxActivePooledSlashArcs);
+    private MaterialPropertyBlock parryStunPropBlock;
     private int activeFlashLights;
     private int activeBloodHits;
     private int activeElementalHits;
@@ -197,11 +265,15 @@ public class CombatVfxManager : MonoBehaviour
 
     private void Update()
     {
-        if (hitStopActive && Time.unscaledTime >= hitStopEndUnscaledTime)
+        float unscaledNow = Time.unscaledTime;
+        float unscaledDt = Time.unscaledDeltaTime;
+        float dt = Time.deltaTime;
+
+        if (hitStopActive && unscaledNow >= hitStopEndUnscaledTime)
         {
             hitStopActive = false;
             activeHitStopScale = 1f;
-            nextAllowedHitStopUnscaledTime = Time.unscaledTime + 0.14f;
+            nextAllowedHitStopUnscaledTime = unscaledNow + 0.14f;
             if (!GameOverManager.IsGameOver && !WeaponShopManager.IsShopOpen)
             {
                 Time.timeScale = 1f;
@@ -210,7 +282,7 @@ public class CombatVfxManager : MonoBehaviour
 
         if (screenFlashCanvasGroup != null && screenFlashAlpha > 0.001f)
         {
-            screenFlashAlpha = Mathf.MoveTowards(screenFlashAlpha, 0f, Time.unscaledDeltaTime * screenFlashFadeSpeed);
+            screenFlashAlpha = Mathf.MoveTowards(screenFlashAlpha, 0f, unscaledDt * screenFlashFadeSpeed);
             screenFlashCanvasGroup.alpha = screenFlashAlpha;
 
             if (screenFlashAlpha <= 0.001f)
@@ -220,6 +292,10 @@ public class CombatVfxManager : MonoBehaviour
                 screenFlashCanvasGroup.gameObject.SetActive(false);
             }
         }
+
+        UpdatePendingPoolReturns(unscaledNow);
+        UpdateActiveFlashLights(unscaledDt);
+        UpdateActiveSlashArcs(unscaledNow, dt);
     }
 
     private void OnDisable()
@@ -268,6 +344,11 @@ public class CombatVfxManager : MonoBehaviour
         bloodHitPool.Clear();
         elementalHitPool.Clear();
         slashArcPool.Clear();
+        pendingBloodReturns.Clear();
+        pendingElementalReturns.Clear();
+        activeFlashLightList.Clear();
+        activeSlashArcList.Clear();
+        activeFlashLights = 0;
         activeBloodHits = 0;
         activeElementalHits = 0;
         activeSlashArcs = 0;
@@ -370,8 +451,7 @@ public class CombatVfxManager : MonoBehaviour
     // Vẽ vệt kiếm hình vòng cung theo từng biến thể đòn chém
     public static void SpawnSlashArc(Vector3 playerPos, Vector3 forwardDir, int attackVariant)
     {
-        CombatVfxManager mgr = EnsureInstance();
-        mgr.StartCoroutine(mgr.SpawnSlashArcCoroutine(
+        EnsureInstance().EnqueueSlashArc(
             playerPos,
             forwardDir,
             attackVariant,
@@ -379,7 +459,7 @@ public class CombatVfxManager : MonoBehaviour
             Color.white,
             Color.white,
             Color.white,
-            1f));
+            1f);
     }
 
     // Vẽ vệt kiếm hình vòng cung mang màu nguyên tố và kích thước theo bậc vũ khí
@@ -392,8 +472,7 @@ public class CombatVfxManager : MonoBehaviour
         Color secondaryColor,
         float scaleMult = 1f)
     {
-        CombatVfxManager mgr = EnsureInstance();
-        mgr.StartCoroutine(mgr.SpawnSlashArcCoroutine(
+        EnsureInstance().EnqueueSlashArc(
             playerPos,
             forwardDir,
             attackVariant,
@@ -401,7 +480,7 @@ public class CombatVfxManager : MonoBehaviour
             primaryColor,
             coreColor,
             secondaryColor,
-            scaleMult));
+            scaleMult);
     }
 
     // Tạo tia lửa khi đỡ đòn thường hoặc vòng sáng khi Perfect Parry
@@ -773,7 +852,11 @@ public class CombatVfxManager : MonoBehaviour
         fx.mist.Play();
 
         TryFlashPointLight(position, heavy ? new Color(1f, 0.55f, 0.18f) : new Color(1f, 0.78f, 0.42f), heavy ? 5.2f : 3.2f, heavy ? 5.5f : 3.6f, heavy ? 0.18f : 0.12f);
-        StartCoroutine(ReturnBloodHitAfter(fx));
+        pendingBloodReturns.Add(new PendingBloodReturn
+        {
+            fx = fx,
+            returnUnscaledTime = Time.unscaledTime + BloodReturnDelay
+        });
     }
 
     private PooledBloodHit RentBloodHit()
@@ -809,7 +892,7 @@ public class CombatVfxManager : MonoBehaviour
             SetSingleBurst(ps, 0f, 1);
             var sizeOver = ps.sizeOverLifetime;
             sizeOver.enabled = true;
-            sizeOver.size = new ParticleSystem.MinMaxCurve(1f, AnimationCurve.EaseInOut(0f, 0.4f, 1f, 1.35f));
+            sizeOver.size = new ParticleSystem.MinMaxCurve(1f, CurveEase04_135);
             var colOver = ps.colorOverLifetime;
             colOver.enabled = true;
             colOver.color = CreateFadeOutGradient(Color.white, new Color(1f, 0.52f, 0.15f), 1f);
@@ -827,7 +910,7 @@ public class CombatVfxManager : MonoBehaviour
             SetSingleBurst(ps, 0f, 1);
             var sizeOver = ps.sizeOverLifetime;
             sizeOver.enabled = true;
-            sizeOver.size = new ParticleSystem.MinMaxCurve(1f, AnimationCurve.EaseInOut(0f, 0.15f, 1f, 1f));
+            sizeOver.size = new ParticleSystem.MinMaxCurve(1f, CurveEase015_1);
             var colOver = ps.colorOverLifetime;
             colOver.enabled = true;
             colOver.color = CreateFadeOutGradient(Color.white, new Color(1f, 0.35f, 0.12f), 0.9f);
@@ -876,7 +959,7 @@ public class CombatVfxManager : MonoBehaviour
             shape.radius = 0.1f;
             var sizeOver = ps.sizeOverLifetime;
             sizeOver.enabled = true;
-            sizeOver.size = new ParticleSystem.MinMaxCurve(1f, AnimationCurve.EaseInOut(0f, 1f, 1f, 0.18f));
+            sizeOver.size = new ParticleSystem.MinMaxCurve(1f, CurveEase1_018);
             var colOver = ps.colorOverLifetime;
             colOver.enabled = true;
             colOver.color = CreateFadeOutGradient(new Color(0.88f, 0.05f, 0.05f), new Color(0.28f, 0.01f, 0.02f), 1f);
@@ -904,7 +987,7 @@ public class CombatVfxManager : MonoBehaviour
             shape.radius = 0.18f;
             var sizeOver = ps.sizeOverLifetime;
             sizeOver.enabled = true;
-            sizeOver.size = new ParticleSystem.MinMaxCurve(1f, AnimationCurve.Linear(0f, 0.5f, 1f, 1.5f));
+            sizeOver.size = new ParticleSystem.MinMaxCurve(1f, CurveLinear05_15);
             var colOver = ps.colorOverLifetime;
             colOver.enabled = true;
             colOver.color = CreateFadeOutGradient(new Color(0.68f, 0.03f, 0.04f), new Color(0.22f, 0.01f, 0.02f), 0.75f);
@@ -968,15 +1051,35 @@ public class CombatVfxManager : MonoBehaviour
         SetSingleBurst(fx.mist, 0f, heavy ? 10 : 6);
     }
 
-    private IEnumerator ReturnBloodHitAfter(PooledBloodHit fx)
+    private void UpdatePendingPoolReturns(float unscaledNow)
     {
-        yield return WaitBloodReturn;
-        if (fx != null && fx.root != null)
+        for (int i = pendingBloodReturns.Count - 1; i >= 0; i--)
         {
-            fx.root.SetActive(false);
-            bloodHitPool.Enqueue(fx);
+            PendingBloodReturn item = pendingBloodReturns[i];
+            if (unscaledNow < item.returnUnscaledTime) continue;
+
+            if (item.fx != null && item.fx.root != null)
+            {
+                item.fx.root.SetActive(false);
+                bloodHitPool.Enqueue(item.fx);
+            }
+            activeBloodHits = Mathf.Max(0, activeBloodHits - 1);
+            pendingBloodReturns.RemoveAt(i);
         }
-        activeBloodHits = Mathf.Max(0, activeBloodHits - 1);
+
+        for (int i = pendingElementalReturns.Count - 1; i >= 0; i--)
+        {
+            PendingElementalReturn item = pendingElementalReturns[i];
+            if (unscaledNow < item.returnUnscaledTime) continue;
+
+            if (item.fx != null && item.fx.root != null)
+            {
+                item.fx.root.SetActive(false);
+                elementalHitPool.Enqueue(item.fx);
+            }
+            activeElementalHits = Mathf.Max(0, activeElementalHits - 1);
+            pendingElementalReturns.RemoveAt(i);
+        }
     }
 
     private void SpawnElementalHitBurstInternal(
@@ -1009,7 +1112,11 @@ public class CombatVfxManager : MonoBehaviour
             fx.shockRing.Play();
         }
 
-        StartCoroutine(ReturnElementalHitAfter(fx));
+        pendingElementalReturns.Add(new PendingElementalReturn
+        {
+            fx = fx,
+            returnUnscaledTime = Time.unscaledTime + BloodReturnDelay
+        });
     }
 
     private PooledElementalHit RentElementalHit()
@@ -1050,7 +1157,7 @@ public class CombatVfxManager : MonoBehaviour
             SetSingleBurst(ps, 0f, 1);
             var sizeOver = ps.sizeOverLifetime;
             sizeOver.enabled = true;
-            sizeOver.size = new ParticleSystem.MinMaxCurve(1f, AnimationCurve.EaseInOut(0f, 0.35f, 1f, 1.38f));
+            sizeOver.size = new ParticleSystem.MinMaxCurve(1f, CurveEase035_138);
             var colOver = ps.colorOverLifetime;
             colOver.enabled = true;
             fx.starFlare = ps;
@@ -1067,7 +1174,7 @@ public class CombatVfxManager : MonoBehaviour
             SetSingleBurst(ps, 0f, 1);
             var sizeOver = ps.sizeOverLifetime;
             sizeOver.enabled = true;
-            sizeOver.size = new ParticleSystem.MinMaxCurve(1f, AnimationCurve.EaseInOut(0f, 0.14f, 1f, 1f));
+            sizeOver.size = new ParticleSystem.MinMaxCurve(1f, CurveEase014_1);
             var colOver = ps.colorOverLifetime;
             colOver.enabled = true;
             fx.shockRing = ps;
@@ -1094,6 +1201,7 @@ public class CombatVfxManager : MonoBehaviour
             fx.sparks = ps;
         }
 
+        root.SetActive(false);
         return fx;
     }
 
@@ -1163,17 +1271,6 @@ public class CombatVfxManager : MonoBehaviour
             var colSparks = fx.sparks.colorOverLifetime;
             colSparks.color = fx.sparksGrad;
         }
-    }
-
-    private IEnumerator ReturnElementalHitAfter(PooledElementalHit fx)
-    {
-        yield return WaitBloodReturn;
-        if (fx != null && fx.root != null)
-        {
-            fx.root.SetActive(false);
-            elementalHitPool.Enqueue(fx);
-        }
-        activeElementalHits = Mathf.Max(0, activeElementalHits - 1);
     }
 
     private void SpawnEnemyDeathInternal(Vector3 position, bool isBoss)
@@ -1248,7 +1345,7 @@ public class CombatVfxManager : MonoBehaviour
 
             var sizeOver = ps.sizeOverLifetime;
             sizeOver.enabled = true;
-            sizeOver.size = new ParticleSystem.MinMaxCurve(1f, AnimationCurve.Linear(0f, 0.55f, 1f, 1.85f));
+            sizeOver.size = new ParticleSystem.MinMaxCurve(1f, CurveLinear055_185);
 
             var colOver = ps.colorOverLifetime;
             colOver.enabled = true;
@@ -1295,7 +1392,7 @@ public class CombatVfxManager : MonoBehaviour
 
             var sizeOver = ps.sizeOverLifetime;
             sizeOver.enabled = true;
-            sizeOver.size = new ParticleSystem.MinMaxCurve(1f, AnimationCurve.EaseInOut(0f, 1f, 1f, 0f));
+            sizeOver.size = new ParticleSystem.MinMaxCurve(1f, CurveEase1_0);
 
             var colOver = ps.colorOverLifetime;
             colOver.enabled = true;
@@ -1413,7 +1510,7 @@ public class CombatVfxManager : MonoBehaviour
         Destroy(root, 1.6f);
     }
 
-    private IEnumerator SpawnSlashArcCoroutine(
+    private void EnqueueSlashArc(
         Vector3 playerPos,
         Vector3 forwardDir,
         int attackVariant,
@@ -1427,16 +1524,33 @@ public class CombatVfxManager : MonoBehaviour
         if (forwardDir.sqrMagnitude < 0.001f) forwardDir = Vector3.forward;
         forwardDir.Normalize();
 
-        Quaternion baseRot = Quaternion.LookRotation(forwardDir);
-        yield return attackVariant == 2 ? WaitSlashSpin : WaitSlashNormal;
+        float delay = attackVariant == 2 ? SlashSpinDelay : SlashNormalDelay;
+        activeSlashArcList.Add(new ActiveSlashArcState
+        {
+            phase = 0,
+            readyUnscaledTime = Time.unscaledTime + delay,
+            playerPos = playerPos,
+            forwardDir = forwardDir,
+            baseRot = Quaternion.LookRotation(forwardDir),
+            attackVariant = attackVariant,
+            useCustomPalette = useCustomPalette,
+            customPrimary = customPrimary,
+            customCore = customCore,
+            customSecondary = customSecondary,
+            scaleMult = scaleMult
+        });
+    }
 
+    private bool ActivateSlashArc(ref ActiveSlashArcState state)
+    {
         PooledSlashArc arc = RentSlashArc();
-        if (arc == null) yield break;
+        if (arc == null) return false;
 
+        int attackVariant = state.attackVariant;
         activeSlashArcs++;
         float heightY = attackVariant == 2 ? 0.58f : 1.16f;
-        Vector3 centerPos = playerPos + Vector3.up * heightY + (attackVariant == 2 ? Vector3.zero : forwardDir * 0.48f);
-        arc.rootTransform.SetPositionAndRotation(centerPos, baseRot);
+        Vector3 centerPos = state.playerPos + Vector3.up * heightY + (attackVariant == 2 ? Vector3.zero : state.forwardDir * 0.48f);
+        arc.rootTransform.SetPositionAndRotation(centerPos, state.baseRot);
 
         Material sharedArcMat = attackVariant == 2 ? additiveRingMat : additiveSlashMat;
         arc.outerRenderer.sharedMaterial = sharedArcMat;
@@ -1489,84 +1603,129 @@ public class CombatVfxManager : MonoBehaviour
             duration = 0.22f;
         }
 
-        if (useCustomPalette)
+        if (state.useCustomPalette)
         {
             float outerGlow = attackVariant == 2 ? 2.25f : 2.10f;
             float endGlow = attackVariant == 2 ? 1.35f : 1.50f;
             float coreGlow = attackVariant == 2 ? 2.50f : 2.38f;
 
-            outerStart = new Color(customPrimary.r * outerGlow, customPrimary.g * outerGlow, customPrimary.b * outerGlow, 0.95f);
-            outerEnd = new Color(customSecondary.r * endGlow, customSecondary.g * endGlow, customSecondary.b * endGlow, 0f);
-            coreStart = new Color(customCore.r * coreGlow, customCore.g * coreGlow, customCore.b * coreGlow, 0.96f);
-            coreEnd = new Color(customPrimary.r * 1.85f, customPrimary.g * 1.85f, customPrimary.b * 1.85f, 0f);
-            lightColor = Color.Lerp(customPrimary, customCore, 0.25f);
+            outerStart = new Color(state.customPrimary.r * outerGlow, state.customPrimary.g * outerGlow, state.customPrimary.b * outerGlow, 0.95f);
+            outerEnd = new Color(state.customSecondary.r * endGlow, state.customSecondary.g * endGlow, state.customSecondary.b * endGlow, 0f);
+            coreStart = new Color(state.customCore.r * coreGlow, state.customCore.g * coreGlow, state.customCore.b * coreGlow, 0.96f);
+            coreEnd = new Color(state.customPrimary.r * 1.85f, state.customPrimary.g * 1.85f, state.customPrimary.b * 1.85f, 0f);
+            lightColor = Color.Lerp(state.customPrimary, state.customCore, 0.25f);
         }
 
-        startScale *= scaleMult;
-        endScale *= scaleMult;
+        startScale *= state.scaleMult;
+        endScale *= state.scaleMult;
 
         if (attackVariant == 2)
         {
-            SpawnLowSpinDust(playerPos + Vector3.up * 0.12f);
-            Color shockwaveCol = useCustomPalette
-                ? new Color(customPrimary.r * 2.0f, customPrimary.g * 2.0f, customPrimary.b * 2.0f, 0.88f)
+            SpawnLowSpinDust(state.playerPos + Vector3.up * 0.12f);
+            Color shockwaveCol = state.useCustomPalette
+                ? new Color(state.customPrimary.r * 2.0f, state.customPrimary.g * 2.0f, state.customPrimary.b * 2.0f, 0.88f)
                 : new Color(2.0f, 0.85f, 0.25f, 0.85f);
             if (arc.shockwavePs != null)
             {
                 arc.shockwavePs.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
                 var swMain = arc.shockwavePs.main;
-                swMain.startSize = 5.6f * scaleMult;
+                swMain.startSize = 5.6f * state.scaleMult;
                 swMain.startColor = shockwaveCol;
                 arc.shockwavePs.Play();
             }
         }
 
-        Color coreSparkColor = useCustomPalette ? coreStart : new Color(2.2f, 2.1f, 1.7f, 1f);
+        Color coreSparkColor = state.useCustomPalette ? coreStart : new Color(2.2f, 2.1f, 1.7f, 1f);
         TriggerPooledSlashSparks(arc.sparksPs, outerStart, coreSparkColor, attackVariant == 2);
-        TryFlashPointLight(centerPos + forwardDir * 0.6f, lightColor, attackVariant == 2 ? 7.5f : 5.2f, attackVariant == 2 ? 5.2f : 3.4f, duration);
+        TryFlashPointLight(centerPos + state.forwardDir * 0.6f, lightColor, attackVariant == 2 ? 7.5f : 5.2f, attackVariant == 2 ? 5.2f : 3.4f, duration);
 
-        float elapsed = 0f;
-        while (elapsed < duration)
+        state.arc = arc;
+        state.outerStart = outerStart;
+        state.outerEnd = outerEnd;
+        state.coreStart = coreStart;
+        state.coreEnd = coreEnd;
+        state.startYaw = startYaw;
+        state.endYaw = endYaw;
+        state.tiltZ = tiltZ;
+        state.startScale = startScale;
+        state.endScale = endScale;
+        state.duration = duration;
+        state.elapsed = 0f;
+        state.phase = 1;
+        return true;
+    }
+
+    private void UpdateActiveSlashArcs(float unscaledNow, float dt)
+    {
+        for (int i = activeSlashArcList.Count - 1; i >= 0; i--)
         {
-            elapsed += Time.deltaTime;
-            float t = Mathf.Clamp01(elapsed / duration);
-            float easeOut = 1f - (1f - t) * (1f - t);
+            ActiveSlashArcState state = activeSlashArcList[i];
+            if (state.phase == 0)
+            {
+                if (unscaledNow < state.readyUnscaledTime) continue;
+                if (!ActivateSlashArc(ref state))
+                {
+                    activeSlashArcList.RemoveAt(i);
+                    continue;
+                }
+            }
 
-            float yaw = Mathf.Lerp(startYaw, endYaw, easeOut);
-            float sc = Mathf.Lerp(startScale, endScale, easeOut);
+            if (state.phase == 1)
+            {
+                if (state.arc == null || state.arc.root == null)
+                {
+                    activeSlashArcs = Mathf.Max(0, activeSlashArcs - 1);
+                    activeSlashArcList.RemoveAt(i);
+                    continue;
+                }
 
-            arc.outerTransform.localRotation = Quaternion.Euler(0f, yaw, tiltZ);
-            arc.outerTransform.localScale = new Vector3(sc, 1f, sc);
-            SetRendererPropertyColor(arc.outerRenderer, arc.propBlock, Color.Lerp(outerStart, outerEnd, t));
+                state.elapsed += dt;
+                float t = Mathf.Clamp01(state.elapsed / state.duration);
+                float easeOut = 1f - (1f - t) * (1f - t);
 
-            arc.coreTransform.localRotation = Quaternion.Euler(0f, yaw + 6f, tiltZ);
-            arc.coreTransform.localScale = new Vector3(sc * 0.92f, 1f, sc * 0.92f);
-            SetRendererPropertyColor(arc.coreRenderer, arc.propBlock, Color.Lerp(coreStart, coreEnd, Mathf.Clamp01(t * 1.25f)));
+                float yaw = Mathf.Lerp(state.startYaw, state.endYaw, easeOut);
+                float sc = Mathf.Lerp(state.startScale, state.endScale, easeOut);
 
-            yield return null;
+                state.arc.outerTransform.localRotation = Quaternion.Euler(0f, yaw, state.tiltZ);
+                state.arc.outerTransform.localScale = new Vector3(sc, 1f, sc);
+                SetRendererPropertyColor(state.arc.outerRenderer, state.arc.propBlock, Color.Lerp(state.outerStart, state.outerEnd, t));
+
+                state.arc.coreTransform.localRotation = Quaternion.Euler(0f, yaw + 6f, state.tiltZ);
+                state.arc.coreTransform.localScale = new Vector3(sc * 0.92f, 1f, sc * 0.92f);
+                SetRendererPropertyColor(state.arc.coreRenderer, state.arc.propBlock, Color.Lerp(state.coreStart, state.coreEnd, Mathf.Clamp01(t * 1.25f)));
+
+                if (state.elapsed >= state.duration)
+                {
+                    state.arc.outerRenderer.enabled = false;
+                    state.arc.coreRenderer.enabled = false;
+                    state.phase = 2;
+                    state.readyUnscaledTime = unscaledNow + (state.attackVariant == 2 ? SlashSpinDelay : SlashNormalDelay);
+                }
+
+                activeSlashArcList[i] = state;
+                continue;
+            }
+
+            if (unscaledNow >= state.readyUnscaledTime)
+            {
+                if (state.arc != null)
+                {
+                    if (state.arc.shockwavePs != null)
+                    {
+                        state.arc.shockwavePs.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
+                    }
+                    if (state.arc.outerRenderer != null) state.arc.outerRenderer.enabled = true;
+                    if (state.arc.coreRenderer != null) state.arc.coreRenderer.enabled = true;
+                    if (state.arc.root != null)
+                    {
+                        state.arc.root.SetActive(false);
+                        slashArcPool.Enqueue(state.arc);
+                    }
+                }
+                activeSlashArcs = Mathf.Max(0, activeSlashArcs - 1);
+                activeSlashArcList.RemoveAt(i);
+            }
         }
-
-        arc.outerRenderer.enabled = false;
-        arc.coreRenderer.enabled = false;
-        if (attackVariant == 2)
-        {
-
-            yield return WaitSlashSpin;
-        }
-        else
-        {
-            yield return WaitSlashNormal;
-        }
-
-        if (arc.shockwavePs != null)
-        {
-            arc.shockwavePs.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
-        }
-        arc.outerRenderer.enabled = true;
-        arc.coreRenderer.enabled = true;
-        arc.root.SetActive(false);
-        slashArcPool.Enqueue(arc);
-        activeSlashArcs = Mathf.Max(0, activeSlashArcs - 1);
     }
 
     private PooledSlashArc RentSlashArc()
@@ -1620,7 +1779,7 @@ public class CombatVfxManager : MonoBehaviour
         SetSingleBurst(shockwavePs, 0f, 1);
         var swSizeOver = shockwavePs.sizeOverLifetime;
         swSizeOver.enabled = true;
-        swSizeOver.size = new ParticleSystem.MinMaxCurve(1f, AnimationCurve.EaseInOut(0f, 0.1f, 1f, 1f));
+        swSizeOver.size = new ParticleSystem.MinMaxCurve(1f, CurveEase01_1);
         var swColOver = shockwavePs.colorOverLifetime;
         swColOver.enabled = true;
         swColOver.color = CreateFadeOutGradient(Color.white, new Color(1f, 0.55f, 0.2f), 0.85f);
@@ -1776,7 +1935,7 @@ public class CombatVfxManager : MonoBehaviour
 
             var sizeOver = ps.sizeOverLifetime;
             sizeOver.enabled = true;
-            sizeOver.size = new ParticleSystem.MinMaxCurve(1f, AnimationCurve.EaseInOut(0f, 0.25f, 1f, 1.25f));
+            sizeOver.size = new ParticleSystem.MinMaxCurve(1f, CurveEase025_125);
 
             var colOver = ps.colorOverLifetime;
             colOver.enabled = true;
@@ -1847,7 +2006,7 @@ public class CombatVfxManager : MonoBehaviour
 
             var sizeOver = ps.sizeOverLifetime;
             sizeOver.enabled = true;
-            sizeOver.size = new ParticleSystem.MinMaxCurve(1f, AnimationCurve.EaseInOut(0f, 0.18f, 1f, 1f));
+            sizeOver.size = new ParticleSystem.MinMaxCurve(1f, CurveEase018_1);
 
             var colOver = ps.colorOverLifetime;
             colOver.enabled = true;
@@ -1895,19 +2054,19 @@ public class CombatVfxManager : MonoBehaviour
         root.transform.localPosition = new Vector3(0f, 2.25f, 0f);
         root.transform.localRotation = Quaternion.Euler(14f, 0f, -10f);
 
-        MaterialPropertyBlock block = new MaterialPropertyBlock();
+        if (parryStunPropBlock == null) parryStunPropBlock = new MaterialPropertyBlock();
         Color goldColor = new Color(2.2f, 1.8f, 0.4f, 0.95f);
-        block.SetColor(BaseColorId, goldColor);
-        block.SetColor(ColorId, goldColor);
+        parryStunPropBlock.SetColor(BaseColorId, goldColor);
+        parryStunPropBlock.SetColor(ColorId, goldColor);
 
-        CreateStunQuad(root.transform, "StunRing", Vector3.zero, Vector3.one * 0.95f, additiveRingMat, block);
+        CreateStunQuad(root.transform, "StunRing", Vector3.zero, Vector3.one * 0.95f, additiveRingMat, parryStunPropBlock);
 
         const float orbitRadius = 0.42f;
         for (int i = 0; i < 3; i++)
         {
             float rad = i * (Mathf.PI * 2f / 3f);
             Vector3 offset = new Vector3(Mathf.Cos(rad) * orbitRadius, 0.02f, Mathf.Sin(rad) * orbitRadius);
-            CreateStunQuad(root.transform, $"StunStar_{i}", offset, Vector3.one * 0.28f, additiveStarMat, block);
+            CreateStunQuad(root.transform, $"StunStar_{i}", offset, Vector3.one * 0.28f, additiveStarMat, parryStunPropBlock);
         }
 
         StunHaloAnim anim = root.AddComponent<StunHaloAnim>();
@@ -2096,7 +2255,7 @@ public class CombatVfxManager : MonoBehaviour
         ringEmission.enabled = false;
         var ringSizeOver = goldCollectRingPs.sizeOverLifetime;
         ringSizeOver.enabled = true;
-        ringSizeOver.size = new ParticleSystem.MinMaxCurve(1f, AnimationCurve.EaseInOut(0f, 0.2f, 1f, 1f));
+        ringSizeOver.size = new ParticleSystem.MinMaxCurve(1f, CurveEase02_1);
         var ringColOver = goldCollectRingPs.colorOverLifetime;
         ringColOver.enabled = true;
         ringColOver.color = CreateFadeOutGradient(Color.white, new Color(1f, 0.75f, 0.18f), 0.9f);
@@ -2478,7 +2637,7 @@ public class CombatVfxManager : MonoBehaviour
 
             var sizeOver = footstepDustPs.sizeOverLifetime;
             sizeOver.enabled = true;
-            sizeOver.size = new ParticleSystem.MinMaxCurve(1f, AnimationCurve.Linear(0f, 0.55f, 1f, 1.55f));
+            sizeOver.size = new ParticleSystem.MinMaxCurve(1f, CurveLinear055_155);
 
             var colOver = footstepDustPs.colorOverLifetime;
             colOver.enabled = true;
@@ -2567,7 +2726,7 @@ public class CombatVfxManager : MonoBehaviour
 
         var sizeOver = ps.sizeOverLifetime;
         sizeOver.enabled = true;
-        sizeOver.size = new ParticleSystem.MinMaxCurve(1f, AnimationCurve.EaseInOut(0f, 0.1f, 1f, 1f));
+        sizeOver.size = new ParticleSystem.MinMaxCurve(1f, CurveEase01_1);
 
         var colOver = ps.colorOverLifetime;
         colOver.enabled = true;
@@ -2651,12 +2810,6 @@ public class CombatVfxManager : MonoBehaviour
     private void TryFlashPointLight(Vector3 pos, Color color, float range, float startIntensity, float duration)
     {
         if (GameSettingsManager.CurrentGraphicsPreset == GraphicsPreset.Low || activeFlashLights >= MaxConcurrentFlashLights) return;
-        StartCoroutine(FlashPointLight(pos, color, range, startIntensity, duration));
-    }
-
-    private IEnumerator FlashPointLight(Vector3 pos, Color color, float range, float startIntensity, float duration)
-    {
-        if (GameSettingsManager.CurrentGraphicsPreset == GraphicsPreset.Low || activeFlashLights >= MaxConcurrentFlashLights) yield break;
 
         activeFlashLights++;
         Light lightComp = RentFlashLight();
@@ -2665,20 +2818,34 @@ public class CombatVfxManager : MonoBehaviour
         lightComp.range = range;
         lightComp.intensity = startIntensity;
 
-        float elapsed = 0f;
-        while (elapsed < duration)
+        activeFlashLightList.Add(new ActiveFlashLight
         {
-            elapsed += Time.unscaledDeltaTime;
-            if (lightComp != null)
-            {
-                float t = Mathf.Clamp01(elapsed / duration);
-                lightComp.intensity = Mathf.Lerp(startIntensity, 0f, t * t);
-            }
-            yield return null;
-        }
+            light = lightComp,
+            startIntensity = startIntensity,
+            elapsed = 0f,
+            duration = duration
+        });
+    }
 
-        ReturnFlashLight(lightComp);
-        activeFlashLights = Mathf.Max(0, activeFlashLights - 1);
+    private void UpdateActiveFlashLights(float unscaledDt)
+    {
+        for (int i = activeFlashLightList.Count - 1; i >= 0; i--)
+        {
+            ActiveFlashLight item = activeFlashLightList[i];
+            item.elapsed += unscaledDt;
+            if (item.light == null || item.elapsed >= item.duration)
+            {
+                ReturnFlashLight(item.light);
+                activeFlashLights = Mathf.Max(0, activeFlashLights - 1);
+                activeFlashLightList.RemoveAt(i);
+            }
+            else
+            {
+                float t = Mathf.Clamp01(item.elapsed / item.duration);
+                item.light.intensity = Mathf.Lerp(item.startIntensity, 0f, t * t);
+                activeFlashLightList[i] = item;
+            }
+        }
     }
 
     private static ParticleSystemRenderer ConfigureParticleRenderer(ParticleSystem ps, Material mat)
@@ -2715,9 +2882,7 @@ public class CombatVfxManager : MonoBehaviour
     private static Gradient CreateFadeOutGradient(Color startColor, Color endColor, float startAlpha)
     {
         Gradient grad = new Gradient();
-        grad.SetKeys(
-            new[] { new GradientColorKey(startColor, 0f), new GradientColorKey(endColor, 1f) },
-            new[] { new GradientAlphaKey(startAlpha, 0f), new GradientAlphaKey(startAlpha * 0.7f, 0.55f), new GradientAlphaKey(0f, 1f) });
+        SetFadeOutGradient(grad, TempGradColorKeys, TempGradAlphaKeys, startColor, endColor, startAlpha);
         return grad;
     }
 

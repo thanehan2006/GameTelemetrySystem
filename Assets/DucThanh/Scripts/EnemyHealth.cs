@@ -1,8 +1,10 @@
 using System;
 using System.Collections;
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.AI;
 using UnityEngine.Rendering;
+using UnityEngine.SceneManagement;
 
 // Quản lý lượng máu, thanh máu 3D trên đầu, phản ứng trúng đòn, rơi vàng/bình máu và hoạt ảnh chết của quái
 public class EnemyHealth : MonoBehaviour
@@ -23,7 +25,56 @@ public class EnemyHealth : MonoBehaviour
     private static readonly int DeathStateHash = Animator.StringToHash("Death");
     private static readonly WaitForSeconds BossFallWait = new WaitForSeconds(1.65f);
     private static readonly WaitForSeconds NormalFallWait = new WaitForSeconds(1.1f);
+    private static readonly Dictionary<int, EnemyHealth> ColliderRegistry = new Dictionary<int, EnemyHealth>(128);
+    private static readonly HashSet<int> NonEnemyColliderIds = new HashSet<int>(256);
+    private static readonly List<Light> ReusableDeathLights = new List<Light>(4);
     private const float HpBarVisibleSqrDist = 18f * 18f;
+
+    [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+    private static void ResetStaticState()
+    {
+        ColliderRegistry.Clear();
+        NonEnemyColliderIds.Clear();
+        ReusableDeathLights.Clear();
+        SceneManager.sceneUnloaded -= OnSceneUnloaded;
+        SceneManager.sceneUnloaded += OnSceneUnloaded;
+    }
+
+    private static void OnSceneUnloaded(Scene _)
+    {
+        NonEnemyColliderIds.Clear();
+    }
+
+    public static bool TryGetFromCollider(Collider col, out EnemyHealth health)
+    {
+        if (col == null)
+        {
+            health = null;
+            return false;
+        }
+
+        int id = col.GetInstanceID();
+        if (ColliderRegistry.TryGetValue(id, out health))
+        {
+            return health != null;
+        }
+
+        if (NonEnemyColliderIds.Contains(id))
+        {
+            health = null;
+            return false;
+        }
+
+        health = col.GetComponentInParent<EnemyHealth>();
+        if (health != null)
+        {
+            ColliderRegistry[id] = health;
+            return true;
+        }
+
+        NonEnemyColliderIds.Add(id);
+        return false;
+    }
 
     private static Mesh sharedBarQuadMesh;
     private static Texture2D sharedFrameTex;
@@ -101,6 +152,15 @@ public class EnemyHealth : MonoBehaviour
         cachedAnimator = GetComponentInChildren<Animator>(true);
         cachedWeaponHitboxes = GetComponentsInChildren<OrcWeaponHitbox>(true);
         cachedColliders = GetComponentsInChildren<Collider>(true);
+        for (int i = 0; i < cachedColliders.Length; i++)
+        {
+            if (cachedColliders[i] != null)
+            {
+                int id = cachedColliders[i].GetInstanceID();
+                NonEnemyColliderIds.Remove(id);
+                ColliderRegistry[id] = this;
+            }
+        }
         for (int i = 0; i < cachedRenderers.Length; i++)
         {
             if (cachedRenderers[i] is SkinnedMeshRenderer smr)
@@ -110,6 +170,21 @@ public class EnemyHealth : MonoBehaviour
             }
         }
         hitFlashBlock = new MaterialPropertyBlock();
+    }
+
+    private void OnDestroy()
+    {
+        if (cachedColliders == null) return;
+        for (int i = 0; i < cachedColliders.Length; i++)
+        {
+            Collider col = cachedColliders[i];
+            if (col == null) continue;
+            int id = col.GetInstanceID();
+            if (ColliderRegistry.TryGetValue(id, out EnemyHealth existing) && existing == this)
+            {
+                ColliderRegistry.Remove(id);
+            }
+        }
     }
 
     // Tạo thanh máu nổi 3D phía trên kẻ địch
@@ -385,10 +460,13 @@ public class EnemyHealth : MonoBehaviour
             }
         }
 
-        foreach (Light l in GetComponentsInChildren<Light>(false))
+        ReusableDeathLights.Clear();
+        GetComponentsInChildren<Light>(false, ReusableDeathLights);
+        for (int i = 0; i < ReusableDeathLights.Count; i++)
         {
-            l.enabled = false;
+            if (ReusableDeathLights[i] != null) ReusableDeathLights[i].enabled = false;
         }
+        ReusableDeathLights.Clear();
 
         Vector3 vfxCenter = transform.position + Vector3.up * (isBoss ? 1.35f : 0.9f);
         CombatVfxManager.SpawnEnemyDeathEffect(vfxCenter, isBoss);

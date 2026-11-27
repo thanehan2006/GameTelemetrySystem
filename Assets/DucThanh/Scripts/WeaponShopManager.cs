@@ -782,6 +782,7 @@ public class WeaponShopManager : MonoBehaviour
         SetTopCenteredRect(feedbackText.rectTransform, 0f, -612f, 896f, 28f);
 
         shopOverlayRoot.SetActive(false);
+        UniversalButtonHoverInstaller.RequestScan();
     }
 
     private void RefreshShopUi()

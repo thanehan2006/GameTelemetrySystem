@@ -3,6 +3,7 @@ using System.Collections;
 using System.Collections.Generic;
 using System.IO;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 using UnityEngine;
 using UnityEngine.Networking;
@@ -11,6 +12,7 @@ using UnityEngine.Networking;
 public class CreateGameEventRequest
 {
     public long sessionId;
+    public string localSessionId;
     public string eventType;
     public string eventTime;
     public int value;
@@ -34,6 +36,19 @@ public class CreateBatchGameEventsRequest
 }
 
 [Serializable]
+public class PendingOfflineSession
+{
+    public string localSessionId;
+    public int playerId;
+    public int levelId;
+    public string characterId;
+    public string startTime;
+    public bool isEnded;
+    public string endResult;
+    public string endTime;
+}
+
+[Serializable]
 public class PendingEndSessionRequest
 {
     public long sessionId;
@@ -44,6 +59,7 @@ public class PendingEndSessionRequest
 [Serializable]
 public class OfflineEventStore
 {
+    public List<PendingOfflineSession> pendingOfflineSessions = new List<PendingOfflineSession>();
     public List<CreateGameEventRequest> pendingEvents = new List<CreateGameEventRequest>();
     public List<PendingEndSessionRequest> pendingEndSessions = new List<PendingEndSessionRequest>();
 }
@@ -52,10 +68,11 @@ public class OfflineEventStore
 public class TelemetryManager : MonoBehaviour
 {
     private const int ImmediateBatchSize = 10;
-    private const int MaxPendingEvents = 200;
+    private const int MaxPendingEvents = 2000;
     private const int MaxEventsPerBatch = 25;
     private const float OfflineSaveIntervalSeconds = 20f;
     private static readonly object OfflineFileLock = new object();
+    private static long latestSaveGen;
 
     public static TelemetryManager Instance { get; private set; }
 
@@ -78,8 +95,9 @@ public class TelemetryManager : MonoBehaviour
         set => currentLevel = Mathf.Max(1, value);
     }
 
-    private readonly List<CreateGameEventRequest> pendingEvents = new List<CreateGameEventRequest>(16);
-    private readonly List<CreateGameEventRequest> sendBatch = new List<CreateGameEventRequest>(16);
+    private readonly List<PendingOfflineSession> pendingOfflineSessions = new List<PendingOfflineSession>(4);
+    private readonly List<CreateGameEventRequest> pendingEvents = new List<CreateGameEventRequest>(32);
+    private readonly List<CreateGameEventRequest> sendBatch = new List<CreateGameEventRequest>(25);
     private readonly CreateBatchGameEventsRequest reusableBatchDto = new CreateBatchGameEventsRequest();
     private readonly List<PendingEndSessionRequest> pendingEndSessions = new List<PendingEndSessionRequest>(4);
     private readonly HashSet<long> inFlightEndSessions = new HashSet<long>();
@@ -90,16 +108,17 @@ public class TelemetryManager : MonoBehaviour
     private bool offlineQueueDirty;
     private float nextOfflineSaveUnscaledTime;
     private bool isSending;
-    private bool isStartingSession;
+    private bool isFlushingOfflineSessions;
     private bool isFlushingEndSessions;
     private bool isQuitting;
     private bool gameEnded;
     private bool playerDeadTracked;
-    private string pendingEndResultIfSessionMissing;
+    private string currentLocalSessionId;
     private int startedLevel = -1;
     private int completedLevel = -1;
     private int failedLevel = -1;
     private Coroutine scheduledFlushRoutine;
+    private Coroutine retryOfflineSessionsRoutine;
     private Coroutine retryEndSessionsRoutine;
     private WaitForSecondsRealtime cachedRetryWait;
     private float cachedRetryWaitSeconds = -1f;
@@ -139,7 +158,7 @@ public class TelemetryManager : MonoBehaviour
         gameEnded = false;
         playerDeadTracked = false;
         isQuitting = false;
-        pendingEndResultIfSessionMissing = null;
+        currentLocalSessionId = null;
         startedLevel = -1;
         completedLevel = -1;
         failedLevel = -1;
@@ -163,7 +182,34 @@ public class TelemetryManager : MonoBehaviour
         else
         {
             SessionId = string.Empty;
-            EnsureBackendSession();
+            int playerId = ResolvePlayerId();
+            if (sendToBackend && playerId > 0)
+            {
+                CharacterProfile selectedProfile = SelectedCharacterStore.GetSelectedProfile();
+                string charId = selectedProfile != null && !string.IsNullOrWhiteSpace(selectedProfile.id)
+                    ? selectedProfile.id.Trim().ToLowerInvariant()
+                    : SessionApiClient.ResolveSelectedCharacterId();
+
+                var offlineSession = new PendingOfflineSession
+                {
+                    localSessionId = Guid.NewGuid().ToString("N"),
+                    playerId = playerId,
+                    levelId = CurrentLevel,
+                    characterId = charId,
+                    startTime = DateTime.UtcNow.ToString("o"),
+                    isEnded = false,
+                    endResult = string.Empty,
+                    endTime = string.Empty
+                };
+                pendingOfflineSessions.Add(offlineSession);
+                currentLocalSessionId = offlineSession.localSessionId;
+                offlineQueueDirty = true;
+                SaveOfflineQueue(synchronous: false, force: true);
+            }
+            else if (sendToBackend)
+            {
+                Debug.LogWarning("[TelemetryManager] Không có PlayerId hợp lệ để tạo Session.");
+            }
         }
 
         if (PlayerPrefs.GetInt("PendingLoginEvent", 0) == 1)
@@ -175,79 +221,188 @@ public class TelemetryManager : MonoBehaviour
 
         TrackEvent("game_start");
         TrackLevelStart(CurrentLevel);
+        FlushOfflineSessions();
         FlushPendingEvents();
+        FlushPendingEndSessions();
     }
 
-    private void EnsureBackendSession()
+    private int ResolvePlayerId()
     {
-        if (!sendToBackend || isStartingSession) return;
+        int playerId = PlayerPrefs.GetInt("PlayerId", 0);
+        return playerId > 0 ? playerId : fallbackTestPlayerId;
+    }
+
+    private PendingOfflineSession FindOfflineSession(string localSessionId)
+    {
+        if (string.IsNullOrWhiteSpace(localSessionId)) return null;
+        for (int i = 0; i < pendingOfflineSessions.Count; i++)
+        {
+            PendingOfflineSession s = pendingOfflineSessions[i];
+            if (s != null && string.Equals(s.localSessionId, localSessionId, StringComparison.Ordinal))
+            {
+                return s;
+            }
+        }
+        return null;
+    }
+
+    // Đồng bộ tuần tự các phiên offline (cũ đến mới) lên API để cấp SessionId và gắn lại vào sự kiện chờ
+    private void FlushOfflineSessions()
+    {
+        if (!sendToBackend || isFlushingOfflineSessions || pendingOfflineSessions.Count == 0 || !gameObject.activeInHierarchy)
+        {
+            return;
+        }
+
+        if (retryOfflineSessionsRoutine != null)
+        {
+            StopCoroutine(retryOfflineSessionsRoutine);
+            retryOfflineSessionsRoutine = null;
+        }
 
         if (sessionApiClient == null)
         {
             sessionApiClient = FindFirstObjectByType<SessionApiClient>();
             if (sessionApiClient == null)
             {
-                Debug.LogWarning("[TelemetryManager] Không tìm thấy SessionApiClient trong Scene để tạo Session!");
+                Debug.LogWarning("[TelemetryManager] Không tìm thấy SessionApiClient trong Scene để tạo/đồng bộ Session!");
+                offlineQueueDirty = true;
+                SaveOfflineQueue(synchronous: false, force: true);
                 return;
             }
         }
 
-        int playerId = PlayerPrefs.GetInt("PlayerId", 0);
-        if (playerId <= 0)
-        {
-            playerId = fallbackTestPlayerId;
-        }
+        StartCoroutine(ProcessOfflineSessionsCoroutine());
+    }
 
-        if (playerId <= 0)
-        {
-            Debug.LogWarning("[TelemetryManager] Không có PlayerId hợp lệ để tạo Session.");
-            return;
-        }
+    private IEnumerator ProcessOfflineSessionsCoroutine()
+    {
+        isFlushingOfflineSessions = true;
 
-        isStartingSession = true;
-        sessionApiClient.StartSession(playerId, CurrentLevel, (success, sessionId, message) =>
+        while (sendToBackend && pendingOfflineSessions.Count > 0)
         {
-            isStartingSession = false;
-
-            if (success && sessionId > 0)
+            PendingOfflineSession s = pendingOfflineSessions[0];
+            if (s == null || string.IsNullOrWhiteSpace(s.localSessionId) || s.playerId <= 0)
             {
-                SessionId = sessionId.ToString();
+                pendingOfflineSessions.RemoveAt(0);
+                offlineQueueDirty = true;
+                continue;
+            }
+
+            bool done = false;
+            bool ok = false;
+            long backendSessionId = 0;
+            long statusCode = 0;
+            string errorMsg = null;
+
+            bool savePref = !s.isEnded && string.Equals(s.localSessionId, currentLocalSessionId, StringComparison.Ordinal);
+            sessionApiClient.StartSession(s.playerId, s.levelId, s.characterId, s.startTime, savePref, (success, sessionId, code, message) =>
+            {
+                ok = success;
+                backendSessionId = sessionId;
+                statusCode = code;
+                errorMsg = message;
+                done = true;
+            });
+
+            while (!done)
+            {
+                yield return null;
+            }
+
+            if (ok && backendSessionId > 0)
+            {
                 for (int i = 0; i < pendingEvents.Count; i++)
                 {
-                    if (pendingEvents[i].sessionId <= 0)
+                    if (string.Equals(pendingEvents[i].localSessionId, s.localSessionId, StringComparison.Ordinal))
                     {
-                        pendingEvents[i].sessionId = sessionId;
+                        pendingEvents[i].sessionId = backendSessionId;
+                        pendingEvents[i].localSessionId = string.Empty;
                     }
                 }
 
-                if (gameEnded && !string.IsNullOrEmpty(pendingEndResultIfSessionMissing))
+                bool isCurrent = string.Equals(s.localSessionId, currentLocalSessionId, StringComparison.Ordinal);
+                if (isCurrent)
+                {
+                    SessionId = backendSessionId.ToString();
+                    currentLocalSessionId = null;
+                    if (!s.isEnded)
+                    {
+                        PlayerPrefs.SetString("SessionId", SessionId);
+                        PlayerPrefs.Save();
+                    }
+                    else if (PlayerPrefs.GetString("SessionId", "") == SessionId)
+                    {
+                        PlayerPrefs.DeleteKey("SessionId");
+                        PlayerPrefs.Save();
+                    }
+                }
+                else if (s.isEnded && PlayerPrefs.GetString("SessionId", "") == backendSessionId.ToString())
                 {
                     PlayerPrefs.DeleteKey("SessionId");
                     PlayerPrefs.Save();
-                    EnqueueEndSession(sessionId, pendingEndResultIfSessionMissing);
-                    pendingEndResultIfSessionMissing = null;
                 }
+
+                if (s.isEnded)
+                {
+                    string safeResult = string.IsNullOrWhiteSpace(s.endResult) ? "Quit" : s.endResult.Trim();
+                    EnqueueEndSession(backendSessionId, safeResult, s.endTime);
+                }
+
+                pendingOfflineSessions.Remove(s);
+                offlineQueueDirty = true;
+                SaveOfflineQueue(synchronous: true, force: true);
 
                 FlushPendingEvents();
                 FlushPendingEndSessions();
             }
+            else if (statusCode == 400 || statusCode == 404)
+            {
+                Debug.LogWarning($"[TelemetryManager] Hủy phiên offline không hợp lệ (HTTP {statusCode}): {errorMsg}");
+                for (int i = pendingEvents.Count - 1; i >= 0; i--)
+                {
+                    if (string.Equals(pendingEvents[i].localSessionId, s.localSessionId, StringComparison.Ordinal))
+                    {
+                        pendingEvents.RemoveAt(i);
+                    }
+                }
+                pendingOfflineSessions.Remove(s);
+                offlineQueueDirty = true;
+                SaveOfflineQueue(synchronous: true, force: true);
+            }
             else
             {
-                Debug.LogWarning($"[TelemetryManager] Tạo Session thất bại: {message}");
-                if (!gameEnded)
+                Debug.LogWarning($"[TelemetryManager] Tạo/đồng bộ Session thất bại (HTTP {statusCode}): {errorMsg}");
+                offlineQueueDirty = true;
+                SaveOfflineQueue(synchronous: false, force: true);
+                if (!isQuitting)
                 {
-                    StartCoroutine(RetryStartSessionCoroutine());
+                    ScheduleRetryOfflineSessions();
                 }
+                break;
             }
-        });
+        }
+
+        isFlushingOfflineSessions = false;
     }
 
-    private IEnumerator RetryStartSessionCoroutine()
+    private void ScheduleRetryOfflineSessions()
     {
-        yield return new WaitForSecondsRealtime(Mathf.Max(1f, retryInterval));
-        if (string.IsNullOrEmpty(SessionId) && sendToBackend && !gameEnded)
+        if (!sendToBackend || isQuitting || retryOfflineSessionsRoutine != null || !gameObject.activeInHierarchy)
         {
-            EnsureBackendSession();
+            return;
+        }
+
+        retryOfflineSessionsRoutine = StartCoroutine(RetryOfflineSessionsCoroutine());
+    }
+
+    private IEnumerator RetryOfflineSessionsCoroutine()
+    {
+        yield return GetRetryWait();
+        retryOfflineSessionsRoutine = null;
+        if (pendingOfflineSessions.Count > 0 && !isFlushingOfflineSessions)
+        {
+            FlushOfflineSessions();
         }
     }
 
@@ -265,6 +420,7 @@ public class TelemetryManager : MonoBehaviour
         if (!sendToBackend) return;
 
         long numericSessionId = long.TryParse(SessionId, out long parsed) && parsed > 0 ? parsed : 0;
+        string localId = numericSessionId > 0 ? string.Empty : (currentLocalSessionId ?? string.Empty);
 
         if (pendingEvents.Count >= MaxPendingEvents)
         {
@@ -274,6 +430,7 @@ public class TelemetryManager : MonoBehaviour
         pendingEvents.Add(new CreateGameEventRequest
         {
             sessionId = numericSessionId,
+            localSessionId = localId,
             eventType = normalizedType,
             eventTime = DateTime.UtcNow.ToString("o"),
             value = eventValue,
@@ -450,16 +607,30 @@ public class TelemetryManager : MonoBehaviour
         if (!sendToBackend) return;
 
         string normalizedResult = string.IsNullOrWhiteSpace(sessionResult) ? "Quit" : sessionResult.Trim();
+        if (normalizedResult.Length > 20)
+        {
+            normalizedResult = normalizedResult.Substring(0, 20);
+        }
+
         if (endingSessionId > 0)
         {
-            EnqueueEndSession(endingSessionId, normalizedResult);
+            EnqueueEndSession(endingSessionId, normalizedResult, DateTime.UtcNow.ToString("o"));
             offlineQueueDirty = true;
-            SaveOfflineQueue(synchronous: false);
+            SaveOfflineQueue(synchronous: true, force: true);
             FlushPendingEndSessions();
         }
-        else
+        else if (!string.IsNullOrEmpty(currentLocalSessionId))
         {
-            pendingEndResultIfSessionMissing = normalizedResult;
+            PendingOfflineSession offline = FindOfflineSession(currentLocalSessionId);
+            if (offline != null)
+            {
+                offline.isEnded = true;
+                offline.endResult = normalizedResult;
+                offline.endTime = DateTime.UtcNow.ToString("o");
+                offlineQueueDirty = true;
+                SaveOfflineQueue(synchronous: true, force: true);
+                FlushOfflineSessions();
+            }
         }
     }
 
@@ -476,7 +647,7 @@ public class TelemetryManager : MonoBehaviour
         if (!gameObject.activeInHierarchy)
         {
             TrackGameEnded(sessionResult);
-            SaveOfflineQueue(synchronous: true);
+            SaveOfflineQueue(synchronous: true, force: true);
             onComplete?.Invoke();
             return;
         }
@@ -487,17 +658,18 @@ public class TelemetryManager : MonoBehaviour
     private IEnumerator EndSessionAndQuitCoroutine(string sessionResult, Action onComplete, float maxWaitSeconds)
     {
         TrackGameEnded(sessionResult);
+        FlushOfflineSessions();
         FlushPendingEvents();
         FlushPendingEndSessions();
 
         float deadline = Time.realtimeSinceStartup + Mathf.Max(0.1f, maxWaitSeconds);
         while (Time.realtimeSinceStartup < deadline
-            && (isSending || HasSendableEvents() || inFlightEndSessions.Count > 0 || pendingEndSessions.Count > 0))
+            && (isFlushingOfflineSessions || pendingOfflineSessions.Count > 0 || isSending || HasSendableEvents() || inFlightEndSessions.Count > 0 || pendingEndSessions.Count > 0))
         {
             yield return null;
         }
 
-        SaveOfflineQueue(synchronous: true);
+        SaveOfflineQueue(synchronous: true, force: true);
         onComplete?.Invoke();
     }
 
@@ -512,7 +684,7 @@ public class TelemetryManager : MonoBehaviour
         return long.TryParse(saved, out long savedParsed) && savedParsed > 0 ? savedParsed : 0;
     }
 
-    private void EnqueueEndSession(long sessionId, string result)
+    private void EnqueueEndSession(long sessionId, string result, string endTimeIso = null)
     {
         if (sessionId <= 0) return;
 
@@ -524,11 +696,21 @@ public class TelemetryManager : MonoBehaviour
             }
         }
 
+        string safeResult = string.IsNullOrWhiteSpace(result) ? "Quit" : result.Trim();
+        if (safeResult.Length > 20)
+        {
+            safeResult = safeResult.Substring(0, 20);
+        }
+
+        string safeEndTime = string.IsNullOrWhiteSpace(endTimeIso)
+            ? DateTime.UtcNow.ToString("o")
+            : endTimeIso.Trim();
+
         pendingEndSessions.Add(new PendingEndSessionRequest
         {
             sessionId = sessionId,
-            result = result,
-            endTime = DateTime.UtcNow.ToString("o")
+            result = safeResult,
+            endTime = safeEndTime
         });
     }
 
@@ -772,7 +954,7 @@ public class TelemetryManager : MonoBehaviour
         isSending = false;
     }
 
-    // Đọc lại các sự kiện & yêu cầu đóng phiên chưa gửi được từ tệp JSON lưu trên thiết bị
+    // Đọc lại các phiên offline, sự kiện & yêu cầu đóng phiên chưa gửi được từ tệp JSON lưu trên thiết bị
     private void LoadOfflineQueue()
     {
         try
@@ -790,12 +972,33 @@ public class TelemetryManager : MonoBehaviour
             OfflineEventStore store = JsonUtility.FromJson<OfflineEventStore>(json);
             if (store == null) return;
 
+            var validLocalIds = new HashSet<string>(StringComparer.Ordinal);
+            if (store.pendingOfflineSessions != null)
+            {
+                for (int i = 0; i < store.pendingOfflineSessions.Count; i++)
+                {
+                    PendingOfflineSession s = store.pendingOfflineSessions[i];
+                    if (s != null && !string.IsNullOrWhiteSpace(s.localSessionId) && s.playerId > 0 && validLocalIds.Add(s.localSessionId))
+                    {
+                        if (string.IsNullOrWhiteSpace(s.startTime))
+                        {
+                            s.startTime = DateTime.UtcNow.ToString("o");
+                        }
+                        pendingOfflineSessions.Add(s);
+                    }
+                }
+            }
+
             if (store.pendingEvents != null)
             {
                 for (int i = 0; i < store.pendingEvents.Count; i++)
                 {
                     CreateGameEventRequest evt = store.pendingEvents[i];
-                    if (evt != null && evt.sessionId > 0 && !string.IsNullOrWhiteSpace(evt.eventType))
+                    if (evt == null || string.IsNullOrWhiteSpace(evt.eventType)) continue;
+
+                    bool hasBackendId = evt.sessionId > 0;
+                    bool hasValidLocalId = !string.IsNullOrWhiteSpace(evt.localSessionId) && validLocalIds.Contains(evt.localSessionId);
+                    if (hasBackendId || hasValidLocalId)
                     {
                         if (string.IsNullOrEmpty(evt.clientEventId))
                         {
@@ -824,11 +1027,11 @@ public class TelemetryManager : MonoBehaviour
         }
     }
 
-    // Lưu tạm hàng đợi sự kiện và phiên chờ đóng xuống thiết bị để tránh mất dữ liệu khi mất kết nối
-    private void SaveOfflineQueue(bool synchronous = false)
+    // Lưu tạm hàng đợi phiên offline, sự kiện và phiên chờ đóng xuống thiết bị để tránh mất dữ liệu khi mất kết nối
+    private void SaveOfflineQueue(bool synchronous = false, bool force = false)
     {
         if (string.IsNullOrEmpty(offlineQueuePath)) return;
-        if (!synchronous && (!offlineQueueDirty || Time.unscaledTime < nextOfflineSaveUnscaledTime))
+        if (!synchronous && !force && (!offlineQueueDirty || Time.unscaledTime < nextOfflineSaveUnscaledTime))
         {
             return;
         }
@@ -841,11 +1044,21 @@ public class TelemetryManager : MonoBehaviour
         try
         {
             var store = new OfflineEventStore();
+            for (int i = 0; i < pendingOfflineSessions.Count; i++)
+            {
+                PendingOfflineSession s = pendingOfflineSessions[i];
+                if (s != null && !string.IsNullOrWhiteSpace(s.localSessionId) && s.playerId > 0)
+                {
+                    store.pendingOfflineSessions.Add(s);
+                }
+            }
+
             for (int i = 0; i < pendingEvents.Count; i++)
             {
-                if (pendingEvents[i].sessionId > 0)
+                CreateGameEventRequest evt = pendingEvents[i];
+                if (evt.sessionId > 0 || !string.IsNullOrWhiteSpace(evt.localSessionId))
                 {
-                    store.pendingEvents.Add(pendingEvents[i]);
+                    store.pendingEvents.Add(evt);
                 }
             }
 
@@ -860,12 +1073,13 @@ public class TelemetryManager : MonoBehaviour
             offlineQueueDirty = false;
             string path = offlineQueuePath;
 
-            if (store.pendingEvents.Count == 0 && store.pendingEndSessions.Count == 0)
+            if (store.pendingOfflineSessions.Count == 0 && store.pendingEvents.Count == 0 && store.pendingEndSessions.Count == 0)
             {
                 bool hadFile = hasOfflineFileOnDisk;
                 hasOfflineFileOnDisk = false;
                 if (!hadFile) return;
 
+                long deleteGen = Interlocked.Increment(ref latestSaveGen);
                 if (synchronous)
                 {
                     lock (OfflineFileLock)
@@ -881,6 +1095,7 @@ public class TelemetryManager : MonoBehaviour
                         {
                             lock (OfflineFileLock)
                             {
+                                if (deleteGen != Interlocked.Read(ref latestSaveGen)) return;
                                 if (File.Exists(path)) File.Delete(path);
                             }
                         }
@@ -892,6 +1107,7 @@ public class TelemetryManager : MonoBehaviour
 
             string json = JsonUtility.ToJson(store);
             hasOfflineFileOnDisk = true;
+            long writeGen = Interlocked.Increment(ref latestSaveGen);
 
             if (synchronous)
             {
@@ -908,6 +1124,7 @@ public class TelemetryManager : MonoBehaviour
                     {
                         lock (OfflineFileLock)
                         {
+                            if (writeGen != Interlocked.Read(ref latestSaveGen)) return;
                             File.WriteAllText(path, json, Encoding.UTF8);
                         }
                     }
@@ -923,9 +1140,9 @@ public class TelemetryManager : MonoBehaviour
 
     private void OnApplicationPause(bool pauseStatus)
     {
-        if (pauseStatus && (pendingEvents.Count > 0 || pendingEndSessions.Count > 0))
+        if (pauseStatus && (pendingOfflineSessions.Count > 0 || pendingEvents.Count > 0 || pendingEndSessions.Count > 0))
         {
-            SaveOfflineQueue(synchronous: true);
+            SaveOfflineQueue(synchronous: true, force: true);
         }
     }
 
@@ -935,14 +1152,26 @@ public class TelemetryManager : MonoBehaviour
         {
             TrackGameEnded("Quit");
         }
-        SaveOfflineQueue(synchronous: true);
+        SaveOfflineQueue(synchronous: true, force: true);
     }
 
     private void OnDestroy()
     {
         if (Instance == this)
         {
-            SaveOfflineQueue(synchronous: true);
+            if (!gameEnded && !string.IsNullOrEmpty(currentLocalSessionId))
+            {
+                PendingOfflineSession currentOffline = FindOfflineSession(currentLocalSessionId);
+                if (currentOffline != null && !currentOffline.isEnded)
+                {
+                    currentOffline.isEnded = true;
+                    currentOffline.endResult = "Quit";
+                    currentOffline.endTime = DateTime.UtcNow.ToString("o");
+                    offlineQueueDirty = true;
+                }
+                currentLocalSessionId = null;
+            }
+            SaveOfflineQueue(synchronous: true, force: true);
             Instance = null;
         }
     }

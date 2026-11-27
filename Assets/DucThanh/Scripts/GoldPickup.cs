@@ -436,12 +436,15 @@ public class GoldPickup : MonoBehaviour
             ResolvePlayer();
         }
 
+        Vector3 playerTarget = default;
+        bool hasPlayerTarget = false;
         if (landed && playerTransform != null)
         {
             if (now < nextCullCheckTime) return;
 
             const float activeCullSqrDist = 26f * 26f;
-            Vector3 playerTarget = playerTransform.position + Vector3.up * 0.9f;
+            playerTarget = playerTransform.position + Vector3.up * 0.9f;
+            hasPlayerTarget = true;
             float cullSqrDist = (playerTarget - transform.position).sqrMagnitude;
             if (cullSqrDist > activeCullSqrDist)
             {
@@ -514,7 +517,7 @@ public class GoldPickup : MonoBehaviour
         if (playerTransform == null) return;
         if (!landed && age < 0.72f) return;
 
-        Vector3 targetPos = playerTransform.position + Vector3.up * 0.9f;
+        Vector3 targetPos = hasPlayerTarget ? playerTarget : playerTransform.position + Vector3.up * 0.9f;
         Vector3 diff = targetPos - transform.position;
         float sqrDist = diff.sqrMagnitude;
 
@@ -580,9 +583,9 @@ public class GoldPickup : MonoBehaviour
             if (col == null) continue;
             if (!(col is TerrainCollider))
             {
+                if (col is CharacterController) continue;
                 if (col.transform == transform || col.transform.IsChildOf(transform)) continue;
-                if (col.GetComponentInParent<PlayerController>() != null || col.GetComponentInParent<PlayerHealth>() != null) continue;
-                if (col.GetComponentInParent<OrcEnemyAI>() != null || col.GetComponentInParent<EnemyHealth>() != null) continue;
+                if (OrcEnemyAI.IsPlayerCollider(col) || OrcEnemyAI.IsEnemyCollider(col)) continue;
             }
 
             float ptY = GroundSampleHitBuffer[i].point.y;

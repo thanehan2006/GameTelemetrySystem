@@ -10,6 +10,8 @@ public class StartSessionRequest
 {
     public int playerId;
     public int levelId;
+    public string characterId;
+    public string startTime;
 }
 
 [Serializable]
@@ -18,6 +20,7 @@ public class StartSessionResponse
     public long sessionId;
     public int playerId;
     public int levelId;
+    public string characterId;
     public string startTime;
     public string endTime;
     public string result;
@@ -46,38 +49,79 @@ public class SessionApiClient : MonoBehaviour
         set => baseUrl = value;
     }
 
+    // Lấy mã lớp nhân vật đang chọn từ SelectedCharacterStore (mặc định vanguard)
+    public static string ResolveSelectedCharacterId()
+    {
+        CharacterProfile profile = SelectedCharacterStore.GetSelectedProfile();
+        string id = profile != null ? profile.id : null;
+        return string.IsNullOrWhiteSpace(id) ? "vanguard" : id.Trim().ToLowerInvariant();
+    }
+
     // Bắt đầu phiên chơi mới dựa trên PlayerId đang đăng nhập
     public void StartSession(Action<bool, long, string> callback)
     {
         int playerId = PlayerPrefs.GetInt("PlayerId", 0);
-        StartSession(playerId, 0, callback);
+        StartSession(playerId, 0, ResolveSelectedCharacterId(), callback);
     }
 
     // Bắt đầu phiên chơi mới với PlayerId chỉ định
     public void StartSession(int overridePlayerId, Action<bool, long, string> callback)
     {
-        StartSession(overridePlayerId, 0, callback);
+        StartSession(overridePlayerId, 0, ResolveSelectedCharacterId(), callback);
     }
 
     // Bắt đầu phiên chơi mới với PlayerId và LevelId (1..3)
     public void StartSession(int overridePlayerId, int levelId, Action<bool, long, string> callback)
     {
+        StartSession(overridePlayerId, levelId, ResolveSelectedCharacterId(), callback);
+    }
+
+    // Bắt đầu phiên chơi mới với PlayerId, LevelId (1..3) và CharacterId
+    public void StartSession(int overridePlayerId, int levelId, string characterId, Action<bool, long, string> callback)
+    {
+        StartSession(overridePlayerId, levelId, characterId, null, true, (ok, id, code, msg) => callback?.Invoke(ok, id, msg));
+    }
+
+    // Bắt đầu hoặc đồng bộ lại phiên chơi offline với StartTime gốc, tùy chọn lưu SessionId vào PlayerPrefs và trả về HTTP responseCode
+    public void StartSession(
+        int overridePlayerId,
+        int levelId,
+        string characterId,
+        string startTimeIso,
+        bool saveToPlayerPrefs,
+        Action<bool, long, long, string> callback)
+    {
         if (overridePlayerId <= 0)
         {
-            callback?.Invoke(false, 0, "Không tìm thấy PlayerId hợp lệ.");
+            callback?.Invoke(false, 0, 400, "Không tìm thấy PlayerId hợp lệ.");
             return;
         }
 
-        StartCoroutine(StartSessionCoroutine(overridePlayerId, levelId, callback));
+        string resolvedChar = string.IsNullOrWhiteSpace(characterId)
+            ? ResolveSelectedCharacterId()
+            : characterId.Trim().ToLowerInvariant();
+        string safeStartTime = string.IsNullOrWhiteSpace(startTimeIso)
+            ? DateTime.UtcNow.ToString("o")
+            : startTimeIso.Trim();
+
+        StartCoroutine(StartSessionCoroutine(overridePlayerId, levelId, resolvedChar, safeStartTime, saveToPlayerPrefs, callback));
     }
 
     // Gửi POST tới /api/Sessions/start để lấy SessionId từ SQL Server
-    private IEnumerator StartSessionCoroutine(int playerId, int levelId, Action<bool, long, string> callback)
+    private IEnumerator StartSessionCoroutine(
+        int playerId,
+        int levelId,
+        string characterId,
+        string startTimeIso,
+        bool saveToPlayerPrefs,
+        Action<bool, long, long, string> callback)
     {
         StartSessionRequest requestData = new StartSessionRequest
         {
             playerId = playerId,
-            levelId = levelId
+            levelId = levelId,
+            characterId = characterId,
+            startTime = startTimeIso
         };
         string json = JsonUtility.ToJson(requestData);
         string url = BaseUrl.TrimEnd('/') + "/api/Sessions/start";
@@ -99,23 +143,26 @@ public class SessionApiClient : MonoBehaviour
 
                 if (response == null || response.sessionId <= 0)
                 {
-                    callback?.Invoke(false, 0, "Backend không trả về sessionId hợp lệ.");
+                    callback?.Invoke(false, 0, request.responseCode, "Backend không trả về sessionId hợp lệ.");
                     yield break;
                 }
 
                 endingSessionIds.Remove(response.sessionId);
                 endedSessionIds.Remove(response.sessionId);
-                PlayerPrefs.SetString("SessionId", response.sessionId.ToString());
-                PlayerPrefs.Save();
+                if (saveToPlayerPrefs)
+                {
+                    PlayerPrefs.SetString("SessionId", response.sessionId.ToString());
+                    PlayerPrefs.Save();
+                }
 
-                Debug.Log($"[SessionApiClient] Session started: {response.sessionId} (Level {levelId})");
-                callback?.Invoke(true, response.sessionId, "Tạo Session thành công.");
+                Debug.Log($"[SessionApiClient] Session started: {response.sessionId} (Level {levelId}, Char {characterId})");
+                callback?.Invoke(true, response.sessionId, request.responseCode, "Tạo Session thành công.");
             }
             else
             {
                 string error = request.downloadHandler?.text;
                 Debug.LogError($"[SessionApiClient] Start Session Error ({request.responseCode} {request.error}) [{url}]: {error}");
-                callback?.Invoke(false, 0, $"{request.error} - {error}");
+                callback?.Invoke(false, 0, request.responseCode, $"{request.error} - {error}");
             }
         }
     }
